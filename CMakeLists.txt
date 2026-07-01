@@ -4,6 +4,10 @@ project(ecfdgii-client-cpp CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+if(WIN32)
+    add_compile_definitions(NOMINMAX)
+endif()
+
 # Find dependencies (normally resolved via vcpkg toolchain)
 find_package(Drogon CONFIG REQUIRED)
 find_package(cpr CONFIG REQUIRED)
