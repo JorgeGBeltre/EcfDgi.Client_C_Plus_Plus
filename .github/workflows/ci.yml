@@ -55,7 +55,10 @@ jobs:
           }
 
       - name: Compilar
-        run: cmake --build build --parallel
+        # Fast parallel build; on failure, re-run serially so the first real
+        # compiler error is the LAST thing printed (not buried under other
+        # in-flight jobs' output) and is easy to read in the CI log.
+        run: cmake --build build --parallel || cmake --build build -- -j 1 -k 0
 
       - name: Correr Tests
         run: ctest --test-dir build --output-on-failure
