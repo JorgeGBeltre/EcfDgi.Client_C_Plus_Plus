@@ -24,7 +24,7 @@ COPY triplets/ ./triplets/
 
 # Pre-install dependencies using a BuildKit cache mount for the vcpkg binary cache
 RUN --mount=type=cache,target=/root/.cache/vcpkg \
-    $VCPKG_ROOT/vcpkg install
+    $VCPKG_ROOT/vcpkg install --x-install-root=build/vcpkg_installed
 
 # Copy the rest of the application source code
 COPY . .
