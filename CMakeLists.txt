@@ -12,7 +12,7 @@ find_package(unofficial-xmlsec CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(jwt-cpp CONFIG REQUIRED)
-find_package(pqxx CONFIG REQUIRED)
+find_package(libpqxx CONFIG REQUIRED)
 find_package(unofficial-sodium CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 
@@ -109,7 +109,7 @@ target_link_libraries(ecfdgii_core PUBLIC
     OpenSSL::Crypto
     nlohmann_json::nlohmann_json
     jwt-cpp::jwt-cpp
-    pqxx::pqxx
+    libpqxx::pqxx
     unofficial-sodium::sodium
     spdlog::spdlog
 )
