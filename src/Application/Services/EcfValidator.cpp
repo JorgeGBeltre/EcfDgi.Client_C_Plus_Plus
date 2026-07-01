@@ -39,7 +39,12 @@ bool EcfValidator::isValidRnc(const std::string& rnc) {
 
 void EcfValidator::validateTotalesConsistency(const RfceTotales& t,
                                               std::vector<std::string>& errors) {
-    if (t.montoGravadoTotal.has_value()) {
+    // The per-rate breakdown fields are optional. Only cross-check the aggregate
+    // against the breakdown when at least one breakdown component is provided;
+    // a document that carries only the aggregate total is valid on its own.
+    if (t.montoGravadoTotal.has_value() &&
+        (t.montoGravadoI1.has_value() || t.montoGravadoI2.has_value() ||
+         t.montoGravadoI3.has_value())) {
         double expected = t.montoGravadoI1.value_or(0) + t.montoGravadoI2.value_or(0) +
                           t.montoGravadoI3.value_or(0);
         if (std::fabs(*t.montoGravadoTotal - expected) > 0.01)
@@ -47,7 +52,9 @@ void EcfValidator::validateTotalesConsistency(const RfceTotales& t,
                 "MontoGravadoTotal no coincide con la suma de MontoGravadoI1+I2+I3.");
     }
 
-    if (t.totalITBIS.has_value()) {
+    if (t.totalITBIS.has_value() &&
+        (t.totalITBIS1.has_value() || t.totalITBIS2.has_value() ||
+         t.totalITBIS3.has_value())) {
         double expected = t.totalITBIS1.value_or(0) + t.totalITBIS2.value_or(0) +
                           t.totalITBIS3.value_or(0);
         if (std::fabs(*t.totalITBIS - expected) > 0.01)
