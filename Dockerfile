@@ -7,7 +7,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git curl zip unzip tar ca-certificates \
     build-essential cmake ninja-build pkg-config \
-    autoconf automake libtool python3 \
+    autoconf automake libtool autoconf-archive python3 \
+    bison flex \
  && rm -rf /var/lib/apt/lists/*
 
 # vcpkg
