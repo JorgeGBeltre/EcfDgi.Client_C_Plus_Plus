@@ -1,0 +1,27 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: ecf_dgii_postgres_cpp
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ecf_dgii}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ecf_dgii_api_cpp
+    ports:
+      - "8080:8080"
+    environment:
+      - ConnectionStrings__DefaultConnection=${ECF_DB_CONNECTION:-host=postgres port=5432 dbname=ecf_dgii user=postgres password=postgres}
+    depends_on:
+      - postgres
+
+volumes:
+  postgres_data:

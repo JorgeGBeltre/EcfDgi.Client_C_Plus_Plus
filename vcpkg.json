@@ -1,0 +1,18 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "ecfdgii-client-cpp",
+  "version": "2.0.0",
+  "description": "C++ replica of the EcfDgii.Client (Dominican Republic DGII e-CF) enterprise REST API + SDK.",
+  "dependencies": [
+    "drogon",
+    "cpr",
+    "libxml2",
+    { "name": "xmlsec", "features": ["openssl"] },
+    "openssl",
+    "nlohmann-json",
+    "jwt-cpp",
+    "libpqxx",
+    "libsodium",
+    "spdlog"
+  ]
+}
