@@ -47,7 +47,12 @@ jobs:
           mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
 
       - name: Configurar (CMake + vcpkg)
-        run: cmake --preset default -DECF_BUILD_TESTS=ON
+        run: |
+          cmake --preset default -DECF_BUILD_TESTS=ON || {
+            echo "=== VCPKG MANIFEST INSTALL LOG ==="
+            cat build/vcpkg-manifest-install.log || true
+            exit 1
+          }
 
       - name: Compilar
         run: cmake --build build --parallel
