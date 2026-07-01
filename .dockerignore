@@ -1,0 +1,29 @@
+# Exclude build output and dependencies
+build/
+out/
+vcpkg_installed/
+.vcpkg-cache/
+vcpkg/
+
+# Exclude git repository data
+.git/
+.github/
+
+# Exclude IDE and user configuration files
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+CMakeUserPresets.json
+
+# Exclude documentation and licensing
+LICENSE
+README.md
+docs/
+
+# Exclude other temporary/system files
+*.log
+*.tmp
+.DS_Store
+Thumbs.db

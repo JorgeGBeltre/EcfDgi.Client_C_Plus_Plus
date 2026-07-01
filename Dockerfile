@@ -17,8 +17,19 @@ RUN git clone https://github.com/microsoft/vcpkg "$VCPKG_ROOT" \
  && "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
 
 WORKDIR /src
+
+# Copy vcpkg manifest and custom triplets first to leverage Docker layer caching
+COPY vcpkg.json ./
+COPY triplets/ ./triplets/
+
+# Pre-install dependencies using a BuildKit cache mount for the vcpkg binary cache
+RUN --mount=type=cache,target=/root/.cache/vcpkg \
+    $VCPKG_ROOT/vcpkg install
+
+# Copy the rest of the application source code
 COPY . .
 
+# Configure and build the target executable
 RUN cmake --preset default && cmake --build build --target ecfdgii_api
 
 # ---------------------------------------------------------------------------
