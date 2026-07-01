@@ -1,5 +1,11 @@
 #pragma once
 // Helpers to map pqxx rows to domain entities (read side).
+//
+// The mappers are templated on the row/field type on purpose: across libpqxx
+// versions result indexing and iteration yield different-but-compatible types
+// (pqxx::row vs pqxx::row_ref, pqxx::field vs pqxx::field_ref). Templating lets
+// the same code bind to whichever the installed libpqxx provides. GCC requires
+// the `.template` disambiguator on the dependent `.as<T>()` member calls.
 
 #include <optional>
 #include <string>
@@ -12,53 +18,63 @@
 
 namespace ecf::infra {
 
-inline std::optional<std::string> optStr(const pqxx::field& f) {
+// Accepts any pqxx field-like type (pqxx::field or pqxx::field_ref); both
+// expose is_null()/as<T>().
+template <class Field>
+inline std::optional<std::string> optStr(const Field& f) {
     if (f.is_null()) return std::nullopt;
-    return f.as<std::string>();
+    return f.template as<std::string>();
 }
 
-inline void mapAuditable(const pqxx::row& r, domain::AuditableEntity& e) {
-    e.id = r["id"].as<std::string>();
-    e.createdAt = r["created_at"].is_null() ? "" : r["created_at"].as<std::string>();
+// Accepts any pqxx row-like type (pqxx::row from iteration, pqxx::row_ref from
+// result::operator[] in newer libpqxx); both expose the same field accessors.
+template <class Row>
+inline void mapAuditable(const Row& r, domain::AuditableEntity& e) {
+    e.id = r["id"].template as<std::string>();
+    e.createdAt =
+        r["created_at"].is_null() ? "" : r["created_at"].template as<std::string>();
     e.createdBy = optStr(r["created_by"]);
     e.updatedAt = optStr(r["updated_at"]);
     e.updatedBy = optStr(r["updated_by"]);
     e.deletedAt = optStr(r["deleted_at"]);
     e.deletedBy = optStr(r["deleted_by"]);
-    e.isDeleted = r["is_deleted"].as<bool>();
+    e.isDeleted = r["is_deleted"].template as<bool>();
 }
 
-inline domain::User mapUser(const pqxx::row& r) {
+template <class Row>
+inline domain::User mapUser(const Row& r) {
     domain::User u;
     mapAuditable(r, u);
-    u.username = r["username"].as<std::string>();
-    u.email = r["email"].as<std::string>();
-    u.passwordHash = r["password_hash"].as<std::string>();
-    u.role = r["role"].as<std::string>();
+    u.username = r["username"].template as<std::string>();
+    u.email = r["email"].template as<std::string>();
+    u.passwordHash = r["password_hash"].template as<std::string>();
+    u.role = r["role"].template as<std::string>();
     return u;
 }
 
-inline domain::Customer mapCustomer(const pqxx::row& r) {
+template <class Row>
+inline domain::Customer mapCustomer(const Row& r) {
     domain::Customer c;
     mapAuditable(r, c);
-    c.name = r["name"].as<std::string>();
-    c.email = r["email"].as<std::string>();
-    c.rnc = r["rnc"].as<std::string>();
+    c.name = r["name"].template as<std::string>();
+    c.email = r["email"].template as<std::string>();
+    c.rnc = r["rnc"].template as<std::string>();
     return c;
 }
 
-inline domain::EcfDocument mapEcfDocument(const pqxx::row& r) {
+template <class Row>
+inline domain::EcfDocument mapEcfDocument(const Row& r) {
     domain::EcfDocument d;
     mapAuditable(r, d);
-    d.eNcf = r["e_ncf"].as<std::string>();
-    d.rncEmisor = r["rnc_emisor"].as<std::string>();
+    d.eNcf = r["e_ncf"].template as<std::string>();
+    d.rncEmisor = r["rnc_emisor"].template as<std::string>();
     d.rncComprador = optStr(r["rnc_comprador"]);
     d.trackId = optStr(r["track_id"]);
-    d.state = r["state"].as<std::string>();
-    d.totalAmount = r["total_amount"].as<double>();
-    d.itbisAmount = r["itbis_amount"].as<double>();
+    d.state = r["state"].template as<std::string>();
+    d.totalAmount = r["total_amount"].template as<double>();
+    d.itbisAmount = r["itbis_amount"].template as<double>();
     d.securityCode = optStr(r["security_code"]);
-    d.xmlContent = r["xml_content"].as<std::string>();
+    d.xmlContent = r["xml_content"].template as<std::string>();
     d.receiptDate = optStr(r["receipt_date"]);
     return d;
 }

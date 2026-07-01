@@ -11,7 +11,7 @@ concurrency:
 
 jobs:
   # 1. EJECUTAR PRUEBAS (build C++ + ctest)
-  test:
+  build-and-test:
     runs-on: ubuntu-24.04
     env:
       VCPKG_ROOT: ${{ github.workspace }}/vcpkg
