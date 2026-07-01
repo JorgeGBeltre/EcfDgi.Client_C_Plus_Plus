@@ -1,0 +1,27 @@
+# CMake build directories
+/build/
+/out/
+
+# vcpkg local installations
+/vcpkg_installed/
+
+# Visual Studio files
+/.vs/
+*.user
+*.suo
+*.userossc
+*.sln.docstates
+
+# CMake User Presets (machine/user-specific settings)
+CMakeUserPresets.json
+
+# VS Code directory
+/.vscode/
+
+# CLion / JetBrains IDE directory
+/.idea/
+
+# OS-generated files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
