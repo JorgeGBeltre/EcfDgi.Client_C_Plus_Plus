@@ -62,7 +62,7 @@ jobs:
 
   # 2. AUTO-MERGE A MAIN
   merge-to-main:
-    needs: test
+    needs: build-and-test
     runs-on: ubuntu-latest
     permissions:
       contents: write
