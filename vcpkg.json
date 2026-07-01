@@ -10,7 +10,7 @@
     "xmlsec",
     "openssl",
     "nlohmann-json",
-    "jwt-cpp",
+    { "name": "jwt-cpp", "features": [ "picojson" ] },
     "libpqxx",
     "libsodium",
     "spdlog"
