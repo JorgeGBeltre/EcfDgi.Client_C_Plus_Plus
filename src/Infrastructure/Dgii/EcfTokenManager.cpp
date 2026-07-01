@@ -4,6 +4,7 @@
 #include <libxml/parser.h>
 #include <libxml/tree.h>
 
+#include <cstdio>
 #include <ctime>
 
 #include "Domain/Exceptions/EcfException.h"
