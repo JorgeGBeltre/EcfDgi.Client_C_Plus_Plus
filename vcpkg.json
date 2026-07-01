@@ -7,7 +7,7 @@
     "drogon",
     "cpr",
     "libxml2",
-    { "name": "xmlsec", "features": ["openssl"] },
+    "xmlsec",
     "openssl",
     "nlohmann-json",
     "jwt-cpp",
