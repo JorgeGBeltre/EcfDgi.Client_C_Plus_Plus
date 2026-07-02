@@ -1,0 +1,81 @@
+# name: CI/CD Pipeline
+
+# on:
+#   push:
+#     branches:
+#       - "develop"
+#   workflow_dispatch:
+
+# concurrency:
+#   group: ci-${{ github.ref }}
+#   cancel-in-progress: true
+
+# jobs:
+#   # 1. EJECUTAR PRUEBAS (build C++ + ctest)
+#   build-and-test:
+#     runs-on: ubuntu-24.04
+#     env:
+#       VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+#       VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.vcpkg-cache
+#     steps:
+#       - name: Descargar código
+#         uses: actions/checkout@v4
+
+#       - name: Instalar toolchain de compilación
+#         run: |
+#           sudo apt-get update
+#           sudo apt-get install -y --no-install-recommends \
+#             build-essential cmake ninja-build pkg-config \
+#             autoconf automake libtool autoconf-archive python3 \
+#             curl zip unzip tar bison flex
+
+#       - name: Cache de vcpkg (herramientas + artefactos binarios)
+#         uses: actions/cache@v4
+#         with:
+#           path: |
+#             ${{ github.workspace }}/vcpkg
+#             ${{ github.workspace }}/.vcpkg-cache
+#           key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+#           restore-keys: |
+#             vcpkg-${{ runner.os }}-
+
+#       - name: Bootstrap de vcpkg
+#         run: |
+#           if [ ! -d "$VCPKG_ROOT/.git" ]; then
+#             git clone https://github.com/microsoft/vcpkg "$VCPKG_ROOT"
+#           fi
+#           "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
+#           mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
+
+#       - name: Configurar (CMake + vcpkg)
+#         run: |
+#           cmake --preset default -DECF_BUILD_TESTS=ON || {
+#             echo "=== VCPKG MANIFEST INSTALL LOG ==="
+#             cat build/vcpkg-manifest-install.log || true
+#             exit 1
+#           }
+
+#       - name: Compilar
+#         # Fast parallel build; on failure, re-run serially so the first real
+#         # compiler error is the LAST thing printed (not buried under other
+#         # in-flight jobs' output) and is easy to read in the CI log.
+#         run: cmake --build build --parallel || cmake --build build -- -j 1 -k 0
+
+#       - name: Correr Tests
+#         run: ctest --test-dir build --output-on-failure
+
+#   # 2. DESPLEGAR EN DEV (docker-compose)
+#   deploy-dev:
+#     runs-on: ubuntu-24.04
+#     needs: build-and-test
+#     steps:
+#       - name: Descargar código
+#         uses: actions/checkout@v5
+
+      
+
+
+      
+
+
+
