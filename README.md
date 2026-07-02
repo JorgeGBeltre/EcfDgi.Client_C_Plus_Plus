@@ -515,66 +515,489 @@ Application Handler          EcfClient Service              DGII Gateway
 
 ## Docker Orchestration
 
-The API stack uses Docker Compose, linking the REST API container and a PostgreSQL database.
+This project includes Docker support for running the C++ REST API together with PostgreSQL using Docker Compose.
 
-### Dockerfile (`./Dockerfile`)
+The Docker setup is defined in the following files:
 
-```dockerfile
-FROM ubuntu:24.04 AS build
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    git curl zip unzip tar ca-certificates \
-    build-essential cmake ninja-build pkg-config \
-    autoconf automake libtool python3
-ENV VCPKG_ROOT=/opt/vcpkg
-RUN git clone https://github.com/microsoft/vcpkg "$VCPKG_ROOT" \
- && "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
-WORKDIR /src
-COPY . .
-RUN cmake --preset default && cmake --build build --target ecfdgii_api
+| File                 | Purpose                                                                                              |
+| :------------------- | :--------------------------------------------------------------------------------------------------- |
+| `Dockerfile`         | Builds the C++ API using a multi-stage build and produces a minimal runtime image                    |
+| `docker-compose.yml` | Orchestrates the API container and PostgreSQL service                                                |
+| `.dockerignore`      | Excludes unnecessary files from the Docker build context                                             |
+| `.env`               | Provides local environment variables for Compose, ports, database credentials and connection strings |
 
-FROM ubuntu:24.04 AS final
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libpq5
-WORKDIR /app
-COPY --from=build /src/build/ecfdgii_api /app/ecfdgii_api
-COPY --from=build /src/config/appsettings.json /app/appsettings.json
-COPY --from=build /src/db/schema.sql /app/db/schema.sql
-EXPOSE 8080
-ENTRYPOINT ["/app/ecfdgii_api"]
+---
+
+### Docker Architecture
+
+The Docker setup is divided into two main responsibilities:
+
+```text
+Dockerfile
+├── build stage
+│   ├── Installs compiler/build tools
+│   ├── Installs vcpkg
+│   ├── Restores and caches C++ dependencies
+│   └── Compiles ecfdgii_api
+│
+└── final stage
+    ├── Installs minimal runtime dependencies
+    ├── Copies the compiled binary
+    ├── Copies appsettings.json
+    └── Copies schema.sql
 ```
 
-### Docker Compose (`./docker-compose.yml`)
-
-```yaml
-services:
-  postgres:
-    image: postgres:15-alpine
-    container_name: ecf_dgii_postgres_cpp
-    environment:
-      POSTGRES_DB: ecf_dgii
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-
-  api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: ecf_dgii_api_cpp
-    ports:
-      - "8080:8080"
-    environment:
-      - ConnectionStrings__DefaultConnection=host=postgres port=5432 dbname=ecf_dgii user=postgres password=postgres
-    depends_on:
-      - postgres
-
-volumes:
-  postgres_data:
+```text
+docker-compose.yml
+├── postgres
+│   ├── PostgreSQL 15 Alpine
+│   ├── Persistent database volume
+│   ├── Optional schema.sql initialization
+│   └── Healthcheck with pg_isready
+│
+└── api
+    ├── Builds from Dockerfile
+    ├── Waits for PostgreSQL healthcheck
+    ├── Exposes port 8080
+    └── Mounts logs folder
 ```
 
 ---
+
+### Dockerfile
+
+The `Dockerfile` uses a multi-stage build.
+
+The build stage is responsible for compiling the C++ application and restoring dependencies through `vcpkg`. The final stage only contains the compiled API binary, required runtime libraries and configuration files.
+
+This keeps compiler tools, CMake, Ninja, Git and `vcpkg` out of the final runtime image.
+
+Key responsibilities:
+
+* Installs C++ build tools.
+* Installs and bootstraps `vcpkg`.
+* Restores dependencies from `vcpkg.json`.
+* Uses BuildKit cache mounts for `vcpkg` binary packages and downloads.
+* Builds `ecfdgii_api` with CMake.
+* Uses parallel compilation.
+* Strips the final binary when possible.
+* Copies only the runtime artifacts into the final image.
+
+---
+
+### Docker Compose
+
+The `docker-compose.yml` file starts the complete local stack:
+
+* `postgres`: PostgreSQL database service.
+* `api`: C++ REST API service.
+
+The API service depends on PostgreSQL and waits for the database healthcheck before starting. This prevents the API from failing during startup because the database container exists but PostgreSQL is not yet ready to accept connections.
+
+Main features:
+
+* PostgreSQL 15 Alpine image.
+* Persistent PostgreSQL data volume.
+* Configurable database credentials through environment variables.
+* Configurable API and PostgreSQL ports.
+* PostgreSQL healthcheck using `pg_isready`.
+* API restart policy.
+* Local log folder mount for diagnostics.
+* Optional schema initialization from `db/schema.sql`.
+
+---
+
+### Environment File
+
+Create a `.env` file next to `docker-compose.yml` to centralize local configuration.
+
+Recommended variables:
+
+```env
+POSTGRES_DB=ecf_dgii
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=postgres
+POSTGRES_PORT=5432
+
+API_PORT=8080
+
+ECF_DB_CONNECTION=host=postgres port=5432 dbname=ecf_dgii user=postgres password=postgres
+```
+
+For production environments, do not store real credentials, JWT secrets or certificate passwords directly in a plain `.env` file. Use your deployment platform’s secret management mechanism.
+
+---
+
+### Docker Ignore File
+
+Create a `.dockerignore` file to reduce the Docker build context and avoid sending unnecessary files to the Docker daemon.
+
+Recommended exclusions:
+
+```text
+.git
+.gitignore
+
+.vs
+.vscode
+.idea
+
+build
+out
+bin
+obj
+
+*.log
+*.tmp
+*.cache
+
+postgres_data
+
+Dockerfile.old
+docker-compose.override.yml
+```
+
+This is especially useful when Docker spends too much time in:
+
+```text
+transferring context
+```
+
+---
+
+### BuildKit and vcpkg Cache
+
+The Dockerfile is designed to use Docker BuildKit cache mounts for `vcpkg`.
+
+The cache stores:
+
+| Cache                   | Purpose                                         |
+| :---------------------- | :---------------------------------------------- |
+| `vcpkg binary cache`    | Reuses already compiled C++ dependency packages |
+| `vcpkg downloads cache` | Reuses downloaded source archives               |
+
+This allows `vcpkg` to avoid downloading and compiling the same dependencies repeatedly when the ABI hash has not changed.
+
+Enable BuildKit before building.
+
+Linux/macOS:
+
+```bash
+DOCKER_BUILDKIT=1 docker compose build --progress=plain
+```
+
+Windows PowerShell:
+
+```powershell
+$env:DOCKER_BUILDKIT=1
+docker compose build --progress=plain
+```
+
+Build and start the stack:
+
+```bash
+DOCKER_BUILDKIT=1 docker compose up --build
+```
+
+Windows PowerShell:
+
+```powershell
+$env:DOCKER_BUILDKIT=1
+docker compose up --build
+```
+
+---
+
+### Running the Stack
+
+Start the API and PostgreSQL:
+
+```bash
+docker compose up --build
+```
+
+Start in detached mode:
+
+```bash
+docker compose up -d --build
+```
+
+Stop the stack:
+
+```bash
+docker compose down
+```
+
+Stop the stack and remove the database volume:
+
+```bash
+docker compose down -v
+```
+
+Warning: `docker compose down -v` deletes the PostgreSQL data stored in the `postgres_data` volume.
+
+---
+
+### Logs
+
+The API logs can be reviewed through Docker:
+
+```bash
+docker logs -f ecf_dgii_api_cpp
+```
+
+PostgreSQL logs can be reviewed with:
+
+```bash
+docker logs -f ecf_dgii_postgres_cpp
+```
+
+The Compose setup may also mount local log folders:
+
+```text
+./logs/api
+./logs/postgres
+```
+
+Create them before running the stack:
+
+Linux/macOS:
+
+```bash
+mkdir -p logs/api logs/postgres
+```
+
+Windows PowerShell:
+
+```powershell
+New-Item -ItemType Directory -Force -Path logs/api, logs/postgres
+```
+
+Important: `docker logs` reads from the container standard output and standard error streams. The `./logs/api` folder is only useful if the application writes file-based logs to `/app/logs`.
+
+Recommended logging strategy:
+
+```text
+stdout/stderr -> docker logs
+/app/logs     -> persistent local log files
+```
+
+---
+
+### Database Initialization
+
+The PostgreSQL service can mount `db/schema.sql` into the PostgreSQL initialization folder.
+
+This causes PostgreSQL to execute the schema script only when the database volume is created for the first time.
+
+If the volume already exists, the script will not run again automatically.
+
+To force schema re-initialization during local development:
+
+```bash
+docker compose down -v
+docker compose up --build
+```
+
+Warning: this removes all existing database data.
+
+---
+
+### Healthcheck Behavior
+
+The API depends on PostgreSQL using a service healthcheck.
+
+PostgreSQL is considered healthy when `pg_isready` confirms that the target database can accept connections.
+
+This prevents startup errors such as:
+
+```text
+connection refused
+database system is starting up
+could not connect to server
+```
+
+Inside Docker Compose, the database hostname is the service name:
+
+```text
+postgres
+```
+
+Use this connection pattern from the API container:
+
+```text
+host=postgres port=5432 dbname=ecf_dgii user=postgres password=postgres
+```
+
+Do not use `localhost` from inside the API container, because `localhost` refers to the API container itself.
+
+---
+
+### Performance Improvements
+
+This Docker setup improves build and runtime behavior in several ways:
+
+| Improvement                | Benefit                                                             |
+| :------------------------- | :------------------------------------------------------------------ |
+| Multi-stage build          | Keeps compilers, CMake, Ninja and vcpkg out of the final image      |
+| BuildKit cache mount       | Reuses compiled vcpkg packages between builds                       |
+| Separate dependency layer  | Avoids reinstalling dependencies when only application code changes |
+| Parallel CMake build       | Uses multiple CPU cores during compilation                          |
+| Binary stripping           | Reduces final executable size when possible                         |
+| `.dockerignore`            | Reduces build context size                                          |
+| PostgreSQL healthcheck     | Prevents API startup before database readiness                      |
+| Persistent database volume | Keeps PostgreSQL data between restarts                              |
+| Log folders                | Allows persistent local inspection of file-based logs               |
+
+---
+
+### Common Commands
+
+Build only:
+
+```bash
+DOCKER_BUILDKIT=1 docker compose build --progress=plain
+```
+
+Build and start:
+
+```bash
+DOCKER_BUILDKIT=1 docker compose up --build
+```
+
+Start without rebuilding:
+
+```bash
+docker compose up
+```
+
+Start in background:
+
+```bash
+docker compose up -d
+```
+
+View API logs:
+
+```bash
+docker logs -f ecf_dgii_api_cpp
+```
+
+View PostgreSQL logs:
+
+```bash
+docker logs -f ecf_dgii_postgres_cpp
+```
+
+Remove containers but keep database data:
+
+```bash
+docker compose down
+```
+
+Remove containers and database data:
+
+```bash
+docker compose down -v
+```
+
+Inspect built images:
+
+```bash
+docker images
+```
+
+Inspect image layers:
+
+```bash
+docker history ecf_dgii_api_cpp
+```
+
+Clean Docker build cache:
+
+```bash
+docker builder prune
+```
+
+Aggressively clean build cache:
+
+```bash
+docker builder prune -a
+```
+
+Use aggressive cleanup only when necessary, because the next build will take longer.
+
+---
+
+### Troubleshooting
+
+#### vcpkg recompiles everything
+
+This usually happens when one of these changes:
+
+```text
+vcpkg.json
+triplets/
+compiler version
+compiler flags
+CMake toolchain configuration
+base image version
+environment variables that affect the build
+```
+
+Check the build output with:
+
+```bash
+DOCKER_BUILDKIT=1 docker compose build --progress=plain
+```
+
+#### Docker takes too long on `transferring context`
+
+Review the `.dockerignore` file. Common causes are:
+
+```text
+.git
+build/
+bin/
+obj/
+logs/
+large temporary files
+```
+
+#### API cannot connect to PostgreSQL
+
+Inside Docker Compose, the database hostname is:
+
+```text
+postgres
+```
+
+The API should use the Compose service name, not `localhost`.
+
+#### schema.sql does not run
+
+PostgreSQL only runs files from its initialization folder when the database volume is empty.
+
+For local development, reset with:
+
+```bash
+docker compose down -v
+docker compose up --build
+```
+
+#### docker logs does not show file logs
+
+`docker logs` only shows stdout and stderr. If the application writes to `/app/logs`, check the mounted folder:
+
+```bash
+ls -la logs/api
+```
+
+On PowerShell:
+
+```powershell
+Get-ChildItem .\logs\api
+```
 
 ## Continuous Integration
 

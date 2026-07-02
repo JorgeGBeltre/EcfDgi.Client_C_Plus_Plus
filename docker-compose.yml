@@ -2,26 +2,40 @@ services:
   postgres:
     image: postgres:15-alpine
     container_name: ecf_dgii_postgres_cpp
+    restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-ecf_dgii}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+      - ./logs/postgres:/var/log/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-ecf_dgii}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
   api:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: ecf_dgii_api_cpp
+    restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "${API_PORT:-8080}:8080"
     environment:
-      - ConnectionStrings__DefaultConnection=${ECF_DB_CONNECTION:-host=postgres port=5432 dbname=ecf_dgii user=postgres password=postgres}
+      ConnectionStrings__DefaultConnection: ${ECF_DB_CONNECTION:-host=postgres port=5432 dbname=ecf_dgii user=postgres password=postgres}
+      LOG_DIR: /app/logs
+    volumes:
+      - ./logs/api:/app/logs
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
 
 volumes:
   postgres_data:
