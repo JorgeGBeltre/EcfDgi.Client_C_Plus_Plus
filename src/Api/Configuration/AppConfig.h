@@ -14,6 +14,7 @@ struct AppConfig {
     int threads = 0;  // 0 => hardware_concurrency
 
     std::string connectionString;
+    std::string redisConnectionString;
     std::string schemaPath = "db/schema.sql";
 
     infra::JwtSettings jwt;

@@ -1,5 +1,7 @@
 #include "Api/AppServices.h"
 
+#include "Infrastructure/Caching/RedisCacheService.h"
+#include "Infrastructure/Dgii/CachedEcfClient.h"
 #include "Infrastructure/EcfClient.h"
 #include "Infrastructure/Persistence/Repositories/CustomerRepository.h"
 #include "Infrastructure/Persistence/Repositories/EcfDocumentRepository.h"
@@ -21,6 +23,7 @@ void AppServices::configure(AppConfig config) {
     passwordHasher_ = std::make_shared<infra::PasswordHasher>();
     tokenService_ = std::make_shared<infra::TokenService>(config_.jwt);
     serializer_ = std::make_shared<infra::EcfXmlSerializer>();
+    cacheService_ = std::make_shared<infra::RedisCacheService>(config_.redisConnectionString);
 }
 
 std::shared_ptr<domain::IEcfClient> AppServices::ecfClient() {
@@ -28,7 +31,8 @@ std::shared_ptr<domain::IEcfClient> AppServices::ecfClient() {
     // certificate, so failures surface at call time.
     std::call_once(ecfClientFlag_, [this] {
         try {
-            ecfClient_ = std::make_shared<infra::EcfClient>(config_.ecfOptions);
+            auto baseClient = std::make_shared<infra::EcfClient>(config_.ecfOptions, nullptr, cacheService_);
+            ecfClient_ = std::make_shared<infra::CachedEcfClient>(baseClient, cacheService_);
         } catch (...) {
             ecfClientError_ = std::current_exception();
         }

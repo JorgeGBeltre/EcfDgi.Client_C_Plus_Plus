@@ -54,16 +54,28 @@ bool parseExpiry(const std::string& s, std::chrono::system_clock::time_point& ou
 }  // namespace
 
 EcfTokenManager::EcfTokenManager(std::shared_ptr<EcfXmlSigner> signer,
-                                 EcfEnvironmentConfig config, std::string rncEmisor)
+                                 EcfEnvironmentConfig config, std::string rncEmisor,
+                                 std::shared_ptr<domain::ICacheService> cacheService)
     : signer_(std::move(signer)),
       config_(std::move(config)),
-      rncEmisor_(std::move(rncEmisor)) {
+      rncEmisor_(std::move(rncEmisor)),
+      cacheService_(std::move(cacheService)) {
     if (!signer_) throw std::invalid_argument("signer");
     if (rncEmisor_.empty()) throw std::invalid_argument("rncEmisor");
 }
 
 std::string EcfTokenManager::getToken() {
     using namespace std::chrono;
+    std::string cacheKey = "ecf:tokens:" + rncEmisor_;
+
+    // 1. Check Distributed Cache
+    if (cacheService_) {
+        if (auto tokenOpt = cacheService_->get(cacheKey)) {
+            if (!tokenOpt->empty()) return *tokenOpt;
+        }
+    }
+
+    // 2. Check Memory Cache
     auto valid = [&] {
         return !cachedToken_.empty() &&
                duration_cast<minutes>(tokenExpiry_ - system_clock::now()).count() > 5;
@@ -71,10 +83,41 @@ std::string EcfTokenManager::getToken() {
 
     if (valid()) return cachedToken_;
 
+    // 3. Acquire Distributed / Local Lock
+    std::string lockKey = "ecf:tokens:lock:" + rncEmisor_;
+    std::string lockValue = "lock_" + std::to_string(duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
+    bool acquiredDistLock = false;
+
+    if (cacheService_) {
+        acquiredDistLock = cacheService_->acquireLock(lockKey, lockValue, std::chrono::seconds(30));
+        if (acquiredDistLock) {
+            if (auto tokenOpt = cacheService_->get(cacheKey)) {
+                if (!tokenOpt->empty()) {
+                    cacheService_->releaseLock(lockKey, lockValue);
+                    return *tokenOpt;
+                }
+            }
+        }
+    }
+
     std::lock_guard<std::mutex> lock(renewMutex_);
-    if (valid()) return cachedToken_;
+    if (valid()) {
+        if (acquiredDistLock && cacheService_) cacheService_->releaseLock(lockKey, lockValue);
+        return cachedToken_;
+    }
 
     renewToken();
+
+    if (cacheService_ && !cachedToken_.empty()) {
+        auto ttl = duration_cast<seconds>(tokenExpiry_ - system_clock::now());
+        if (ttl.count() > 0) {
+            cacheService_->set(cacheKey, cachedToken_, ttl);
+        }
+        if (acquiredDistLock) {
+            cacheService_->releaseLock(lockKey, lockValue);
+        }
+    }
+
     return cachedToken_;
 }
 

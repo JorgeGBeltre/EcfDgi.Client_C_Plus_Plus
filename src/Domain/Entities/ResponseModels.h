@@ -5,6 +5,7 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include <nlohmann/json.hpp>
 
 namespace ecf::domain {
 
@@ -87,12 +88,14 @@ struct DirectorioContribuyente {
     std::string urlAceptacion;
     std::string urlOpcional;
 };
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(DirectorioContribuyente, nombre, rnc, urlRecepcion, urlAceptacion, urlOpcional)
 
 struct EstatusServicio {
     std::string servicio;
     std::string estatus;
     std::string ambiente;
 };
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(EstatusServicio, servicio, estatus, ambiente)
 
 struct TrackIdDetalle {
     std::string trackId;
@@ -105,6 +108,7 @@ struct VentanaMantenimiento {
     std::string fin;
     std::string descripcion;
 };
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(VentanaMantenimiento, inicio, fin, descripcion)
 
 struct AprobacionComercialResponse {
     std::string codigo;

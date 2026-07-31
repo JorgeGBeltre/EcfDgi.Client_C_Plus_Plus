@@ -36,6 +36,7 @@ add_library(ecfdgii_core STATIC
     src/Domain/Entities/Rfce.h
     src/Domain/Entities/User.h
     src/Domain/Exceptions/EcfException.h
+    src/Domain/Interfaces/ICacheService.h
     src/Domain/Interfaces/ICustomerRepository.h
     src/Domain/Interfaces/IEcfClient.h
     src/Domain/Interfaces/IEcfDocumentRepository.h
@@ -65,6 +66,10 @@ add_library(ecfdgii_core STATIC
     src/Application/Services/PollingHelper.h
 
     # Infrastructure
+    src/Infrastructure/Caching/RedisCacheService.cpp
+    src/Infrastructure/Caching/RedisCacheService.h
+    src/Infrastructure/Dgii/CachedEcfClient.cpp
+    src/Infrastructure/Dgii/CachedEcfClient.h
     src/Infrastructure/Dgii/DgiiDirectTransport.cpp
     src/Infrastructure/Dgii/DgiiDirectTransport.h
     src/Infrastructure/Dgii/EcfEnvironmentConfig.cpp

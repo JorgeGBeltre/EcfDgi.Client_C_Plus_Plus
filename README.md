@@ -3,12 +3,14 @@
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-blue)](https://en.cppreference.com/w/cpp/20)
 [![CMake](https://img.shields.io/badge/Build-CMake%20%2B%20vcpkg-064F8C)](https://cmake.org/)
 [![Drogon](https://img.shields.io/badge/HTTP-Drogon-00A98F)](https://github.com/drogonframework/drogon)
+[![Redis](https://img.shields.io/badge/Cache-Redis-red)](https://redis.io/)
 [![PostgreSQL](https://img.shields.io/badge/Database-PostgreSQL-blue)](https://www.postgresql.org/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/JorgeGBeltre/EcfDgi.Client_C_Plus_Plus)
 
 ---
 
-**EcfDgii.Client** is an enterprise-grade C++ solution that wraps and exposes the Dominican Republic Tax Authority's (**DGII**) Comprobante Fiscal Electrónico (**e-CF**) REST integration services. Built under **Clean Architecture** and **Domain-Driven Design (DDD)** principles, it provides a robust REST API, secure JWT-based authentication, PostgreSQL persistence with automated auditing and soft-delete, request validation rules, structured logging, and full Docker orchestration support.
+**EcfDgii.Client** is an enterprise-grade C++ solution that wraps and exposes the Dominican Republic Tax Authority's (**DGII**) Comprobante Fiscal Electrónico (**e-CF**) REST integration services. Built under **Clean Architecture** and **Domain-Driven Design (DDD)** principles, it provides a robust REST API, secure JWT-based authentication, Redis distributed caching & locking, PostgreSQL persistence with automated auditing and soft-delete, request validation rules, structured logging, interactive Scalar & Swagger API documentation, and full Docker orchestration support.
 
 ---
 
@@ -20,6 +22,9 @@
 - [Installation & Setup](#installation--setup)
 - [Dependencies](#dependencies)
 - [Basic Configuration](#basic-configuration)
+- [Distributed Caching & Redis Integration](#distributed-caching--redis-integration)
+- [Redis Integration Architecture](#redis-integration-architecture)
+- [Interactive API Documentation (Scalar & Swagger)](#interactive-api-documentation-scalar--swagger)
 - [Security & JWT Authentication](#security--jwt-authentication)
 - [XML Digital Signature (XMLDSig)](#xml-digital-signature-xmldsig)
 - [API Endpoints Reference](#api-endpoints-reference)
@@ -40,7 +45,7 @@
 
 ## Overview
 
-The `EcfDgii.Client` solution acts as a middleware between internal billing platforms and the Dominican Republic Tax Authority (DGII) server systems. It automates XML serialization, digital signing (XMLDSig), authentication token acquisition, document transmission, and status querying.
+The `EcfDgii.Client` solution acts as a middleware between internal billing platforms and the Dominican Republic Tax Authority (DGII) server systems. It automates XML serialization, digital signing (XMLDSig), authentication token acquisition, document transmission, status querying, and response caching.
 
 The codebase is split into five cleanly separated layers with a strict dependency direction: the outer layers depend on the inner ones, never the reverse.
 
@@ -61,7 +66,9 @@ graph TD
 
 > **Auto schema at startup:** on boot the service applies `db/schema.sql` idempotently against the configured PostgreSQL instance.
 >
-> **Mandatory Authentication:** all endpoints (except `/api/auth/register`, `/api/auth/login` and `/health`) require a valid JWT bearer token.
+> **Mandatory Authentication:** all endpoints (except `/api/auth/register`, `/api/auth/login`, `/health`, `/scalar`, `/swagger`, and `/openapi/v1.json`) require a valid JWT bearer token.
+>
+> **Interactive Documentation:** open [http://localhost:8081/scalar](http://localhost:8081/scalar) or [http://localhost:8081/swagger](http://localhost:8081/swagger) to view interactive API docs.
 >
 > **Default Admin Credentials:** a default admin user is seeded on first run:
 > - **Username:** `admin`
@@ -71,11 +78,13 @@ graph TD
 
 ## Key Features
 
-### e-CF Operations
+### e-CF Operations & Caching
 - **Single e-CF Sending**: Prepares, validates, signs, and posts signed XML tax receipts directly to DGII REST services.
 - **RFCE Summaries**: Automatic validation, serialization, signing, and transmission of Consumption Invoice Summaries (RFCE).
 - **DGII Status Syncing**: Queries local and external services to sync transaction statuses (TrackId results) into the PostgreSQL database.
 - **Sequence Collision Recovery**: Automatically retries transmitting with a newly acquired sequence number if the DGII responds with a sequence-in-use error.
+- **Redis & Decorator Caching (`CachedEcfClient`)**: Caches taxpayer directories (24h), service status (5m), and maintenance windows (1h) with graceful in-memory fallback.
+- **Distributed Token Lock**: `EcfTokenManager` uses Redis distributed locks (`ecf:tokens:lock:{rnc}`) and token caching (`ecf:tokens:{rnc}`) to prevent token request thundering herds across distributed nodes.
 
 ### Cryptography & Security
 - **JWT Authorization**: Protects REST API endpoints with JWT token verification and role policies (`jwt-cpp`, HS256).
@@ -83,10 +92,12 @@ graph TD
 - **Argon2id Password Hashing**: User credentials are stored using libsodium's `crypto_pwhash` (salted, adaptive).
 - **Auditing & Tracking**: Automatically registers creation, update, and soft-deletion dates/users for all tables.
 
-### Enterprise Observability
+### Enterprise Observability & Documentation
+- **Scalar API Reference & Swagger UI**: Built-in interactive API documentation interfaces served at `/scalar` and `/swagger`.
+- **OpenAPI 3.0 Specification**: Machine-readable API schema exposed at `/openapi/v1.json`.
 - **Structured Logging**: Request start/completion and error logging with elapsed timings via `spdlog`.
 - **RFC 9457 ProblemDetails**: A global exception handler formats validation and runtime errors as `application/problem+json`.
-- **Health Endpoint**: `/health` for liveness/readiness probes.
+- **Health Endpoint**: `/health` for database and Redis readiness probes.
 
 ---
 
@@ -97,7 +108,7 @@ src/
 ├── Domain/              # Enterprise core: entities, value objects, exceptions, abstractions
 │   ├── Common/          # AuditableEntity base model
 │   ├── Entities/        # User, Customer, EcfDocument, Rfce, ResponseModels, EcfClientOptions
-│   ├── Interfaces/      # Abstractions (IEcfClient, IEcfXmlSerializer, repositories, security)
+│   ├── Interfaces/      # Abstractions (IEcfClient, ICacheService, IEcfXmlSerializer, repositories, security)
 │   └── Exceptions/      # Domain-specific exceptions (EcfSigningException, EcfValidationException)
 ├── Application/         # Application use cases, request handlers, validation rules
 │   ├── Common/          # Logging & validation behaviors, ValidationException, request validators
@@ -106,10 +117,11 @@ src/
 │   ├── Auth/            # Authentication use cases + DTOs
 │   └── Services/        # EcfValidator, PollingHelper
 ├── Infrastructure/      # Concrete implementations, DB access, DGII REST client
+│   ├── Caching/         # ICacheService implementation (RedisCacheService + In-Memory Fallback)
 │   ├── Persistence/     # DbContext, repositories, schema bootstrap, sequence provider
 │   ├── Security/        # PasswordHasher, TokenService, EcfXmlSigner, EcfSecurityUtils
 │   ├── Serialization/   # EcfXmlSerializer
-│   └── Dgii/            # DgiiDirectTransport, EcfTokenManager, EcfEnvironmentConfig
+│   └── Dgii/            # DgiiDirectTransport, EcfTokenManager, CachedEcfClient, EcfEnvironmentConfig
 ├── Shared/              # Result<T> wrapper, cross-cutting helpers
 └── Api/                 # Drogon host, controllers, filters, composition root
 db/schema.sql            # PostgreSQL schema (applied at startup)
@@ -125,14 +137,14 @@ tests/                   # Unit tests
 - CMake ≥ 3.20 and a C++20 compiler (MSVC 2022 / GCC 12+ / Clang 15+)
 - [Ninja](https://ninja-build.org/)
 - [vcpkg](https://github.com/microsoft/vcpkg) with the `VCPKG_ROOT` environment variable set
-- A reachable PostgreSQL instance
+- A reachable PostgreSQL instance and optional Redis instance
 
 ### Method 1: Manual Build
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/JorgeGBeltre/EcfDgi.Client.git
-   cd EcfDgi.Client
+   git clone https://github.com/JorgeGBeltre/EcfDgi.Client_C_Plus_Plus.git
+   cd EcfDgi.Client_C_Plus_Plus
    ```
 2. Configure and build (vcpkg resolves all dependencies from `vcpkg.json`):
    ```bash
@@ -149,14 +161,18 @@ The build copies `appsettings.json` and `db/schema.sql` next to the produced bin
 
 ### Method 2: Docker Compose Run
 
-1. Run the entire database and API stack:
+1. Run the entire database, Redis, and API stack:
    ```bash
    docker compose up --build -d
    ```
-2. Verify execution using the docker logs:
+2. Verify container execution and health:
    ```bash
-   docker logs ecf_dgii_api_cpp -f
+   docker compose ps
    ```
+3. Access API and Interactive Documentation:
+   - **Scalar UI**: [http://localhost:8081/scalar](http://localhost:8081/scalar)
+   - **Swagger UI**: [http://localhost:8081/swagger](http://localhost:8081/swagger)
+   - **Health Check**: [http://localhost:8081/health](http://localhost:8081/health)
 
 ---
 
@@ -172,7 +188,7 @@ Dependencies are declared in `vcpkg.json` and resolved automatically during conf
     "libxml2",        // XML building and parsing
     { "name": "xmlsec", "features": ["openssl"] }, // XMLDSig signing
     "openssl",        // SHA-256, PKCS#12, X.509, RSA
-    "nlohmann-json",  // JSON (core)
+    "nlohmann-json",  // JSON (core & caching serialization)
     "jwt-cpp",        // JWT generation & validation (HS256)
     "libpqxx",        // PostgreSQL client
     "libsodium",      // Argon2id password hashing
@@ -185,17 +201,18 @@ Dependencies are declared in `vcpkg.json` and resolved automatically during conf
 
 ## Basic Configuration
 
-The composition root (`AppServices`) wires the application and infrastructure services and builds a per-request scope (database context + repositories + unit of work).
+The composition root (`AppServices`) wires the application, caching, and infrastructure services, and builds a per-request scope (database context + repositories + unit of work).
 
 ### Complete `appsettings.json` Template
 
-Configure your server, database, credentials, and signing certificate in `config/appsettings.json`:
+Configure your server, database, Redis connection, credentials, and signing certificate in `config/appsettings.json`:
 
 ```json
 {
   "Server": { "Host": "0.0.0.0", "Port": 8080, "Threads": 0 },
   "ConnectionStrings": {
-    "DefaultConnection": "host=localhost port=5432 dbname=ecf_dgii user=postgres password=postgres"
+    "DefaultConnection": "host=localhost port=5432 dbname=ecf_dgii user=postgres password=postgres",
+    "Redis": "localhost:6379"
   },
   "JwtSettings": {
     "Secret": "e_CF_Dominican_Tax_Authority_Secure_JWT_Secret_Token_2026_Key_Length_Minimum_32_Bytes!",
@@ -216,13 +233,72 @@ Configure your server, database, credentials, and signing certificate in `config
 }
 ```
 
-The connection string uses the libpq keyword/value format. The `ConnectionStrings__DefaultConnection` environment variable overrides the file value.
+The database connection string uses the libpq keyword/value format. Environment variables override configuration settings at runtime:
+- `ConnectionStrings__DefaultConnection` -> PostgreSQL Connection String
+- `ConnectionStrings__Redis` / `REDIS_URL` -> Redis Connection String
+
+---
+
+## Distributed Caching & Redis Integration
+
+The solution includes an enterprise caching layer conforming to `domain::ICacheService`:
+
+- **`RedisCacheService`**: Communicates with Redis servers using TCP RESP protocol and supports expiration TTL and atomic distributed locking (`acquireLock` / `releaseLock`). If Redis is unreachable or unconfigured, it seamlessly operates in a thread-safe **In-Memory Fallback Mode**.
+- **`CachedEcfClient`**: Implements the Decorator pattern over `IEcfClient`, transparently serving:
+  - `consultarDirectorio()` from cache for **24 Hours** (`ecf:directory:all`)
+  - `consultarEstatusServicios()` from cache for **5 Minutes** (`ecf:services:status`)
+  - `consultarVentanasMantenimiento()` from cache for **1 Hour** (`ecf:maintenance:windows`)
+- **`EcfTokenManager` Distributed Renewal**: Uses Redis key `ecf:tokens:{rncEmisor}` and lock `ecf:tokens:lock:{rncEmisor}` to avoid unnecessary auth token requests to DGII endpoints.
+
+---
+
+## Redis Integration Architecture
+
+```mermaid
+graph TD
+    Client[Client / API Request] --> API[EcfDgii.Client.Api]
+    API --> CacheService[ICacheService / DistributedCache]
+    CacheService --> Redis[(Redis Cache)]
+    
+    subgraph Use Cases
+        UC1[DGII Token Cache per RNC]
+        UC2[Taxpayer Directory & DGII Status]
+        UC3[Distributed Locking / e-CF Idempotency]
+        UC4[Query Response Cache]
+    end
+    
+    CacheService --> UC1
+    CacheService --> UC2
+    CacheService --> UC3
+    CacheService --> UC4
+    
+    UC1 -. Miss .-> DGII[DGII Web Services]
+    UC2 -. Miss .-> DGII
+```
+
+> [!IMPORTANT]
+> **Fallback Strategy (High Availability)**:
+> A resilience strategy is implemented where, if Redis is unavailable or temporarily fails, the system will gracefully degrade using `IMemoryCache` as a local in-memory fallback without interrupting the operation of the DGII client.
+
+> [!NOTE]
+> **Orchestration with Docker Compose**:
+> The official `redis:7-alpine` image is included with optional persistence (RDB/AOF) and memory limit configuration (`maxmemory 256mb`, policy `allkeys-lru`).
+
+---
+
+## Interactive API Documentation (Scalar & Swagger)
+
+`EcfDgii.Client_C_Plus_Plus` embeds interactive REST API documentation:
+
+- **Scalar API Reference**: Modern, ultra-fast documentation UI accessible at `/scalar`.
+- **Swagger UI**: Traditional Swagger documentation interface available at `/swagger`.
+- **OpenAPI v1 JSON**: Dynamic OpenAPI 3.0 schema served at `/openapi/v1.json`.
 
 ---
 
 ## Security & JWT Authentication
 
-Endpoints are protected by a Drogon request filter (`JwtAuthFilter`) that validates the `Authorization: Bearer <token>` header. Validation checks the signing key, issuer and audience, then stashes the user claims (`nameid`, `name`, `role`) on the request for downstream use. A second filter (`AdminRoleFilter`) enforces role-based authorization on privileged routes.
+Endpoints are protected by a Drogon request filter (`JwtAuthFilter`) that validates the `Authorization: Bearer <token>` header. Validation checks the signing key, issuer, and audience, then stashes the user claims (`nameid`, `name`, `role`) on the request for downstream use. A second filter (`AdminRoleFilter`) enforces role-based authorization on privileged routes.
 
 ```cpp
 // JwtAuthFilter.cpp — token validation with jwt-cpp
@@ -238,59 +314,24 @@ req->attributes()->insert("username", decoded.get_payload_claim("name").as_strin
 req->attributes()->insert("role",     decoded.get_payload_claim("role").as_string());
 ```
 
-Tokens are issued on register/login by `TokenService::generateToken`, embedding the user id, username, email and role claims with the configured issuer, audience and expiry.
-
 ---
 
 ## XML Digital Signature (XMLDSig)
 
-The cryptographic signature of XML receipts is handled by the `EcfXmlSigner` service. It loads the private key from the client PKCS#12 certificate, validates that the certificate subject matches the sender's RNC, builds an enveloped signature template (Exclusive C14N + RSA-SHA256), computes the signature and appends the `<Signature>` block.
-
-```cpp
-// EcfXmlSigner.cpp — enveloped XMLDSig (Exclusive C14N + RSA-SHA256)
-std::string EcfXmlSigner::signXml(const std::string& xmlContent,
-                                  const std::string& rncEmisor) {
-    if (!validateCertificateSn(rncEmisor))
-        throw EcfSigningException(
-            "El RNC del certificado no coincide con el emisor: " + rncEmisor);
-
-    xmlDocPtr doc = xmlReadMemory(xmlContent.c_str(), (int)xmlContent.size(),
-                                  "doc.xml", nullptr, 0);
-
-    xmlNodePtr signNode = xmlSecTmplSignatureCreate(
-        doc, xmlSecTransformExclC14NId, xmlSecTransformRsaSha256Id, nullptr);
-
-    xmlNodePtr ref = xmlSecTmplSignatureAddReference(
-        signNode, xmlSecTransformSha256Id, nullptr, (const xmlChar*)"", nullptr);
-    xmlSecTmplReferenceAddTransform(ref, xmlSecTransformEnvelopedId);
-    xmlSecTmplReferenceAddTransform(ref, xmlSecTransformExclC14NId);
-
-    xmlNodePtr keyInfo = xmlSecTmplSignatureEnsureKeyInfo(signNode, nullptr);
-    xmlSecTmplKeyInfoAddX509Data(keyInfo);
-
-    xmlAddChild(xmlDocGetRootElement(doc), signNode);   // enveloped
-
-    xmlSecKeyPtr key = xmlSecCryptoAppKeyLoadMemory(
-        pfxBytes_.data(), pfxBytes_.size(), xmlSecKeyDataFormatPkcs12,
-        pfxPassword_.c_str(), nullptr, nullptr);
-
-    xmlSecDSigCtxPtr ctx = xmlSecDSigCtxCreate(nullptr);
-    ctx->signKey = key;
-    xmlSecDSigCtxSign(ctx, signNode);
-    // ... serialize doc and return
-}
-```
-
-The e-CF security code is derived by `EcfSecurityUtils::calcularCodigoSeguridad`, which extracts the `<SignatureValue>`, computes its SHA-256 and takes the first 6 hex characters.
+The cryptographic signature of XML receipts is handled by the `EcfXmlSigner` service. It loads the private key from the client PKCS#12 certificate, validates that the certificate subject matches the sender's RNC, builds an enveloped signature template (Exclusive C14N + RSA-SHA256), computes the signature, and appends the `<Signature>` block.
 
 ---
 
 ## API Endpoints Reference
 
-All endpoints except `Auth` and `/health` require a valid JWT Bearer header: `Authorization: Bearer <your-token>`.
+All endpoints except `Auth`, `/health`, `/scalar`, `/swagger`, and `/openapi/v1.json` require a valid JWT Bearer header: `Authorization: Bearer <your-token>`.
 
 | Route | Method | Authentication | Request Body | Description |
 | :--- | :--- | :--- | :--- | :--- |
+| `/scalar` | `GET` | Anonymous | None | Interactive Scalar API Reference UI |
+| `/swagger` | `GET` | Anonymous | None | Interactive Swagger UI |
+| `/openapi/v1.json` | `GET` | Anonymous | None | OpenAPI 3.0 specification JSON |
+| `/health` | `GET` | Anonymous | None | System readiness and component health probe |
 | `/api/auth/register` | `POST` | Anonymous | `RegisterUserCommand` | Creates a new user |
 | `/api/auth/login` | `POST` | Anonymous | `LoginUserCommand` | Verifies user password and yields a JWT token |
 | `/api/customers` | `GET` | Bearer Token | None | Returns a list of active customers |
@@ -301,7 +342,6 @@ All endpoints except `Auth` and `/health` require a valid JWT Bearer header: `Au
 | `/api/ecf/send` | `POST` | Bearer Token | `SendEcfCommand` | Signs and sends an XML e-CF document |
 | `/api/ecf/send-rfce` | `POST` | Bearer Token | `SendRfceCommand` | Signs and sends a Consumption Summary |
 | `/api/ecf/status` | `GET` | Bearer Token | Query Parameters | Queries current processing status |
-| `/health` | `GET` | Anonymous | None | Liveness probe |
 
 ---
 
@@ -396,8 +436,6 @@ CREATE TABLE IF NOT EXISTS customers (
 CREATE INDEX IF NOT EXISTS ix_customers_rnc ON customers (rnc);
 ```
 
-The schema is applied idempotently at startup by `DbInitializer`, which also seeds the default admin user and the "Consumidor Final Genérico" customer if they are not present.
-
 ---
 
 ## Complete Core API Interfaces
@@ -405,6 +443,21 @@ The schema is applied idempotently at startup by `DbInitializer`, which also see
 These abstractions separate use cases in the Application layer from concrete implementations in the Infrastructure layer.
 
 ```cpp
+// ICacheService.h
+namespace ecf::domain {
+class ICacheService {
+public:
+    virtual ~ICacheService() = default;
+    virtual std::optional<std::string> get(const std::string& key) = 0;
+    virtual bool set(const std::string& key, const std::string& value,
+                     std::optional<std::chrono::seconds> expiration = std::nullopt) = 0;
+    virtual bool remove(const std::string& key) = 0;
+    virtual bool acquireLock(const std::string& lockKey, const std::string& lockValue,
+                             std::chrono::seconds expiration) = 0;
+    virtual bool releaseLock(const std::string& lockKey, const std::string& lockValue) = 0;
+};
+}  // namespace ecf::domain
+
 // IEcfClient.h
 namespace ecf::domain {
 class IEcfClient {
@@ -432,30 +485,6 @@ public:
     virtual AnulacionResponse anularRangos(const std::string& xmlContent) = 0;
 };
 }  // namespace ecf::domain
-
-// IEcfXmlSerializer.h
-namespace ecf::domain {
-class IEcfXmlSerializer {
-public:
-    virtual ~IEcfXmlSerializer() = default;
-    virtual std::string serialize(const Rfce& model) = 0;
-    virtual EcfRecepcionResponse      deserializeEcfRecepcion(const std::string& xml) = 0;
-    virtual RfceRecepcionResponse     deserializeRfceRecepcion(const std::string& xml) = 0;
-    virtual ConsultaResultadoResponse deserializeConsultaResultado(const std::string& xml) = 0;
-    virtual std::string getFileName(const std::string& rncEmisor, const std::string& eNcf) = 0;
-    virtual std::string escapeAlfanum(const std::string& value) = 0;
-};
-}  // namespace ecf::domain
-
-// IEcfSequenceProvider.h
-namespace ecf::domain {
-class IEcfSequenceProvider {
-public:
-    virtual ~IEcfSequenceProvider() = default;
-    virtual std::string getNext(const std::string& rncEmisor) = 0;
-    virtual void release(const std::string& rncEmisor, const std::string& eNcf) = 0;
-};
-}  // namespace ecf::domain
 ```
 
 ---
@@ -463,22 +492,22 @@ public:
 ## Performance Considerations
 
 - **Threaded HTTP server**: Drogon serves requests across a configurable worker-thread pool (`Server.Threads`, `0` = hardware concurrency).
-- **Cached DGII token**: `EcfTokenManager` caches the bearer token and only renews it ~5 minutes before expiry, guarded by a mutex.
+- **Cached DGII token & Distributed Locks**: `EcfTokenManager` uses Redis distributed locking and caches bearer tokens to avoid unnecessary token acquisition requests to DGII servers.
+- **Decorator Caching**: `CachedEcfClient` serves static/slow-changing DGII queries (Directorio, EstatusServicios, VentanasMantenimiento) directly from Redis.
 - **Scoped database connections**: each request builds its own scope; mutations are staged and committed atomically by the unit of work in a single transaction.
-- **Reused serializer/signer**: XML serialization and the signing context are initialized once and reused to avoid repeated setup costs.
 
 ---
 
 ## Best Practices
 
 1. **Use HTTPS and TLS 1.2/1.3**: Ensure connections to the API and to DGII endpoints are strictly encrypted.
-2. **Store P12/PFX Certificates Safely**: Keep the signing certificate out of public folders; rely on secure configuration or secret stores (AWS Secrets Manager / Azure Key Vault).
+2. **Store P12/PFX Certificates Safely**: Keep the signing certificate out of public folders; rely on secure configuration or secret stores.
 3. **Keep the JWT secret private**: Use a long, random secret (≥ 32 bytes) and inject it via environment/secret configuration in production.
 4. **Rely on the global error handler**: Validation errors are surfaced as RFC 9457 `problem+json`, preventing internal details from leaking to clients.
 
 ---
 
-## Complete Workflows
+## Workflows
 
 ### Successful e-CF Invoice Submission Workflow
 
@@ -495,509 +524,69 @@ Client App                   EcfDgii.Client API              DGII Gateway
    │◄── Return TrackId ──────────────│                             │
 ```
 
-### e-CF Sequence Reuse Auto-Retry Workflow
-
-```
-Application Handler          EcfClient Service              DGII Gateway
-   │                                 │                             │
-   │── sendRfce ────────────────────►│                             │
-   │                                 │── Send to DGII ────────────►│
-   │                                 │◄── Rejected (Sequence Used)─│
-   │                                 │                             │
-   │                                 │── 1. Get next sequence      │
-   │                                 │── 2. Re-sign XML payload    │
-   │                                 │── 3. Resend payload ───────►│
-   │                                 │◄── Accepted (Success) ──────│
-   │◄── Return Success ──────────────│                             │
-```
-
 ---
 
 ## Docker Orchestration
 
-This project includes Docker support for running the C++ REST API together with PostgreSQL using Docker Compose.
+The API stack uses Docker Compose, linking the REST API container, Redis cache, and PostgreSQL database.
 
-The Docker setup is defined in the following files:
+### Docker Compose (`./docker-compose.yml`)
 
-| File                 | Purpose                                                                                              |
-| :------------------- | :--------------------------------------------------------------------------------------------------- |
-| `Dockerfile`         | Builds the C++ API using a multi-stage build and produces a minimal runtime image                    |
-| `docker-compose.yml` | Orchestrates the API container and PostgreSQL service                                                |
-| `.dockerignore`      | Excludes unnecessary files from the Docker build context                                             |
-| `.env`               | Provides local environment variables for Compose, ports, database credentials and connection strings |
+```yaml
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: ecf_dgii_postgres_cpp
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ecf_dgii}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-ecf_dgii}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
----
+  redis:
+    image: redis:7-alpine
+    container_name: ecf_dgii_redis_cpp
+    ports:
+      - "${REDIS_PORT:-6380}:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --save 60 1 --loglevel notice
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
-### Docker Architecture
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ecf_dgii_api_cpp
+    ports:
+      - "${API_PORT:-8081}:8080"
+    environment:
+      - ConnectionStrings__DefaultConnection=${ECF_DB_CONNECTION:-host=postgres port=5432 dbname=ecf_dgii user=postgres password=postgres}
+      - ConnectionStrings__Redis=redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 
-The Docker setup is divided into two main responsibilities:
-
-```text
-Dockerfile
-├── build stage
-│   ├── Installs compiler/build tools
-│   ├── Installs vcpkg
-│   ├── Restores and caches C++ dependencies
-│   └── Compiles ecfdgii_api
-│
-└── final stage
-    ├── Installs minimal runtime dependencies
-    ├── Copies the compiled binary
-    ├── Copies appsettings.json
-    └── Copies schema.sql
-```
-
-```text
-docker-compose.yml
-├── postgres
-│   ├── PostgreSQL 15 Alpine
-│   ├── Persistent database volume
-│   ├── Optional schema.sql initialization
-│   └── Healthcheck with pg_isready
-│
-└── api
-    ├── Builds from Dockerfile
-    ├── Waits for PostgreSQL healthcheck
-    ├── Exposes port 8080
-    └── Mounts logs folder
-```
-
----
-
-### Dockerfile
-
-The `Dockerfile` uses a multi-stage build.
-
-The build stage is responsible for compiling the C++ application and restoring dependencies through `vcpkg`. The final stage only contains the compiled API binary, required runtime libraries and configuration files.
-
-This keeps compiler tools, CMake, Ninja, Git and `vcpkg` out of the final runtime image.
-
-Key responsibilities:
-
-* Installs C++ build tools.
-* Installs and bootstraps `vcpkg`.
-* Restores dependencies from `vcpkg.json`.
-* Uses BuildKit cache mounts for `vcpkg` binary packages and downloads.
-* Builds `ecfdgii_api` with CMake.
-* Uses parallel compilation.
-* Strips the final binary when possible.
-* Copies only the runtime artifacts into the final image.
-
----
-
-### Docker Compose
-
-The `docker-compose.yml` file starts the complete local stack:
-
-* `postgres`: PostgreSQL database service.
-* `api`: C++ REST API service.
-
-The API service depends on PostgreSQL and waits for the database healthcheck before starting. This prevents the API from failing during startup because the database container exists but PostgreSQL is not yet ready to accept connections.
-
-Main features:
-
-* PostgreSQL 15 Alpine image.
-* Persistent PostgreSQL data volume.
-* Configurable database credentials through environment variables.
-* Configurable API and PostgreSQL ports.
-* PostgreSQL healthcheck using `pg_isready`.
-* API restart policy.
-* Local log folder mount for diagnostics.
-* Optional schema initialization from `db/schema.sql`.
-
----
-
-### Environment File
-
-Create a `.env` file next to `docker-compose.yml` to centralize local configuration.
-
-Recommended variables:
-
-```env
-POSTGRES_DB=ecf_dgii
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=postgres
-POSTGRES_PORT=5432
-
-API_PORT=8080
-
-ECF_DB_CONNECTION=host=postgres port=5432 dbname=ecf_dgii user=postgres password=postgres
-```
-
-For production environments, do not store real credentials, JWT secrets or certificate passwords directly in a plain `.env` file. Use your deployment platform’s secret management mechanism.
-
----
-
-### Docker Ignore File
-
-Create a `.dockerignore` file to reduce the Docker build context and avoid sending unnecessary files to the Docker daemon.
-
-Recommended exclusions:
-
-```text
-.git
-.gitignore
-
-.vs
-.vscode
-.idea
-
-build
-out
-bin
-obj
-
-*.log
-*.tmp
-*.cache
-
-postgres_data
-
-Dockerfile.old
-docker-compose.override.yml
-```
-
-This is especially useful when Docker spends too much time in:
-
-```text
-transferring context
+volumes:
+  postgres_data:
+  redis_data:
 ```
 
 ---
-
-### BuildKit and vcpkg Cache
-
-The Dockerfile is designed to use Docker BuildKit cache mounts for `vcpkg`.
-
-The cache stores:
-
-| Cache                   | Purpose                                         |
-| :---------------------- | :---------------------------------------------- |
-| `vcpkg binary cache`    | Reuses already compiled C++ dependency packages |
-| `vcpkg downloads cache` | Reuses downloaded source archives               |
-
-This allows `vcpkg` to avoid downloading and compiling the same dependencies repeatedly when the ABI hash has not changed.
-
-Enable BuildKit before building.
-
-Linux/macOS:
-
-```bash
-DOCKER_BUILDKIT=1 docker compose build --progress=plain
-```
-
-Windows PowerShell:
-
-```powershell
-$env:DOCKER_BUILDKIT=1
-docker compose build --progress=plain
-```
-
-Build and start the stack:
-
-```bash
-DOCKER_BUILDKIT=1 docker compose up --build
-```
-
-Windows PowerShell:
-
-```powershell
-$env:DOCKER_BUILDKIT=1
-docker compose up --build
-```
-
----
-
-### Running the Stack
-
-Start the API and PostgreSQL:
-
-```bash
-docker compose up --build
-```
-
-Start in detached mode:
-
-```bash
-docker compose up -d --build
-```
-
-Stop the stack:
-
-```bash
-docker compose down
-```
-
-Stop the stack and remove the database volume:
-
-```bash
-docker compose down -v
-```
-
-Warning: `docker compose down -v` deletes the PostgreSQL data stored in the `postgres_data` volume.
-
----
-
-### Logs
-
-The API logs can be reviewed through Docker:
-
-```bash
-docker logs -f ecf_dgii_api_cpp
-```
-
-PostgreSQL logs can be reviewed with:
-
-```bash
-docker logs -f ecf_dgii_postgres_cpp
-```
-
-The Compose setup may also mount local log folders:
-
-```text
-./logs/api
-./logs/postgres
-```
-
-Create them before running the stack:
-
-Linux/macOS:
-
-```bash
-mkdir -p logs/api logs/postgres
-```
-
-Windows PowerShell:
-
-```powershell
-New-Item -ItemType Directory -Force -Path logs/api, logs/postgres
-```
-
-Important: `docker logs` reads from the container standard output and standard error streams. The `./logs/api` folder is only useful if the application writes file-based logs to `/app/logs`.
-
-Recommended logging strategy:
-
-```text
-stdout/stderr -> docker logs
-/app/logs     -> persistent local log files
-```
-
----
-
-### Database Initialization
-
-The PostgreSQL service can mount `db/schema.sql` into the PostgreSQL initialization folder.
-
-This causes PostgreSQL to execute the schema script only when the database volume is created for the first time.
-
-If the volume already exists, the script will not run again automatically.
-
-To force schema re-initialization during local development:
-
-```bash
-docker compose down -v
-docker compose up --build
-```
-
-Warning: this removes all existing database data.
-
----
-
-### Healthcheck Behavior
-
-The API depends on PostgreSQL using a service healthcheck.
-
-PostgreSQL is considered healthy when `pg_isready` confirms that the target database can accept connections.
-
-This prevents startup errors such as:
-
-```text
-connection refused
-database system is starting up
-could not connect to server
-```
-
-Inside Docker Compose, the database hostname is the service name:
-
-```text
-postgres
-```
-
-Use this connection pattern from the API container:
-
-```text
-host=postgres port=5432 dbname=ecf_dgii user=postgres password=postgres
-```
-
-Do not use `localhost` from inside the API container, because `localhost` refers to the API container itself.
-
----
-
-### Performance Improvements
-
-This Docker setup improves build and runtime behavior in several ways:
-
-| Improvement                | Benefit                                                             |
-| :------------------------- | :------------------------------------------------------------------ |
-| Multi-stage build          | Keeps compilers, CMake, Ninja and vcpkg out of the final image      |
-| BuildKit cache mount       | Reuses compiled vcpkg packages between builds                       |
-| Separate dependency layer  | Avoids reinstalling dependencies when only application code changes |
-| Parallel CMake build       | Uses multiple CPU cores during compilation                          |
-| Binary stripping           | Reduces final executable size when possible                         |
-| `.dockerignore`            | Reduces build context size                                          |
-| PostgreSQL healthcheck     | Prevents API startup before database readiness                      |
-| Persistent database volume | Keeps PostgreSQL data between restarts                              |
-| Log folders                | Allows persistent local inspection of file-based logs               |
-
----
-
-### Common Commands
-
-Build only:
-
-```bash
-DOCKER_BUILDKIT=1 docker compose build --progress=plain
-```
-
-Build and start:
-
-```bash
-DOCKER_BUILDKIT=1 docker compose up --build
-```
-
-Start without rebuilding:
-
-```bash
-docker compose up
-```
-
-Start in background:
-
-```bash
-docker compose up -d
-```
-
-View API logs:
-
-```bash
-docker logs -f ecf_dgii_api_cpp
-```
-
-View PostgreSQL logs:
-
-```bash
-docker logs -f ecf_dgii_postgres_cpp
-```
-
-Remove containers but keep database data:
-
-```bash
-docker compose down
-```
-
-Remove containers and database data:
-
-```bash
-docker compose down -v
-```
-
-Inspect built images:
-
-```bash
-docker images
-```
-
-Inspect image layers:
-
-```bash
-docker history ecf_dgii_api_cpp
-```
-
-Clean Docker build cache:
-
-```bash
-docker builder prune
-```
-
-Aggressively clean build cache:
-
-```bash
-docker builder prune -a
-```
-
-Use aggressive cleanup only when necessary, because the next build will take longer.
-
----
-
-### Troubleshooting
-
-#### vcpkg recompiles everything
-
-This usually happens when one of these changes:
-
-```text
-vcpkg.json
-triplets/
-compiler version
-compiler flags
-CMake toolchain configuration
-base image version
-environment variables that affect the build
-```
-
-Check the build output with:
-
-```bash
-DOCKER_BUILDKIT=1 docker compose build --progress=plain
-```
-
-#### Docker takes too long on `transferring context`
-
-Review the `.dockerignore` file. Common causes are:
-
-```text
-.git
-build/
-bin/
-obj/
-logs/
-large temporary files
-```
-
-#### API cannot connect to PostgreSQL
-
-Inside Docker Compose, the database hostname is:
-
-```text
-postgres
-```
-
-The API should use the Compose service name, not `localhost`.
-
-#### schema.sql does not run
-
-PostgreSQL only runs files from its initialization folder when the database volume is empty.
-
-For local development, reset with:
-
-```bash
-docker compose down -v
-docker compose up --build
-```
-
-#### docker logs does not show file logs
-
-`docker logs` only shows stdout and stderr. If the application writes to `/app/logs`, check the mounted folder:
-
-```bash
-ls -la logs/api
-```
-
-On PowerShell:
-
-```powershell
-Get-ChildItem .\logs\api
-```
 
 ## Continuous Integration
 
@@ -1006,19 +595,6 @@ A GitHub Actions pipeline at `.github/workflows/ci.yml` runs on every push to `d
 1. **test** — builds the project on Ubuntu with CMake + vcpkg (cached vcpkg tree) and runs the suite via `ctest`.
 2. **merge-to-main** — once tests pass, fast-forward merges `develop` into `main` and pushes it.
 3. **docker** — builds the Docker image from `main` (`ecfdgii-client-cpp:latest`).
-
-```bash
-# Reproduce the test stage locally
-cmake --preset default -DECF_BUILD_TESTS=ON
-cmake --build build --parallel
-ctest --test-dir build --output-on-failure
-```
-
-### Required repository secrets
-
-| Secret | Purpose |
-| :--- | :--- |
-| `AUTO_MERGE_TOKEN` | Token with push rights for the `develop` → `main` merge (falls back to `GITHUB_TOKEN`) |
 
 ---
 
@@ -1034,17 +610,19 @@ ctest --test-dir build --output-on-failure
 ```
 
 ### Health Check Endpoint
-Check API status by requesting the `/health` endpoint:
+Check API, Database, and Redis status by requesting the `/health` endpoint:
 
 **Example Request:**
 ```bash
-curl http://localhost:8080/health
+curl http://localhost:8081/health
 ```
 
 **Example Response:**
 ```json
 {
-  "status": "Healthy"
+  "status": "Healthy",
+  "database": "Healthy",
+  "redis": "Healthy"
 }
 ```
 
@@ -1061,16 +639,20 @@ Licensed under the **MIT License**. See [LICENSE](LICENSE) for details.
 Author: **Jorge Gaspar Beltre Rivera**  
 Project: **EcfDgii.Client API & SDK (C++)**
 
- [![GitHub](https://img.shields.io/badge/GitHub-181717?style=for-the-badge&logo=github&logoColor=white)](https://github.com/JorgeGBeltre)
- [![LinkedIn](https://img.shields.io/badge/LinkedIn-0A66C2?style=for-the-badge&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/jorge-gaspar-beltre-rivera/)
- [![Email](https://img.shields.io/badge/Email-EA4335?style=for-the-badge&logo=gmail&logoColor=white)](mailto:Jorgegaspar3021@gmail.com)
-
----
+<p align="center">
+  <a href="https://www.linkedin.com/in/jorge-gaspar-beltre-rivera/" target="_blank"><img src="https://user-images.githubusercontent.com/74038190/235294012-0a55e343-37ad-4b0f-924f-c8431d9d2483.gif" alt="LinkedIn" width="100"></a>
+  <a href="https://github.com/JorgeGBeltre" target="_blank"><img src="https://user-images.githubusercontent.com/74038190/212257468-1e9a91f1-b626-4baa-b15d-5c385dfa7ed2.gif" alt="GitHub" width="100"></a>
+  <a href="mailto:Jorgegaspar3021@gmail.com"><img src="https://user-images.githubusercontent.com/74038190/216122065-2f028bae-25d6-4a3c-bc9f-175394ed5011.png" alt="E-Mail" width="100"></a>
+</p>
 
 ## Support
 
-This project is developed independently.
+This project is developed independently. Even a small contribution helps me dedicate more time to development, testing, and releasing new features.
 
-Even a small contribution helps dedicate more time to development, testing, and releasing new features.
-
- [![Buy Me a Coffee](https://img.shields.io/badge/Buy_Me_a_Coffee-FFDD00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black)](https://www.paypal.com/donate/?hosted_button_id=2VLA8BWT967LU)
+<p align="center">
+  <a href="https://www.paypal.com/donate/?hosted_button_id=2VLA8BWT967LU">
+    <img src="https://www.paypalobjects.com/webstatic/icon/pp258.png"
+         alt="Donate with PayPal"
+         height="60">
+  </a>
+</p>

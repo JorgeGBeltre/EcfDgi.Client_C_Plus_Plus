@@ -42,12 +42,18 @@ AppConfig AppConfig::load(const std::string& path) {
         if (s.contains("Threads")) cfg.threads = s["Threads"].get<int>();
     }
 
-    if (j.contains("ConnectionStrings"))
+    if (j.contains("ConnectionStrings")) {
         cfg.connectionString = getStr(j["ConnectionStrings"], "DefaultConnection");
+        cfg.redisConnectionString = getStr(j["ConnectionStrings"], "Redis");
+    }
 
-    // Allow the connection string to be overridden via environment variable.
+    // Allow the connection strings to be overridden via environment variables.
     if (const char* env = std::getenv("ConnectionStrings__DefaultConnection"))
         cfg.connectionString = env;
+    if (const char* redisEnv = std::getenv("ConnectionStrings__Redis"))
+        cfg.redisConnectionString = redisEnv;
+    else if (const char* redisUrlEnv = std::getenv("REDIS_URL"))
+        cfg.redisConnectionString = redisUrlEnv;
 
     if (j.contains("JwtSettings")) {
         const auto& s = j["JwtSettings"];
