@@ -98,6 +98,189 @@ int main() {
         },
         {Get});
 
+    // OpenAPI Specification JSON.
+    app().registerHandler(
+        "/openapi/v1.json",
+        [](const HttpRequestPtr&, std::function<void(const HttpResponsePtr&)>&& cb) {
+            std::string openApiJson = R"json({
+  "openapi": "3.0.3",
+  "info": {
+    "title": "EcfDgii.Client API (C++)",
+    "description": "Dominican Republic e-CF Enterprise REST API client wrapper.",
+    "version": "2.0.0"
+  },
+  "servers": [{ "url": "/" }],
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    }
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Health check endpoint",
+        "responses": { "200": { "description": "System operational" } }
+      }
+    },
+    "/api/auth/register": {
+      "post": {
+        "summary": "Register new user",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "username": { "type": "string" },
+                  "email": { "type": "string" },
+                  "password": { "type": "string" },
+                  "role": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Registration successful" } }
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "summary": "User login to acquire JWT token",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "username": { "type": "string" },
+                  "password": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "JWT authentication token returned" } }
+      }
+    },
+    "/api/customers": {
+      "get": {
+        "summary": "List all customers",
+        "security": [{ "BearerAuth": [] }],
+        "responses": { "200": { "description": "Customer list" } }
+      },
+      "post": {
+        "summary": "Create new customer",
+        "security": [{ "BearerAuth": [] }],
+        "responses": { "201": { "description": "Customer created" } }
+      }
+    },
+    "/api/customers/{id}": {
+      "get": {
+        "summary": "Get customer by ID",
+        "security": [{ "BearerAuth": [] }],
+        "responses": { "200": { "description": "Customer details" } }
+      },
+      "put": {
+        "summary": "Update customer",
+        "security": [{ "BearerAuth": [] }],
+        "responses": { "204": { "description": "Customer updated" } }
+      },
+      "delete": {
+        "summary": "Delete customer (Admin only)",
+        "security": [{ "BearerAuth": [] }],
+        "responses": { "204": { "description": "Customer deleted" } }
+      }
+    },
+    "/api/ecf/send": {
+      "post": {
+        "summary": "Send electronic invoice (e-CF)",
+        "security": [{ "BearerAuth": [] }],
+        "responses": { "200": { "description": "e-CF response" } }
+      }
+    },
+    "/api/ecf/send-rfce": {
+      "post": {
+        "summary": "Send RFCE document",
+        "security": [{ "BearerAuth": [] }],
+        "responses": { "200": { "description": "RFCE response" } }
+      }
+    },
+    "/api/ecf/status": {
+      "get": {
+        "summary": "Query e-CF status",
+        "security": [{ "BearerAuth": [] }],
+        "responses": { "200": { "description": "Status response" } }
+      }
+    }
+  }
+})json";
+            auto resp = HttpResponse::newHttpResponse();
+            resp->setBody(openApiJson);
+            resp->setContentTypeString("application/json");
+            cb(resp);
+        },
+        {Get});
+
+    // Scalar API Reference UI.
+    app().registerHandler(
+        "/scalar",
+        [](const HttpRequestPtr&, std::function<void(const HttpResponsePtr&)>&& cb) {
+            std::string html = R"html(<!doctype html>
+<html>
+  <head>
+    <title>EcfDgii Client API Reference (Scalar UI)</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+  </head>
+  <body>
+    <script id="api-reference" data-url="/openapi/v1.json"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
+  </body>
+</html>)html";
+            auto resp = HttpResponse::newHttpResponse();
+            resp->setBody(html);
+            resp->setContentTypeString("text/html");
+            cb(resp);
+        },
+        {Get});
+
+    // Swagger UI.
+    app().registerHandler(
+        "/swagger",
+        [](const HttpRequestPtr&, std::function<void(const HttpResponsePtr&)>&& cb) {
+            std::string html = R"html(<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>EcfDgii Client API - Swagger UI</title>
+  <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js" charset="UTF-8"></script>
+  <script>
+    window.onload = function() {
+      window.ui = SwaggerUIBundle({
+        url: "/openapi/v1.json",
+        dom_id: '#swagger-ui',
+      });
+    };
+  </script>
+</body>
+</html>)html";
+            auto resp = HttpResponse::newHttpResponse();
+            resp->setBody(html);
+            resp->setContentTypeString("text/html");
+            cb(resp);
+        },
+        {Get});
+
     const int threads =
         config.threads > 0 ? config.threads
                            : static_cast<int>(std::thread::hardware_concurrency());

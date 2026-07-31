@@ -21,7 +21,7 @@ public:
         const std::string& rncEmisor, const std::string& eNcf,
         const std::optional<std::string>& rncComprador = std::nullopt,
         const std::optional<std::string>& codigoSeguridad = std::nullopt) override;
-    domain::std::vector<domain::TrackIdDetalle> consultarTrackIds(
+    std::vector<domain::TrackIdDetalle> consultarTrackIds(
         const std::string& rncEmisor, const std::string& eNcf) override;
     domain::RfceConsultaResponse consultarRfce(const std::string& rncEmisor,
                                                const std::string& eNcf,
