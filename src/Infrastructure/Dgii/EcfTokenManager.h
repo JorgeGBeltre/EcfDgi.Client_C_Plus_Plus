@@ -7,6 +7,7 @@
 #include <mutex>
 #include <string>
 
+#include "Domain/Interfaces/ICacheService.h"
 #include "Infrastructure/Dgii/EcfEnvironmentConfig.h"
 #include "Infrastructure/Security/EcfXmlSigner.h"
 
@@ -15,7 +16,8 @@ namespace ecf::infra {
 class EcfTokenManager {
 public:
     EcfTokenManager(std::shared_ptr<EcfXmlSigner> signer,
-                    EcfEnvironmentConfig config, std::string rncEmisor);
+                    EcfEnvironmentConfig config, std::string rncEmisor,
+                    std::shared_ptr<domain::ICacheService> cacheService = nullptr);
 
     std::string getToken();
 
@@ -25,6 +27,7 @@ private:
     std::shared_ptr<EcfXmlSigner> signer_;
     EcfEnvironmentConfig config_;
     std::string rncEmisor_;
+    std::shared_ptr<domain::ICacheService> cacheService_;
 
     std::string cachedToken_;
     std::chrono::system_clock::time_point tokenExpiry_{};

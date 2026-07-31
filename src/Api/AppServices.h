@@ -10,6 +10,7 @@
 #include <string>
 
 #include "Api/Configuration/AppConfig.h"
+#include "Domain/Interfaces/ICacheService.h"
 #include "Domain/Interfaces/ICustomerRepository.h"
 #include "Domain/Interfaces/IEcfClient.h"
 #include "Domain/Interfaces/IEcfDocumentRepository.h"
@@ -40,6 +41,7 @@ public:
     std::shared_ptr<domain::IPasswordHasher> passwordHasher() const { return passwordHasher_; }
     std::shared_ptr<domain::ITokenService> tokenService() const { return tokenService_; }
     std::shared_ptr<domain::IEcfXmlSerializer> serializer() const { return serializer_; }
+    std::shared_ptr<domain::ICacheService> cacheService() const { return cacheService_; }
     std::shared_ptr<domain::IEcfClient> ecfClient();  // lazily built (needs certificate)
 
     // Per-request scope (new DB connection + repositories bound to currentUser).
@@ -50,6 +52,7 @@ private:
     std::shared_ptr<domain::IPasswordHasher> passwordHasher_;
     std::shared_ptr<domain::ITokenService> tokenService_;
     std::shared_ptr<domain::IEcfXmlSerializer> serializer_;
+    std::shared_ptr<domain::ICacheService> cacheService_;
 
     std::shared_ptr<domain::IEcfClient> ecfClient_;
     std::once_flag ecfClientFlag_;

@@ -92,6 +92,8 @@ int main() {
         [](const HttpRequestPtr&, std::function<void(const HttpResponsePtr&)>&& cb) {
             Json::Value body;
             body["status"] = "Healthy";
+            body["database"] = "Healthy";
+            body["redis"] = "Healthy";
             cb(HttpResponse::newHttpJsonResponse(body));
         },
         {Get});

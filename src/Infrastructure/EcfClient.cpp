@@ -30,7 +30,8 @@ AmbienteEnum toAmbiente(EcfEnvironment env) {
 }  // namespace
 
 EcfClient::EcfClient(EcfClientOptions options,
-                     std::shared_ptr<IEcfSequenceProvider> sequenceProvider)
+                     std::shared_ptr<IEcfSequenceProvider> sequenceProvider,
+                     std::shared_ptr<ICacheService> cacheService)
     : options_(std::move(options)),
       sequenceProvider_(sequenceProvider ? std::move(sequenceProvider)
                                          : std::make_shared<MemorySequenceProvider>()) {
@@ -46,7 +47,7 @@ EcfClient::EcfClient(EcfClientOptions options,
         *options_.certificatePath, options_.certificatePassword.value_or(""));
     auto envConfig = EcfEnvironmentConfig::getConfig(toAmbiente(options_.environment));
     auto tokenManager =
-        std::make_shared<EcfTokenManager>(signer, envConfig, *options_.rncEmisor);
+        std::make_shared<EcfTokenManager>(signer, envConfig, *options_.rncEmisor, cacheService);
 
     transport_ = std::make_shared<DgiiDirectTransport>(tokenManager, envConfig);
 }
