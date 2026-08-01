@@ -45,7 +45,7 @@ jobs:
             git clone https://github.com/microsoft/vcpkg "$VCPKG_ROOT"
           fi
           "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
-          mkdir -p "$VCPKG_DEFAULTBINARY_CACHE"
+          mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
 
       - name: Configurar (CMake + vcpkg)
         run: |
