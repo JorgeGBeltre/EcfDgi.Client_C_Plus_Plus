@@ -27,3 +27,28 @@ docs/
 *.tmp
 .DS_Store
 Thumbs.db
+
+.git
+.gitignore
+
+.vs
+.vscode
+.idea
+
+build
+out
+bin
+obj
+
+*.log
+*.tmp
+*.cache
+
+postgres_data
+
+Dockerfile.old
+docker-compose.override.yml
+
+This is especially useful when Docker spends too much time in:
+
+transferring context
