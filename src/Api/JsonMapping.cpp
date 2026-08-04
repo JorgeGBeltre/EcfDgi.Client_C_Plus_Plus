@@ -155,6 +155,56 @@ Rfce rfceFromJson(const Json::Value& j) {
     return rfce;
 }
 
+app::CanonicalDocumentDto canonicalDocumentFromJson(const Json::Value& j) {
+    app::CanonicalDocumentDto d;
+    d.ncf = optStr(j, "ncf");
+    d.documentKind = jstr(j, "documentKind", "Invoice");
+    d.tipoComprobante = jstr(j, "tipoComprobante", "E31");
+
+    if (has(j, "sourceReference")) {
+        const auto& sr = j["sourceReference"];
+        d.sourceReference.provider = jstr(sr, "provider", "QuickBooksDesktop");
+        d.sourceReference.txnId = jstr(sr, "txnId");
+        d.sourceReference.editSequence = jstr(sr, "editSequence");
+    }
+
+    if (has(j, "header")) {
+        const auto& h = j["header"];
+        d.header.rncEmisor = jstr(h, "rncEmisor");
+        d.header.razonSocialEmisor = jstr(h, "razonSocialEmisor");
+        d.header.rncComprador = jstr(h, "rncComprador");
+        d.header.razonSocialComprador = jstr(h, "razonSocialComprador");
+        d.header.fechaEmision = jstr(h, "fechaEmision");
+    }
+
+    if (j.isMember("lines") && j["lines"].isArray()) {
+        for (const auto& l : j["lines"]) {
+            app::CanonicalLineDto line;
+            line.lineNumber = jint(l, "lineNumber");
+            line.itemName = jstr(l, "itemName");
+            line.quantity = jdbl(l, "quantity");
+            line.unitPrice = jdbl(l, "unitPrice");
+            line.amount = jdbl(l, "amount");
+            d.lines.push_back(line);
+        }
+    }
+
+    if (has(j, "totals")) {
+        const auto& t = j["totals"];
+        d.totals.montoSubtotal = jdbl(t, "montoSubtotal");
+        d.totals.montoItbis = jdbl(t, "montoItbis");
+        d.totals.montoTotal = jdbl(t, "montoTotal");
+    }
+
+    if (has(j, "references")) {
+        const auto& r = j["references"];
+        d.references.correctsTxnId = jstr(r, "correctsTxnId");
+        d.references.correctsENcf = jstr(r, "correctsENcf");
+    }
+
+    return d;
+}
+
 std::shared_ptr<domain::ICurrentUserService> currentUserFrom(
     const drogon::HttpRequestPtr& req) {
     std::optional<std::string> userId, username;

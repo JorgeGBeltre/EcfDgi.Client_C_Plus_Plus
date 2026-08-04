@@ -51,13 +51,15 @@ void EcfDocumentRepository::add(const EcfDocument& document) {
     e.isDeleted = false;
     db_->stage([e, by](pqxx::work& w) {
         w.exec_params(
-            "INSERT INTO ecf_documents (id, e_ncf, rnc_emisor, rnc_comprador, track_id, "
-            "state, total_amount, itbis_amount, security_code, xml_content, receipt_date, "
+            "INSERT INTO ecf_documents (id, e_ncf, rnc_emisor, rnc_comprador, tenant_id, "
+            "source_txn_id, document_kind, ncf, track_id, state, total_amount, itbis_amount, "
+            "security_code, xml_content, signed_xml_content, dgii_response_xml, receipt_date, "
             "created_at, created_by, is_deleted) "
-            "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)",
-            e.id, e.eNcf, e.rncEmisor, e.rncComprador, e.trackId, e.state, e.totalAmount,
-            e.itbisAmount, e.securityCode, e.xmlContent, e.receiptDate, e.createdAt, by,
-            e.isDeleted);
+            "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)",
+            e.id, e.eNcf, e.rncEmisor, e.rncComprador, e.tenantId, e.sourceTxnId,
+            e.documentKind, e.ncf, e.trackId, e.state, e.totalAmount, e.itbisAmount,
+            e.securityCode, e.xmlContent, e.signedXmlContent, e.dgiiResponseXml, e.receiptDate,
+            e.createdAt, by, e.isDeleted);
     });
 }
 
@@ -68,11 +70,14 @@ void EcfDocumentRepository::update(const EcfDocument& document) {
     db_->stage([e, at, by](pqxx::work& w) {
         w.exec_params(
             "UPDATE ecf_documents SET e_ncf = $2, rnc_emisor = $3, rnc_comprador = $4, "
-            "track_id = $5, state = $6, total_amount = $7, itbis_amount = $8, "
-            "security_code = $9, xml_content = $10, receipt_date = $11, "
-            "updated_at = $12, updated_by = $13 WHERE id = $1",
-            e.id, e.eNcf, e.rncEmisor, e.rncComprador, e.trackId, e.state, e.totalAmount,
-            e.itbisAmount, e.securityCode, e.xmlContent, e.receiptDate, at, by);
+            "tenant_id = $5, source_txn_id = $6, document_kind = $7, ncf = $8, track_id = $9, "
+            "state = $10, total_amount = $11, itbis_amount = $12, security_code = $13, "
+            "xml_content = $14, signed_xml_content = $15, dgii_response_xml = $16, "
+            "receipt_date = $17, updated_at = $18, updated_by = $19 WHERE id = $1",
+            e.id, e.eNcf, e.rncEmisor, e.rncComprador, e.tenantId, e.sourceTxnId,
+            e.documentKind, e.ncf, e.trackId, e.state, e.totalAmount, e.itbisAmount,
+            e.securityCode, e.xmlContent, e.signedXmlContent, e.dgiiResponseXml, e.receiptDate,
+            at, by);
     });
 }
 

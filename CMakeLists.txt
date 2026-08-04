@@ -35,12 +35,16 @@ add_library(ecfdgii_core STATIC
     src/Domain/Entities/ResponseModels.h
     src/Domain/Entities/Rfce.h
     src/Domain/Entities/User.h
+    src/Domain/Entities/EcfSequence.h
+    src/Domain/Entities/EcfIdempotencyRecord.h
     src/Domain/Exceptions/EcfException.h
     src/Domain/Interfaces/ICacheService.h
     src/Domain/Interfaces/ICustomerRepository.h
     src/Domain/Interfaces/IEcfClient.h
     src/Domain/Interfaces/IEcfDocumentRepository.h
     src/Domain/Interfaces/IEcfSequenceProvider.h
+    src/Domain/Interfaces/IEcfSequenceManager.h
+    src/Domain/Interfaces/IIdempotencyStore.h
     src/Domain/Interfaces/IEcfTransport.h
     src/Domain/Interfaces/IEcfXmlSerializer.h
     src/Domain/Interfaces/ISecurity.h
@@ -59,6 +63,7 @@ add_library(ecfdgii_core STATIC
     src/Application/Customers/CustomerHandlers.cpp
     src/Application/Customers/CustomerHandlers.h
     src/Application/Ecf/EcfDtos.h
+    src/Application/Ecf/CanonicalDocumentDto.h
     src/Application/Ecf/EcfHandlers.cpp
     src/Application/Ecf/EcfHandlers.h
     src/Application/Services/EcfValidator.cpp
@@ -86,6 +91,10 @@ add_library(ecfdgii_core STATIC
     src/Infrastructure/Persistence/DbInitializer.h
     src/Infrastructure/Persistence/MemorySequenceProvider.cpp
     src/Infrastructure/Persistence/MemorySequenceProvider.h
+    src/Infrastructure/Persistence/EcfSequenceManager.cpp
+    src/Infrastructure/Persistence/EcfSequenceManager.h
+    src/Infrastructure/Persistence/DbIdempotencyStore.cpp
+    src/Infrastructure/Persistence/DbIdempotencyStore.h
     src/Infrastructure/Persistence/Repositories/CustomerRepository.cpp
     src/Infrastructure/Persistence/Repositories/CustomerRepository.h
     src/Infrastructure/Persistence/Repositories/EcfDocumentRepository.cpp
@@ -103,6 +112,8 @@ add_library(ecfdgii_core STATIC
     src/Infrastructure/Security/PasswordHasher.h
     src/Infrastructure/Security/TokenService.cpp
     src/Infrastructure/Security/TokenService.h
+    src/Infrastructure/Security/CanonicalRequestHelper.cpp
+    src/Infrastructure/Security/CanonicalRequestHelper.h
     src/Infrastructure/Serialization/EcfXmlSerializer.cpp
     src/Infrastructure/Serialization/EcfXmlSerializer.h
 )
@@ -136,10 +147,17 @@ add_executable(ecfdgii_api
     src/Api/Controllers/CustomersController.h
     src/Api/Controllers/EcfController.cpp
     src/Api/Controllers/EcfController.h
+    src/Api/Controllers/DocumentsController.cpp
+    src/Api/Controllers/DocumentsController.h
     src/Api/Filters/AdminRoleFilter.cpp
     src/Api/Filters/AdminRoleFilter.h
     src/Api/Filters/JwtAuthFilter.cpp
     src/Api/Filters/JwtAuthFilter.h
+    src/Api/Filters/UserOrWorkerFilter.cpp
+    src/Api/Filters/UserOrWorkerFilter.h
+    src/Api/Security/NonceCache.cpp
+    src/Api/Security/NonceCache.h
+    src/Api/Security/IdempotencyHandler.h
     src/Api/JsonMapping.cpp
     src/Api/JsonMapping.h
     src/Api/Services/CurrentUserService.h

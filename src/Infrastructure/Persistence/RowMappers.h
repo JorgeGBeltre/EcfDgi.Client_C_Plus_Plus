@@ -15,6 +15,8 @@
 #include "Domain/Entities/Customer.h"
 #include "Domain/Entities/EcfDocument.h"
 #include "Domain/Entities/User.h"
+#include "Domain/Entities/EcfSequence.h"
+#include "Domain/Entities/EcfIdempotencyRecord.h"
 
 namespace ecf::infra {
 
@@ -69,14 +71,52 @@ inline domain::EcfDocument mapEcfDocument(const Row& r) {
     d.eNcf = r["e_ncf"].template as<std::string>();
     d.rncEmisor = r["rnc_emisor"].template as<std::string>();
     d.rncComprador = optStr(r["rnc_comprador"]);
+    d.tenantId = r["tenant_id"].template as<std::string>();
+    d.sourceTxnId = r["source_txn_id"].template as<std::string>();
+    d.documentKind = r["document_kind"].template as<std::string>();
+    d.ncf = optStr(r["ncf"]);
     d.trackId = optStr(r["track_id"]);
     d.state = r["state"].template as<std::string>();
     d.totalAmount = r["total_amount"].template as<double>();
     d.itbisAmount = r["itbis_amount"].template as<double>();
     d.securityCode = optStr(r["security_code"]);
     d.xmlContent = r["xml_content"].template as<std::string>();
+    d.signedXmlContent = optStr(r["signed_xml_content"]);
+    d.dgiiResponseXml = optStr(r["dgii_response_xml"]);
     d.receiptDate = optStr(r["receipt_date"]);
     return d;
+}
+
+template <class Row>
+inline domain::EcfSequence mapEcfSequence(const Row& r) {
+    domain::EcfSequence s;
+    s.id = r["id"].template as<int>();
+    s.tenantId = r["tenant_id"].template as<std::string>();
+    s.tipoComprobante = r["tipo_comprobante"].template as<std::string>();
+    s.prefix = r["prefix"].template as<std::string>();
+    s.rangoDesde = r["rango_desde"].template as<long long>();
+    s.rangoHasta = r["rango_hasta"].template as<long long>();
+    s.secuenciaActual = r["secuencia_actual"].template as<long long>();
+    s.fechaVencimiento = optStr(r["fecha_vencimiento"]);
+    s.isActive = r["is_active"].template as<bool>();
+    s.updatedAt = r["updated_at"].template as<std::string>();
+    return s;
+}
+
+template <class Row>
+inline domain::EcfIdempotencyRecord mapEcfIdempotencyRecord(const Row& r) {
+    domain::EcfIdempotencyRecord rec;
+    rec.key = r["key"].template as<std::string>();
+    rec.createdByWorkerKeyId = r["created_by_worker_key_id"].template as<std::string>();
+    rec.payloadHash = r["payload_hash"].template as<std::string>();
+    rec.status = domain::idempotencyStatusFromString(r["status"].template as<std::string>());
+    rec.statusCode = r["status_code"].template as<int>();
+    rec.contentType = r["content_type"].template as<std::string>();
+    rec.responseBody = r["response_body"].template as<std::string>();
+    rec.createdAt = r["created_at"].template as<std::string>();
+    rec.updatedAt = optStr(r["updated_at"]);
+    rec.expiresAt = r["expires_at"].template as<std::string>();
+    return rec;
 }
 
 // Common SELECT column lists (timestamps cast to text for stable ISO strings).
@@ -91,10 +131,18 @@ inline const char* customerColumns() {
            "deleted_at::text, deleted_by, is_deleted";
 }
 inline const char* ecfDocumentColumns() {
-    return "id::text, e_ncf, rnc_emisor, rnc_comprador, track_id, state, "
-           "total_amount, itbis_amount, security_code, xml_content, "
+    return "id::text, e_ncf, rnc_emisor, rnc_comprador, tenant_id, source_txn_id, document_kind, ncf, track_id, state, "
+           "total_amount, itbis_amount, security_code, xml_content, signed_xml_content, dgii_response_xml, "
            "receipt_date::text, created_at::text, created_by, updated_at::text, "
            "updated_by, deleted_at::text, deleted_by, is_deleted";
+}
+inline const char* ecfSequenceColumns() {
+    return "id, tenant_id, tipo_comprobante, prefix, rango_desde, rango_hasta, "
+           "secuencia_actual, fecha_vencimiento::text, is_active, updated_at::text";
+}
+inline const char* ecfIdempotencyColumns() {
+    return "key, created_by_worker_key_id, payload_hash, status, status_code, "
+           "content_type, response_body, created_at::text, updated_at::text, expires_at::text";
 }
 
 }  // namespace ecf::infra

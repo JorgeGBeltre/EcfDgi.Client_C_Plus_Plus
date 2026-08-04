@@ -10,6 +10,8 @@
 #include "Infrastructure/Security/PasswordHasher.h"
 #include "Infrastructure/Security/TokenService.h"
 #include "Infrastructure/Serialization/EcfXmlSerializer.h"
+#include "Infrastructure/Persistence/EcfSequenceManager.h"
+#include "Infrastructure/Persistence/DbIdempotencyStore.h"
 
 namespace ecf::api {
 
@@ -24,6 +26,9 @@ void AppServices::configure(AppConfig config) {
     tokenService_ = std::make_shared<infra::TokenService>(config_.jwt);
     serializer_ = std::make_shared<infra::EcfXmlSerializer>();
     cacheService_ = std::make_shared<infra::RedisCacheService>(config_.redisConnectionString);
+    nonceCache_ = std::make_shared<NonceCache>();
+    sequenceManager_ = std::make_shared<infra::EcfSequenceManager>(config_.connectionString);
+    idempotencyStore_ = std::make_shared<infra::DbIdempotencyStore>(config_.connectionString);
 }
 
 std::shared_ptr<domain::IEcfClient> AppServices::ecfClient() {

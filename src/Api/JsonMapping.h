@@ -12,6 +12,7 @@
 #include "Domain/Entities/ResponseModels.h"
 #include "Domain/Entities/Rfce.h"
 #include "Domain/Interfaces/ISecurity.h"
+#include "Application/Ecf/CanonicalDocumentDto.h"
 
 namespace ecf::api::mapping {
 
@@ -22,6 +23,7 @@ Json::Value toJson(const app::AuthResponseDto& d);
 Json::Value toJson(const app::CustomerDto& d);
 
 domain::Rfce rfceFromJson(const Json::Value& j);
+app::CanonicalDocumentDto canonicalDocumentFromJson(const Json::Value& j);
 
 std::shared_ptr<domain::ICurrentUserService> currentUserFrom(
     const drogon::HttpRequestPtr& req);

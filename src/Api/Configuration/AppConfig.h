@@ -20,6 +20,11 @@ struct AppConfig {
     infra::JwtSettings jwt;
     domain::EcfClientOptions ecfOptions;
 
+    std::string workerKeyId = "default-worker-id";
+    std::string workerSecretKey = "WorkerSecretKey";
+    std::string workerTenantId = "default-tenant";
+    std::string workerAllowedRncs = "*";
+
     // Loads from a JSON file; throws std::runtime_error on failure.
     static AppConfig load(const std::string& path);
 };
