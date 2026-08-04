@@ -11,6 +11,7 @@
 #include "Infrastructure/Persistence/RowMappers.h"
 
 using namespace drogon;
+using namespace ecf::infra;
 
 namespace ecf::api {
 
@@ -172,7 +173,7 @@ void DocumentsController::submit(const HttpRequestPtr& req,
 
                 std::string fileName = doc.rncEmisor + doc.eNcf + ".xml";
                 auto response = services.ecfClient()->sendEcf(doc.signedXmlContent.value(), fileName);
-                if (response.trackId && !response.trackId->empty()) {
+                if (!response.trackId.empty()) {
                     doc.trackId = response.trackId;
                     doc.state = "SentToDgii";
                 } else {

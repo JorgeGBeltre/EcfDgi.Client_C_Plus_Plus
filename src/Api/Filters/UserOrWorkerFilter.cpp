@@ -126,7 +126,7 @@ void UserOrWorkerFilter::doFilter(const HttpRequestPtr& req, FilterCallback&& fc
         }
 
         // Verify Anti-Replay Nonce
-        auto& nonceCache = AppServices::instance().nonceCache();
+        auto nonceCache = AppServices::instance().nonceCache();
         if (!nonceCache->tryAddNonce(keyId, nonce, 300.0)) {
             fcb(unauthorized("Replayed nonce detected. Code: nonce_replayed."));
             return;
