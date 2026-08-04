@@ -18,6 +18,9 @@
 #include "Domain/Interfaces/ISecurity.h"
 #include "Domain/Interfaces/IUnitOfWork.h"
 #include "Domain/Interfaces/IUserRepository.h"
+#include "Domain/Interfaces/IEcfSequenceManager.h"
+#include "Domain/Interfaces/IIdempotencyStore.h"
+#include "Api/Security/NonceCache.h"
 #include "Infrastructure/Persistence/DbContext.h"
 
 namespace ecf::api {
@@ -42,6 +45,9 @@ public:
     std::shared_ptr<domain::ITokenService> tokenService() const { return tokenService_; }
     std::shared_ptr<domain::IEcfXmlSerializer> serializer() const { return serializer_; }
     std::shared_ptr<domain::ICacheService> cacheService() const { return cacheService_; }
+    std::shared_ptr<NonceCache> nonceCache() const { return nonceCache_; }
+    std::shared_ptr<domain::IEcfSequenceManager> sequenceManager() const { return sequenceManager_; }
+    std::shared_ptr<domain::IIdempotencyStore> idempotencyStore() const { return idempotencyStore_; }
     std::shared_ptr<domain::IEcfClient> ecfClient();  // lazily built (needs certificate)
 
     // Per-request scope (new DB connection + repositories bound to currentUser).
@@ -53,6 +59,9 @@ private:
     std::shared_ptr<domain::ITokenService> tokenService_;
     std::shared_ptr<domain::IEcfXmlSerializer> serializer_;
     std::shared_ptr<domain::ICacheService> cacheService_;
+    std::shared_ptr<NonceCache> nonceCache_;
+    std::shared_ptr<domain::IEcfSequenceManager> sequenceManager_;
+    std::shared_ptr<domain::IIdempotencyStore> idempotencyStore_;
 
     std::shared_ptr<domain::IEcfClient> ecfClient_;
     std::once_flag ecfClientFlag_;

@@ -77,6 +77,21 @@ AppConfig AppConfig::load(const std::string& path) {
             o.autoRetryOnReuseableSequence = s["AutoRetryOnReuseableSequence"].get<bool>();
     }
 
+    // Parse Worker configurations
+    cfg.workerKeyId = getStr(j, "WorkerKeyId", cfg.workerKeyId);
+    cfg.workerSecretKey = getStr(j, "WorkerSecretKey", cfg.workerSecretKey);
+    if (j.contains("WorkerApiKey")) {
+        cfg.workerSecretKey = getStr(j, "WorkerApiKey");
+    }
+    cfg.workerTenantId = getStr(j, "WorkerTenantId", cfg.workerTenantId);
+    cfg.workerAllowedRncs = getStr(j, "WorkerAllowedRncs", cfg.workerAllowedRncs);
+
+    // Support env overrides
+    if (const char* envKeyId = std::getenv("WORKER_KEY_ID")) cfg.workerKeyId = envKeyId;
+    if (const char* envSecret = std::getenv("WORKER_SECRET_KEY")) cfg.workerSecretKey = envSecret;
+    if (const char* envTenant = std::getenv("WORKER_TENANT_ID")) cfg.workerTenantId = envTenant;
+    if (const char* envRncs = std::getenv("WORKER_ALLOWED_RNCS")) cfg.workerAllowedRncs = envRncs;
+
     return cfg;
 }
 
