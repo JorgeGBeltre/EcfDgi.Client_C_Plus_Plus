@@ -17,6 +17,7 @@ struct CanonicalHeaderDto {
     std::string razonSocialEmisor;
     std::string rncComprador;
     std::string razonSocialComprador;
+    std::optional<std::string> correoComprador;
     // ISO 8601 (yyyy-MM-dd) or DGII format (dd-MM-yyyy)
     std::string fechaEmision;
 };

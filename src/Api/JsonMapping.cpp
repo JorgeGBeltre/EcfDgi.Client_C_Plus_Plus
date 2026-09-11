@@ -132,6 +132,7 @@ Json::Value toJson(const app::CanonicalDocumentDto& d) {
     h["razonSocialEmisor"] = d.header.razonSocialEmisor;
     h["rncComprador"] = d.header.rncComprador;
     h["razonSocialComprador"] = d.header.razonSocialComprador;
+    if (d.header.correoComprador.has_value()) h["correoComprador"] = *d.header.correoComprador;
     h["fechaEmision"] = d.header.fechaEmision;
     j["header"] = h;
 
@@ -273,6 +274,7 @@ app::CanonicalDocumentDto canonicalDocumentFromJson(const Json::Value& j) {
         d.header.razonSocialEmisor = jstr(h, "razonSocialEmisor");
         d.header.rncComprador = jstr(h, "rncComprador");
         d.header.razonSocialComprador = jstr(h, "razonSocialComprador");
+        d.header.correoComprador = optStr(h, "correoComprador");
         d.header.fechaEmision = jstr(h, "fechaEmision");
     }
 

@@ -238,11 +238,15 @@ Instead of forcing internal billing software to generate complex DGII XML, the A
 - Root element `<ECF>` with child `<Encabezado>`.
 - `<IdDoc>`: Contains `<TipoeCF>`, `<eNCF>`, `<FechaVencimientoSecuencia>`, `<IndicadorMontoNeto>`, `<TipoIngresos>`, `<TipoPago>`.
 - `<Emisor>`: Contains `<RNCEmisor>`, `<RazonSocialEmisor>`, `<FechaEmision>`, `<DireccionEmisor>`, etc.
-- `<Comprador>`: Contains `<RNCComprador>`, `<RazonSocialComprador>`, etc.
+- `<Comprador>`: Contains `<RNCComprador>`, `<RazonSocialComprador>`, and optional `<CorreoComprador>` (validated against standard email regex `^\w+([-+.]\w+)*@\w+([-.]\w+)*\.\w+([-.]\w+)*$`, trimmed, truncated to 80 characters max, and emitted for all types except Tipo 47 Pagos al Exterior).
 - `<Totales>`: Contains `<MontoGravadoTotal>`, `<MontoGravadoI1>`, `<TotalITBIS>`, `<TotalITBIS1>`, `<MontoTotal>`.
-- `<DetallesItems>`: Contains `<Item>` with line number, item name, quantity, unit price, ITBIS indicator, item amount.
+- `<DetallesItems>`: Processed via `normalizeCanonicalLines()`:
+  - **Discount Absorption**: Absorbs negative ERP lines (e.g. QuickBooks line discounts) into the preceding item's `DescuentoMonto`.
+  - **Zero-Amount Line Suppression**: Automatically discards lines with `amount == 0` or `unitPrice == 0` (e.g. ERP informational comments, "Total Bultos", "P-142501", subtotal text) to guarantee strict DGII validation compliance.
+  - **Item Name & Description**: Truncates `NombreItem` to 80 characters and places any remainder up to 1000 characters into `<DescripcionItem>`.
 - `<InformacionReferencia>`: Appended for credit notes (34) and debit notes (33) referencing the original eNCF.
 - `<Retencion>`: Appended for purchase bills (41) and foreign payments (47) with tax withholding amounts.
+- **Immediate Signed XML in Responses**: All `202 Accepted` response payloads from `POST /api/documents` return `signedXml` along with `documentId`, `eNcf`, `state`, `trackId`, and `securityCode`, allowing upstream callers and ERP connectors to instantly archive the certified XML without an additional roundtrip.
 
 ### 4. XMLDSig Digital Signature & In-Memory Fallback
 - `EcfXmlSigner` uses `xmlsec1` and OpenSSL:
@@ -387,6 +391,9 @@ Every endpoint and service interface from the reference C# implementation is ful
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **ERP Documents** | `/api/documents` | `POST` | Bearer / Worker HMAC | `CanonicalDocumentDto` (JSON) | `DocumentSubmissionResponse` | Canonical invoice ingestion, validation of all 10 e-CF types, sequential allocation, signing, XSD gate, and DGII dispatch. |
 | **ERP Documents** | `/api/documents/by-source/{txnId}` | `GET` | Bearer / Worker HMAC | None | `DocumentSummaryDto` | Queries invoice state, eNCF, and security code by ERP source transaction ID. |
+| **ERP Documents** | `/api/documents/by-source/{txnId}/xml` | `GET` | Bearer / Worker HMAC | None | XML Attachment | Downloads signed XML e-CF document file by ERP source transaction ID. |
+| **ERP Documents** | `/api/documents/{id}` | `GET` | Bearer / Worker HMAC | None | `DocumentSummaryDto` | Queries document state, eNCF, and security code by document UUID. |
+| **ERP Documents** | `/api/documents/{id}/xml` | `GET` | Bearer / Worker HMAC | None | XML Attachment | Downloads signed XML e-CF document file by document UUID. |
 | **Direct e-CF** | `/api/ecf/send` | `POST` | Bearer / Worker HMAC | `SendEcfCommand` (JSON) | `EcfRecepcionResponse` | Submits pre-built signed e-CF XML directly to DGII REST services. |
 | **Direct e-CF** | `/api/ecf/send-rfce` | `POST` | Bearer / Worker HMAC | `SendRfceCommand` (JSON) | `RfceRecepcionResponse` | Submits Consumption Summary (RFCE) to DGII. |
 | **Direct e-CF** | `/api/ecf/status` | `GET` | Bearer / Worker HMAC | Query Params (`rncEmisor`, `eNcf`, `trackId`) | `ConsultaEstadoResponse` | Queries DGII TrackId and eNCF processing status. |
@@ -1088,6 +1095,9 @@ All endpoints except `Auth`, `/health`, `/scalar`, `/swagger`, and `/openapi/v1.
 | `/api/customers/{id}` | `DELETE` | Admin Role | None | Soft-deletes a customer |
 | `/api/documents` | `POST` | Bearer or HMAC | `CanonicalDocumentDto` | Ingests canonical ERP invoice, compiles XML, signs, checks XSD, and dispatches to DGII |
 | `/api/documents/by-source/{txnId}` | `GET` | Bearer or HMAC | None | Queries document state and eNCF by ERP source transaction ID |
+| `/api/documents/by-source/{txnId}/xml` | `GET` | Bearer or HMAC | None | Downloads signed XML file attachment by ERP source transaction ID |
+| `/api/documents/{id}` | `GET` | Bearer or HMAC | None | Queries document state and details by document UUID |
+| `/api/documents/{id}/xml` | `GET` | Bearer or HMAC | None | Downloads signed XML file attachment by document UUID |
 | `/api/ecf/send` | `POST` | Bearer or HMAC | `SendEcfCommand` | Submits pre-built signed XML e-CF document |
 | `/api/ecf/send-rfce` | `POST` | Bearer or HMAC | `SendRfceCommand` | Submits Consumption Summary (RFCE) |
 | `/api/ecf/status` | `GET` | Bearer or HMAC | Query Parameters | Queries current DGII processing status |

@@ -174,6 +174,89 @@ int main() {
         "responses": { "200": { "description": "Document details" } }
       }
     },
+    "/api/documents/by-source/{txnId}/xml": {
+      "get": {
+        "summary": "Download signed XML by ERP source transaction ID",
+        "security": [{ "BearerAuth": [] }],
+        "responses": { "200": { "description": "Raw signed XML file attachment" } }
+      }
+    },
+    "/api/documents/{id}": {
+      "get": {
+        "summary": "Query document by UUID",
+        "security": [{ "BearerAuth": [] }],
+        "responses": { "200": { "description": "Document details" } }
+      }
+    },
+    "/api/documents/{id}/xml": {
+      "get": {
+        "summary": "Download signed XML by document UUID",
+        "security": [{ "BearerAuth": [] }],
+        "responses": { "200": { "description": "Raw signed XML file attachment" } }
+      }
+    },
+    "/api/ecf/send": {
+      "post": {
+        "summary": "Direct e-CF XML transmission to DGII REST services",
+        "security": [{ "BearerAuth": [] }],
+        "responses": { "200": { "description": "DGII reception response" } }
+      }
+    },
+    "/api/ecf/send-rfce": {
+      "post": {
+        "summary": "Submit Consumption Summary (RFCE) to DGII",
+        "security": [{ "BearerAuth": [] }],
+        "responses": { "200": { "description": "RFCE reception response" } }
+      }
+    },
+    "/api/ecf/status": {
+      "get": {
+        "summary": "Query DGII processing status",
+        "security": [{ "BearerAuth": [] }],
+        "responses": { "200": { "description": "Status response" } }
+      }
+    },
+    "/api/customers": {
+      "get": {
+        "summary": "List customers",
+        "security": [{ "BearerAuth": [] }],
+        "responses": { "200": { "description": "Customer list" } }
+      },
+      "post": {
+        "summary": "Create customer",
+        "security": [{ "BearerAuth": [] }],
+        "responses": { "201": { "description": "Customer created" } }
+      }
+    },
+    "/api/customers/{id}": {
+      "get": {
+        "summary": "Get customer by ID",
+        "security": [{ "BearerAuth": [] }],
+        "responses": { "200": { "description": "Customer details" } }
+      },
+      "put": {
+        "summary": "Update customer",
+        "security": [{ "BearerAuth": [] }],
+        "responses": { "200": { "description": "Customer updated" } }
+      },
+      "delete": {
+        "summary": "Delete customer",
+        "security": [{ "BearerAuth": [] }],
+        "responses": { "204": { "description": "Customer deleted" } }
+      }
+    },
+    "/api/auth/register": {
+      "post": {
+        "summary": "Register a new user",
+        "responses": { "200": { "description": "User registered" } }
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "summary": "Authenticate user and issue JWT token",
+        "responses": { "200": { "description": "Authentication token" } }
+      }
+    },
     "/fe/recepcion/api/ecf": {
       "post": {
         "summary": "B2B reception of e-CF XML and generation of signed Acuse de Recibo (ARECF)",
