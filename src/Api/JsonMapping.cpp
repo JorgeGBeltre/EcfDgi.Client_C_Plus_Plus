@@ -28,6 +28,10 @@ std::optional<double> optDbl(const Json::Value& j, const char* key) {
     if (has(j, key) && j[key].isNumeric()) return j[key].asDouble();
     return std::nullopt;
 }
+std::optional<int> optInt(const Json::Value& j, const char* key) {
+    if (has(j, key) && j[key].isNumeric()) return j[key].asInt();
+    return std::nullopt;
+}
 
 }  // namespace
 
@@ -72,11 +76,33 @@ Json::Value toJson(const ConsultaEstadoResponse& r) {
     return v;
 }
 
+Json::Value toJson(const AprobacionComercialResponse& r) {
+    Json::Value v;
+    v["codigo"] = r.codigo;
+    v["estado"] = r.estado;
+    Json::Value msgs(Json::arrayValue);
+    for (const auto& m : r.mensaje) {
+        msgs.append(m);
+    }
+    v["mensaje"] = msgs;
+    return v;
+}
+
+Json::Value toJson(const DirectorioContribuyente& d) {
+    Json::Value v;
+    v["nombre"] = d.nombre;
+    v["rnc"] = d.rnc;
+    v["urlRecepcion"] = d.urlRecepcion;
+    v["urlAceptacion"] = d.urlAceptacion;
+    v["urlOpcional"] = d.urlOpcional;
+    return v;
+}
+
 Json::Value toJson(const app::AuthResponseDto& d) {
     Json::Value v;
-    v["username"] = d.username;
     v["token"] = d.token;
-    v["role"] = d.role;
+    v["userId"] = d.userId;
+    v["username"] = d.username;
     return v;
 }
 
@@ -87,6 +113,79 @@ Json::Value toJson(const app::CustomerDto& d) {
     v["email"] = d.email;
     v["rnc"] = d.rnc;
     return v;
+}
+
+Json::Value toJson(const app::CanonicalDocumentDto& d) {
+    Json::Value j;
+    if (d.ncf.has_value()) j["ncf"] = *d.ncf;
+    j["documentKind"] = d.documentKind;
+    j["tipoComprobante"] = d.tipoComprobante;
+
+    Json::Value sr;
+    sr["provider"] = d.sourceReference.provider;
+    sr["txnId"] = d.sourceReference.txnId;
+    sr["editSequence"] = d.sourceReference.editSequence;
+    j["sourceReference"] = sr;
+
+    Json::Value h;
+    h["rncEmisor"] = d.header.rncEmisor;
+    h["razonSocialEmisor"] = d.header.razonSocialEmisor;
+    h["rncComprador"] = d.header.rncComprador;
+    h["razonSocialComprador"] = d.header.razonSocialComprador;
+    h["fechaEmision"] = d.header.fechaEmision;
+    j["header"] = h;
+
+    Json::Value lines(Json::arrayValue);
+    for (const auto& l : d.lines) {
+        Json::Value line;
+        line["lineNumber"] = l.lineNumber;
+        line["itemName"] = l.itemName;
+        line["quantity"] = l.quantity;
+        line["unitPrice"] = l.unitPrice;
+        line["amount"] = l.amount;
+        lines.append(line);
+    }
+    j["lines"] = lines;
+
+    Json::Value t;
+    t["montoSubtotal"] = d.totals.montoSubtotal;
+    if (d.totals.montoGravadoTotal.has_value()) t["montoGravadoTotal"] = *d.totals.montoGravadoTotal;
+    if (d.totals.montoExento.has_value()) t["montoExento"] = *d.totals.montoExento;
+    if (!d.totals.taxBuckets.empty()) {
+        Json::Value buckets(Json::arrayValue);
+        for (const auto& b : d.totals.taxBuckets) {
+            Json::Value bv;
+            bv["rate"] = b.rate;
+            bv["base"] = b.base;
+            bv["tax"] = b.tax;
+            buckets.append(bv);
+        }
+        t["taxBuckets"] = buckets;
+    }
+    t["montoItbis"] = d.totals.montoItbis;
+    t["montoTotal"] = d.totals.montoTotal;
+    j["totals"] = t;
+
+    Json::Value r;
+    r["correctsTxnId"] = d.references.correctsTxnId;
+    r["correctsENcf"] = d.references.correctsENcf;
+    if (d.references.codigoModificacion.has_value()) r["codigoModificacion"] = *d.references.codigoModificacion;
+    if (d.references.razonModificacion.has_value()) r["razonModificacion"] = *d.references.razonModificacion;
+    if (d.references.fechaNcfModificado.has_value()) r["fechaNcfModificado"] = *d.references.fechaNcfModificado;
+    if (d.references.rncOtroContribuyente.has_value()) r["rncOtroContribuyente"] = *d.references.rncOtroContribuyente;
+    j["references"] = r;
+
+    if (d.retention.has_value()) {
+        Json::Value ret;
+        ret["indicadorAgenteRetencionoPercepcion"] = d.retention->indicadorAgenteRetencionoPercepcion;
+        ret["montoItbisRetenido"] = d.retention->montoItbisRetenido;
+        if (d.retention->montoIsrRetenido.has_value()) {
+            ret["montoIsrRetenido"] = *d.retention->montoIsrRetenido;
+        }
+        j["retention"] = ret;
+    }
+
+    return j;
 }
 
 Rfce rfceFromJson(const Json::Value& j) {
@@ -192,6 +291,17 @@ app::CanonicalDocumentDto canonicalDocumentFromJson(const Json::Value& j) {
     if (has(j, "totals")) {
         const auto& t = j["totals"];
         d.totals.montoSubtotal = jdbl(t, "montoSubtotal");
+        d.totals.montoGravadoTotal = optDbl(t, "montoGravadoTotal");
+        d.totals.montoExento = optDbl(t, "montoExento");
+        if (t.isMember("taxBuckets") && t["taxBuckets"].isArray()) {
+            for (const auto& tb : t["taxBuckets"]) {
+                app::CanonicalTaxBucketDto b;
+                b.rate = jint(tb, "rate", 18);
+                b.base = jdbl(tb, "base");
+                b.tax = jdbl(tb, "tax");
+                d.totals.taxBuckets.push_back(b);
+            }
+        }
         d.totals.montoItbis = jdbl(t, "montoItbis");
         d.totals.montoTotal = jdbl(t, "montoTotal");
     }
@@ -200,6 +310,19 @@ app::CanonicalDocumentDto canonicalDocumentFromJson(const Json::Value& j) {
         const auto& r = j["references"];
         d.references.correctsTxnId = jstr(r, "correctsTxnId");
         d.references.correctsENcf = jstr(r, "correctsENcf");
+        d.references.codigoModificacion = optInt(r, "codigoModificacion");
+        d.references.razonModificacion = optStr(r, "razonModificacion");
+        d.references.fechaNcfModificado = optStr(r, "fechaNcfModificado");
+        d.references.rncOtroContribuyente = optStr(r, "rncOtroContribuyente");
+    }
+
+    if (has(j, "retention")) {
+        const auto& ret = j["retention"];
+        app::CanonicalRetentionDto retention;
+        retention.indicadorAgenteRetencionoPercepcion = jint(ret, "indicadorAgenteRetencionoPercepcion", 1);
+        retention.montoItbisRetenido = jdbl(ret, "montoItbisRetenido");
+        retention.montoIsrRetenido = optDbl(ret, "montoIsrRetenido");
+        d.retention = retention;
     }
 
     return d;

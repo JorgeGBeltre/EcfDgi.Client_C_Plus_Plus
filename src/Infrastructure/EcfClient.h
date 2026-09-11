@@ -45,11 +45,16 @@ public:
     std::vector<domain::VentanaMantenimiento> consultarVentanasMantenimiento() override;
     std::string verificarEstadoAmbiente(domain::AmbienteEnum ambiente) override;
     domain::AnulacionResponse anularRangos(const std::string& xmlContent) override;
+    domain::AprobacionComercialResponse sendAprobacionComercial(
+        const std::string& xmlContent, const std::string& fileName) override;
+    domain::DirectorioContribuyente consultarDirectorioPorRnc(const std::string& rnc) override;
 
 private:
     domain::EcfClientOptions options_;
     std::shared_ptr<domain::IEcfTransport> transport_;
     std::shared_ptr<domain::IEcfSequenceProvider> sequenceProvider_;
+    std::shared_ptr<domain::IEcfSchemaValidator> schemaValidator_;
+    std::shared_ptr<domain::IEcfXmlSigner> signer_;
     app::EcfValidator validator_;
     EcfXmlSerializer serializer_;
 };

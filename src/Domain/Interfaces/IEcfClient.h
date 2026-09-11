@@ -33,6 +33,9 @@ public:
     virtual std::vector<VentanaMantenimiento> consultarVentanasMantenimiento() = 0;
     virtual std::string verificarEstadoAmbiente(AmbienteEnum ambiente) = 0;
     virtual AnulacionResponse anularRangos(const std::string& xmlContent) = 0;
+    virtual AprobacionComercialResponse sendAprobacionComercial(
+        const std::string& xmlContent, const std::string& fileName) = 0;
+    virtual DirectorioContribuyente consultarDirectorioPorRnc(const std::string& rnc) = 0;
 };
 
 }  // namespace ecf::domain

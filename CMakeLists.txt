@@ -47,6 +47,8 @@ add_library(ecfdgii_core STATIC
     src/Domain/Interfaces/IIdempotencyStore.h
     src/Domain/Interfaces/IEcfTransport.h
     src/Domain/Interfaces/IEcfXmlSerializer.h
+    src/Domain/Interfaces/IEcfXmlSigner.h
+    src/Domain/Interfaces/IEcfSchemaValidator.h
     src/Domain/Interfaces/ISecurity.h
     src/Domain/Interfaces/IUnitOfWork.h
     src/Domain/Interfaces/IUserRepository.h
@@ -68,6 +70,8 @@ add_library(ecfdgii_core STATIC
     src/Application/Ecf/EcfHandlers.h
     src/Application/Services/EcfValidator.cpp
     src/Application/Services/EcfValidator.h
+    src/Application/Services/EcfStatusReconciler.cpp
+    src/Application/Services/EcfStatusReconciler.h
     src/Application/Services/PollingHelper.h
 
     # Infrastructure
@@ -114,6 +118,10 @@ add_library(ecfdgii_core STATIC
     src/Infrastructure/Security/TokenService.h
     src/Infrastructure/Security/CanonicalRequestHelper.cpp
     src/Infrastructure/Security/CanonicalRequestHelper.h
+    src/Infrastructure/Serialization/EcfSchemaValidator.cpp
+    src/Infrastructure/Serialization/EcfSchemaValidator.h
+    src/Infrastructure/Serialization/EcfXsdFileNameResolver.cpp
+    src/Infrastructure/Serialization/EcfXsdFileNameResolver.h
     src/Infrastructure/Serialization/EcfXmlSerializer.cpp
     src/Infrastructure/Serialization/EcfXmlSerializer.h
 )
@@ -149,6 +157,8 @@ add_executable(ecfdgii_api
     src/Api/Controllers/EcfController.h
     src/Api/Controllers/DocumentsController.cpp
     src/Api/Controllers/DocumentsController.h
+    src/Api/Controllers/EmisorReceptorController.cpp
+    src/Api/Controllers/EmisorReceptorController.h
     src/Api/Filters/AdminRoleFilter.cpp
     src/Api/Filters/AdminRoleFilter.h
     src/Api/Filters/JwtAuthFilter.cpp
@@ -164,6 +174,10 @@ add_executable(ecfdgii_api
 )
 
 target_link_libraries(ecfdgii_api PRIVATE ecfdgii_core)
+
+# Copy XSD directory to build tree so schemas are immediately available next to binaries
+file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/Documentación Técnica (XSD)"
+     DESTINATION "${CMAKE_CURRENT_BINARY_DIR}")
 
 # Tests Subdirectory
 option(ECF_BUILD_TESTS "Build tests" ON)

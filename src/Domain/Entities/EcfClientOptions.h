@@ -21,6 +21,19 @@ struct EcfClientOptions {
     std::optional<std::string> certificatePath;
     std::optional<std::string> certificatePassword;
     bool autoRetryOnReuseableSequence = true;
+    std::optional<std::string> xsdDirectoryPath;
+    bool validateSchemasLocal = true;
+};
+
+struct EcfEmisorOptions {
+    std::string rnc;
+    std::string razonSocial;
+};
+
+struct EcfStatusPollingOptions {
+    int pollingIntervalMinutes = 15;
+    int minDocumentAgeMinutes = 2;
+    int maxPollingWindowHours = 72;
 };
 
 struct PollingOptions {

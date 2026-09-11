@@ -9,6 +9,7 @@
 #include "Infrastructure/Dgii/EcfTokenManager.h"
 #include "Infrastructure/Persistence/MemorySequenceProvider.h"
 #include "Infrastructure/Security/EcfXmlSigner.h"
+#include "Infrastructure/Serialization/EcfSchemaValidator.h"
 
 namespace ecf::infra {
 
@@ -31,20 +32,31 @@ AmbienteEnum toAmbiente(EcfEnvironment env) {
 
 EcfClient::EcfClient(EcfClientOptions options,
                      std::shared_ptr<IEcfSequenceProvider> sequenceProvider,
-                     std::shared_ptr<ICacheService> cacheService)
+                     std::shared_ptr<ICacheService> cacheService,
+                     std::shared_ptr<IEcfSchemaValidator> schemaValidator)
     : options_(std::move(options)),
       sequenceProvider_(sequenceProvider ? std::move(sequenceProvider)
-                                         : std::make_shared<MemorySequenceProvider>()) {
+                                         : std::make_shared<MemorySequenceProvider>()),
+      schemaValidator_(std::move(schemaValidator)) {
     if (options_.mode != IntegrationMode::DgiiDirect)
         throw std::runtime_error("Only DgiiDirect mode is supported.");
 
     if (!options_.rncEmisor || options_.rncEmisor->empty())
         throw std::runtime_error("RncEmisor is required for Direct mode.");
-    if (!options_.certificatePath || options_.certificatePath->empty())
-        throw std::runtime_error("CertificatePath is required for Direct mode.");
 
-    auto signer = std::make_shared<EcfXmlSigner>(
-        *options_.certificatePath, options_.certificatePassword.value_or(""));
+    if (!schemaValidator_ && options_.validateSchemasLocal) {
+        schemaValidator_ = std::make_shared<EcfSchemaValidator>(options_.xsdDirectoryPath);
+    }
+
+    std::shared_ptr<IEcfXmlSigner> signer;
+    if (options_.certificatePath && !options_.certificatePath->empty()) {
+        signer = std::make_shared<EcfXmlSigner>(
+            *options_.certificatePath, options_.certificatePassword.value_or(""));
+    } else {
+        // Fallback signer so the client can initialize without throwing when testing or awaiting certificate
+        signer = std::make_shared<EcfXmlSigner>();
+    }
+
     auto envConfig = EcfEnvironmentConfig::getConfig(toAmbiente(options_.environment));
     auto tokenManager =
         std::make_shared<EcfTokenManager>(signer, envConfig, *options_.rncEmisor, cacheService);
@@ -54,16 +66,27 @@ EcfClient::EcfClient(EcfClientOptions options,
 
 EcfClient::EcfClient(EcfClientOptions options,
                      std::shared_ptr<IEcfTransport> transport,
-                     std::shared_ptr<IEcfSequenceProvider> sequenceProvider)
+                     std::shared_ptr<IEcfSequenceProvider> sequenceProvider,
+                     std::shared_ptr<IEcfSchemaValidator> schemaValidator)
     : options_(std::move(options)),
       transport_(std::move(transport)),
       sequenceProvider_(sequenceProvider ? std::move(sequenceProvider)
-                                         : std::make_shared<MemorySequenceProvider>()) {
+                                         : std::make_shared<MemorySequenceProvider>()),
+      schemaValidator_(std::move(schemaValidator)) {
     if (!transport_) throw std::invalid_argument("transport");
+    if (!schemaValidator_ && options_.validateSchemasLocal) {
+        schemaValidator_ = std::make_shared<EcfSchemaValidator>(options_.xsdDirectoryPath);
+    }
 }
 
 EcfRecepcionResponse EcfClient::sendEcf(const std::string& xmlContent,
                                         const std::string& fileName) {
+    if (options_.validateSchemasLocal && schemaValidator_) {
+        auto result = schemaValidator_->validate(xmlContent);
+        if (!result.isValid) {
+            throw EcfValidationException(result.errors);
+        }
+    }
     return transport_->sendEcf(xmlContent, fileName);
 }
 
@@ -75,6 +98,13 @@ RfceRecepcionResponse EcfClient::sendRfce(Rfce& rfce) {
     const std::string xml = serializer_.serialize(rfce);
     const std::string fileName =
         serializer_.getFileName(rfce.encabezado.emisor.rncEmisor, rfce.encabezado.idDoc.eNcf);
+
+    if (options_.validateSchemasLocal && schemaValidator_) {
+        auto result = schemaValidator_->validate(xml);
+        if (!result.isValid) {
+            throw EcfValidationException(result.errors);
+        }
+    }
 
     auto response = transport_->sendRfce(xml, fileName);
 
@@ -112,6 +142,17 @@ RfceConsultaResponse EcfClient::consultarRfce(const std::string& rncEmisor,
     return transport_->consultarRfce(rncEmisor, eNcf, codigoSeguridad);
 }
 
+AprobacionComercialResponse EcfClient::sendAprobacionComercial(const std::string& xmlContent,
+                                                              const std::string& fileName) {
+    if (options_.validateSchemasLocal && schemaValidator_) {
+        auto result = schemaValidator_->validate(xmlContent);
+        if (!result.isValid) {
+            throw EcfValidationException(result.errors);
+        }
+    }
+    return transport_->sendAprobacionComercial(xmlContent, fileName);
+}
+
 TimbreResponse EcfClient::validarTimbreEcf(const TimbreEcfRequest& request) {
     return transport_->consultarTimbre(request);
 }
@@ -122,6 +163,18 @@ TimbreFcResponse EcfClient::validarTimbreFc(const TimbreFcRequest& request) {
 
 std::vector<DirectorioContribuyente> EcfClient::consultarDirectorio() {
     return transport_->consultarDirectorio();
+}
+
+std::optional<DirectorioContribuyente> EcfClient::consultarDirectorioPorRnc(const std::string& rnc) {
+    try {
+        auto d = transport_->consultarDirectorioPorRnc(rnc);
+        if (d.rnc.empty() && d.nombre.empty()) {
+            return std::nullopt;
+        }
+        return d;
+    } catch (...) {
+        return std::nullopt;
+    }
 }
 
 std::vector<EstatusServicio> EcfClient::consultarEstatusServicios() {
@@ -137,6 +190,12 @@ std::string EcfClient::verificarEstadoAmbiente(AmbienteEnum ambiente) {
 }
 
 AnulacionResponse EcfClient::anularRangos(const std::string& xmlContent) {
+    if (options_.validateSchemasLocal && schemaValidator_) {
+        auto result = schemaValidator_->validate(xmlContent);
+        if (!result.isValid) {
+            throw EcfValidationException(result.errors);
+        }
+    }
     return transport_->anularRangos(xmlContent);
 }
 

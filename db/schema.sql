@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS ecf_documents (
     rnc_comprador      varchar(20),
     tenant_id          varchar(100)  NOT NULL DEFAULT 'default-tenant',
     source_txn_id      varchar(100)  NOT NULL DEFAULT '',
+    edit_sequence      varchar(50)   NOT NULL DEFAULT '',
     document_kind      varchar(50)   NOT NULL DEFAULT 'Invoice',
     ncf                varchar(20),
     track_id           varchar(100),
@@ -62,6 +63,9 @@ CREATE TABLE IF NOT EXISTS ecf_documents (
     signed_xml_content text,
     dgii_response_xml  text,
     receipt_date       timestamptz,
+    sent_to_dgii_at    timestamptz,
+    last_status_check_at timestamptz,
+    status_check_attempts integer    NOT NULL DEFAULT 0,
     created_at         timestamptz   NOT NULL,
     created_by         varchar(100),
     updated_at         timestamptz,
@@ -73,8 +77,12 @@ CREATE TABLE IF NOT EXISTS ecf_documents (
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_ecf_documents_rnc_emisor_encf
     ON ecf_documents (rnc_emisor, e_ncf);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_ecf_documents_tenant_source_txn
+    ON ecf_documents (tenant_id, source_txn_id);
 CREATE INDEX IF NOT EXISTS ix_ecf_documents_track_id ON ecf_documents (track_id);
 CREATE INDEX IF NOT EXISTS ix_ecf_documents_state    ON ecf_documents (state);
+CREATE INDEX IF NOT EXISTS ix_ecf_documents_state_last_status_check_at
+    ON ecf_documents (state, last_status_check_at);
 
 -- e-CF sequences --------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS ecf_sequences (

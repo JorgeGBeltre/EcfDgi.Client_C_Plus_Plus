@@ -9,6 +9,8 @@
 #include "Infrastructure/Persistence/UnitOfWork.h"
 #include "Infrastructure/Security/PasswordHasher.h"
 #include "Infrastructure/Security/TokenService.h"
+#include "Infrastructure/Security/EcfXmlSigner.h"
+#include "Infrastructure/Serialization/EcfSchemaValidator.h"
 #include "Infrastructure/Serialization/EcfXmlSerializer.h"
 #include "Infrastructure/Persistence/EcfSequenceManager.h"
 #include "Infrastructure/Persistence/DbIdempotencyStore.h"
@@ -29,6 +31,15 @@ void AppServices::configure(AppConfig config) {
     nonceCache_ = std::make_shared<NonceCache>();
     sequenceManager_ = std::make_shared<infra::EcfSequenceManager>(config_.connectionString);
     idempotencyStore_ = std::make_shared<infra::DbIdempotencyStore>(config_.connectionString);
+
+    if (config_.ecfOptions.certificatePath && !config_.ecfOptions.certificatePath->empty()) {
+        signer_ = std::make_shared<infra::EcfXmlSigner>(
+            *config_.ecfOptions.certificatePath, config_.ecfOptions.certificatePassword.value_or(""));
+    } else {
+        signer_ = std::make_shared<infra::EcfXmlSigner>();
+    }
+
+    schemaValidator_ = std::make_shared<infra::EcfSchemaValidator>(config_.ecfOptions.xsdDirectoryPath);
 }
 
 std::shared_ptr<domain::IEcfClient> AppServices::ecfClient() {
@@ -36,7 +47,7 @@ std::shared_ptr<domain::IEcfClient> AppServices::ecfClient() {
     // certificate, so failures surface at call time.
     std::call_once(ecfClientFlag_, [this] {
         try {
-            auto baseClient = std::make_shared<infra::EcfClient>(config_.ecfOptions, nullptr, cacheService_);
+            auto baseClient = std::make_shared<infra::EcfClient>(config_.ecfOptions, nullptr, cacheService_, schemaValidator_);
             ecfClient_ = std::make_shared<infra::CachedEcfClient>(baseClient, cacheService_);
         } catch (...) {
             ecfClientError_ = std::current_exception();
