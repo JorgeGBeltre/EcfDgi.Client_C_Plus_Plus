@@ -53,7 +53,7 @@ bool parseExpiry(const std::string& s, std::chrono::system_clock::time_point& ou
 
 }  // namespace
 
-EcfTokenManager::EcfTokenManager(std::shared_ptr<EcfXmlSigner> signer,
+EcfTokenManager::EcfTokenManager(std::shared_ptr<domain::IEcfXmlSigner> signer,
                                  EcfEnvironmentConfig config, std::string rncEmisor,
                                  std::shared_ptr<domain::ICacheService> cacheService)
     : signer_(std::move(signer)),

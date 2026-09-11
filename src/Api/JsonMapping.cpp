@@ -101,7 +101,7 @@ Json::Value toJson(const DirectorioContribuyente& d) {
 Json::Value toJson(const app::AuthResponseDto& d) {
     Json::Value v;
     v["token"] = d.token;
-    v["userId"] = d.userId;
+    v["role"] = d.role;
     v["username"] = d.username;
     return v;
 }

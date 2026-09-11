@@ -59,7 +59,7 @@ int EcfStatusReconciler::reconcile() {
                 doc.rncEmisor, doc.eNcf, doc.rncComprador, doc.securityCode);
 
             doc.lastStatusCheckAt = nowIso;
-            doc.statusCheckAttempts = doc.statusCheckAttempts.value_or(0) + 1;
+            doc.statusCheckAttempts += 1;
 
             std::string estado = response.estado;
             while (!estado.empty() && std::isspace(static_cast<unsigned char>(estado.front()))) estado.erase(estado.begin());
@@ -75,7 +75,7 @@ int EcfStatusReconciler::reconcile() {
             docsRepo_->update(doc);
         } catch (const std::exception& ex) {
             doc.lastStatusCheckAt = nowIso;
-            doc.statusCheckAttempts = doc.statusCheckAttempts.value_or(0) + 1;
+            doc.statusCheckAttempts += 1;
             try {
                 docsRepo_->update(doc);
             } catch (...) {}

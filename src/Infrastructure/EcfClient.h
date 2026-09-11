@@ -7,8 +7,10 @@
 #include "Domain/Entities/EcfClientOptions.h"
 #include "Domain/Interfaces/ICacheService.h"
 #include "Domain/Interfaces/IEcfClient.h"
+#include "Domain/Interfaces/IEcfSchemaValidator.h"
 #include "Domain/Interfaces/IEcfSequenceProvider.h"
 #include "Domain/Interfaces/IEcfTransport.h"
+#include "Domain/Interfaces/IEcfXmlSigner.h"
 #include "Infrastructure/Serialization/EcfXmlSerializer.h"
 
 namespace ecf::infra {
@@ -18,12 +20,14 @@ public:
     // Full construction from options (builds a DgiiDirectTransport internally).
     explicit EcfClient(domain::EcfClientOptions options,
                        std::shared_ptr<domain::IEcfSequenceProvider> sequenceProvider = nullptr,
-                       std::shared_ptr<domain::ICacheService> cacheService = nullptr);
+                       std::shared_ptr<domain::ICacheService> cacheService = nullptr,
+                       std::shared_ptr<domain::IEcfSchemaValidator> schemaValidator = nullptr);
 
     // Injectable construction (used by tests / DI).
     EcfClient(domain::EcfClientOptions options,
               std::shared_ptr<domain::IEcfTransport> transport,
-              std::shared_ptr<domain::IEcfSequenceProvider> sequenceProvider);
+              std::shared_ptr<domain::IEcfSequenceProvider> sequenceProvider = nullptr,
+              std::shared_ptr<domain::IEcfSchemaValidator> schemaValidator = nullptr);
 
     domain::EcfRecepcionResponse sendEcf(const std::string& xmlContent,
                                          const std::string& fileName) override;

@@ -27,7 +27,7 @@ std::string extractXmlContent(const HttpRequestPtr& req) {
             }
         }
     }
-    return req->getBody();
+    return std::string(req->getBody());
 }
 
 std::string xpathValue(xmlXPathContextPtr ctx, const char* expr) {

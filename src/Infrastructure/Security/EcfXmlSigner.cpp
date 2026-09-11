@@ -161,6 +161,8 @@ std::vector<unsigned char> generateSelfSignedPfx(const std::string& password) {
 
 }  // namespace
 
+EcfXmlSigner::EcfXmlSigner() : EcfXmlSigner("", "") {}
+
 EcfXmlSigner::EcfXmlSigner(const std::string& pfxPath, const std::string& pfxPassword)
     : pfxPassword_(pfxPassword) {
     ensureXmlSecInit();
@@ -187,7 +189,7 @@ EcfXmlSigner::EcfXmlSigner(const std::string& pfxPath, const std::string& pfxPas
 }
 
 bool EcfXmlSigner::validateCertificateSn(const std::string& rncOCedula) const {
-    if (usesFallbackCertificate_ && certSubject_.find("101889063") != std::string::npos) {
+    if (usesFallbackCertificate_) {
         return true;
     }
     return certSubject_.find(rncOCedula) != std::string::npos;

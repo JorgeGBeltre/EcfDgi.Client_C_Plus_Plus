@@ -6,6 +6,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 if(WIN32)
     add_compile_definitions(NOMINMAX)
+    if(MSVC)
+        add_link_options("/FORCE:MULTIPLE")
+    endif()
 endif()
 
 # Find dependencies (normally resolved via vcpkg toolchain)

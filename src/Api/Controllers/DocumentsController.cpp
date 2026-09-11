@@ -604,9 +604,19 @@ HttpResponsePtr reconcileUncertain(domain::EcfDocument& doc,
                                    const std::string& emisorRnc,
                                    const std::string& emisorRazonSocial) {
     // Check minimum age: updatedAt or createdAt
-    std::string timestampStr = doc.updatedAt.value_or(doc.createdAt.value_or(""));
+    std::string timestampStr = doc.updatedAt.value_or(doc.createdAt);
     if (!timestampStr.empty()) {
-        // Approximate age check or pass
+        auto docTime = sys::parseIsoUtc(timestampStr);
+        auto now = std::chrono::system_clock::now();
+        if (now - docTime < MinimumUncertainAgeBeforeReconciliation) {
+            Json::Value out;
+            out["documentId"] = doc.id;
+            out["eNcf"] = doc.eNcf;
+            out["state"] = doc.state;
+            out["trackId"] = doc.trackId.value_or("");
+            out["securityCode"] = doc.securityCode.value_or("");
+            return json(out, k202Accepted);
+        }
     }
 
     domain::ConsultaEstadoResponse status;
@@ -671,14 +681,14 @@ HttpResponsePtr handleExistingDocument(domain::EcfDocument& existingDoc,
         return reconcileUncertain(existingDoc, dto, editSequence, scope, services, emisorRnc, emisorRazonSocial);
     }
 
-    if (existingDoc.editSequence.value_or("") != editSequence) {
+    if (existingDoc.editSequence != editSequence) {
         Json::Value conflictObj;
         conflictObj["error"] = "SourceReference.EditSequence differs from the version already processed for this TxnId. "
                               "The invoice was modified after its e-CF was issued; issue a correction document instead of resubmitting.";
         conflictObj["documentId"] = existingDoc.id;
         conflictObj["eNcf"] = existingDoc.eNcf;
         conflictObj["state"] = existingDoc.state;
-        conflictObj["previousEditSequence"] = existingDoc.editSequence.value_or("");
+        conflictObj["previousEditSequence"] = existingDoc.editSequence;
         conflictObj["incomingEditSequence"] = editSequence;
         return json(conflictObj, k409Conflict);
     }

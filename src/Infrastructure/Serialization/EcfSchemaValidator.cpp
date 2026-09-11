@@ -2,8 +2,11 @@
 
 #include <libxml/parser.h>
 #include <libxml/tree.h>
+#include <cstdarg>
 #include <filesystem>
 #include <sstream>
+
+#include "Infrastructure/Serialization/EcfXsdFileNameResolver.h"
 
 namespace ecf::infra {
 
@@ -29,7 +32,8 @@ void schemaErrorCallback(void* ctx, const char* msg, ...) {
 
 }  // namespace
 
-EcfSchemaValidator::EcfSchemaValidator() = default;
+EcfSchemaValidator::EcfSchemaValidator(const std::optional<std::string>& xsdDirectoryPath)
+    : xsdDirectoryPath_(xsdDirectoryPath) {}
 
 EcfSchemaValidator::~EcfSchemaValidator() {
     std::unique_lock lock(cacheMutex_);
@@ -101,28 +105,40 @@ domain::SchemaValidationResult EcfSchemaValidator::validate(const std::string& x
     xmlSchemaValidCtxtPtr validCtxt = xmlSchemaNewValidCtxt(schema);
     if (!validCtxt) {
         xmlFreeDoc(doc);
-        result.addError("Failed to create XSD validation context.");
+        result.addError("Failed to create schema validation context.");
         return result;
     }
 
-    std::vector<std::string> validationErrors;
-    xmlSchemaSetValidErrors(validCtxt, schemaErrorCallback, schemaErrorCallback, &validationErrors);
+    xmlSchemaSetValidErrors(validCtxt, schemaErrorCallback, nullptr, &result.errors);
 
-    int status = xmlSchemaValidateDoc(validCtxt, doc);
+    int val = xmlSchemaValidateDoc(validCtxt, doc);
+    if (val != 0) {
+        result.isValid = false;
+        if (result.errors.empty()) {
+            result.errors.push_back("Schema validation failed with code: " + std::to_string(val));
+        }
+    } else {
+        result.isValid = true;
+    }
 
     xmlSchemaFreeValidCtxt(validCtxt);
     xmlFreeDoc(doc);
 
-    if (status != 0 || !validationErrors.empty()) {
-        result.isValid = false;
-        if (validationErrors.empty()) {
-            result.errors.push_back("Schema validation failed with exit code: " + std::to_string(status));
-        } else {
-            result.errors = std::move(validationErrors);
-        }
-    }
-
     return result;
+}
+
+domain::SchemaValidationResult EcfSchemaValidator::validate(const std::string& xmlContent) {
+    if (!xsdDirectoryPath_.has_value() || xsdDirectoryPath_->empty()) {
+        domain::SchemaValidationResult r;
+        return r;
+    }
+    std::string xsdFileName = EcfXsdFileNameResolver::resolve(xmlContent);
+    if (xsdFileName.empty()) {
+        domain::SchemaValidationResult r;
+        return r;
+    }
+    std::string xsdPath = *xsdDirectoryPath_ + "/" + xsdFileName;
+    return validate(xmlContent, xsdPath);
 }
 
 }  // namespace ecf::infra
