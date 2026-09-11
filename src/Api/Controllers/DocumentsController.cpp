@@ -73,14 +73,29 @@ std::string escapeXml(const std::string& value) {
     if (value.empty()) return value;
     std::string out;
     out.reserve(value.size());
-    for (char c : value) {
-        switch (c) {
-            case '&': out += "&amp;"; break;
-            case '<': out += "&lt;"; break;
-            case '>': out += "&gt;"; break;
-            case '"': out += "&quot;"; break;
-            case '\'': out += "&apos;"; break;
-            default: out += c; break;
+    for (size_t i = 0; i < value.size(); ++i) {
+        unsigned char c = static_cast<unsigned char>(value[i]);
+        if (c == '&') {
+            out += "&amp;";
+        } else if (c == '<') {
+            out += "&lt;";
+        } else if (c == '>') {
+            out += "&gt;";
+        } else if (c == '"') {
+            out += "&quot;";
+        } else if (c == '\'') {
+            out += "&apos;";
+        } else if (c == 0xC2 && i + 1 < value.size() && static_cast<unsigned char>(value[i+1]) == 0xA9) {
+            out += "&#169;";
+            ++i;
+        } else if (c == 0xC2 && i + 1 < value.size() && static_cast<unsigned char>(value[i+1]) == 0xAE) {
+            out += "&#174;";
+            ++i;
+        } else if (c == 0xE2 && i + 2 < value.size() && static_cast<unsigned char>(value[i+1]) == 0x82 && static_cast<unsigned char>(value[i+2]) == 0xAC) {
+            out += "&#8364;";
+            i += 2;
+        } else {
+            out += static_cast<char>(c);
         }
     }
     return out;
@@ -162,6 +177,12 @@ std::vector<ProcessedLineItem> normalizeCanonicalLines(const std::vector<app::Ca
                 prev.montoItem = std::max(0.0, prev.montoItem - absDiscount);
                 continue;
             }
+        }
+
+        // Regla DGII: Lineas con valor 0 o precio 0 (e.g. lineas informativas como "Total Bultos", "P-142501", "TOTAL METROS", subtotales de ERP)
+        // no se agregan al XML que se envia a la DGII.
+        if (line.amount == 0.0 || rawPrice == 0.0) {
+            continue;
         }
 
         double safeQty = rawQty > 0.0 ? rawQty : 1.0;
@@ -312,8 +333,18 @@ std::string buildXmlFromCanonical(const app::CanonicalDocumentDto& dto,
             ? (tipoEcf == "47" ? "Beneficiario del Exterior" : (tipoEcf == "46" ? "Comprador Internacional" : "Consumidor Final"))
             : dto.header.razonSocialComprador;
         std::string safeComprador = rawComprador.length() > 150 ? rawComprador.substr(0, 150) : rawComprador;
-        ss << "      <RazonSocialComprador>" << escapeXml(safeComprador) << "</RazonSocialComprador>\n"
-           << "    </Comprador>\n";
+        ss << "      <RazonSocialComprador>" << escapeXml(safeComprador) << "</RazonSocialComprador>\n";
+        if (tipoEcf != "47" && dto.header.correoComprador.has_value() && !dto.header.correoComprador->empty()) {
+            std::string trimmedEmail = *dto.header.correoComprador;
+            while (!trimmedEmail.empty() && std::isspace(static_cast<unsigned char>(trimmedEmail.front()))) trimmedEmail.erase(trimmedEmail.begin());
+            while (!trimmedEmail.empty() && std::isspace(static_cast<unsigned char>(trimmedEmail.back()))) trimmedEmail.pop_back();
+            if (trimmedEmail.length() > 80) trimmedEmail = trimmedEmail.substr(0, 80);
+            static const std::regex emailRegex(R"(^\w+([-+.]\w+)*@\w+([-.]\w+)*\.\w+([-.]\w+)*$)");
+            if (std::regex_match(trimmedEmail, emailRegex)) {
+                ss << "      <CorreoComprador>" << escapeXml(trimmedEmail) << "</CorreoComprador>\n";
+            }
+        }
+        ss << "    </Comprador>\n";
     }
 
     ss << "    <Totales>\n";
@@ -564,6 +595,7 @@ HttpResponsePtr signAndSend(domain::EcfDocument& doc, AppServices::Scope& scope,
         out["state"] = doc.state;
         out["trackId"] = doc.trackId.value_or("");
         out["securityCode"] = doc.securityCode.value_or("");
+        out["signedXml"] = doc.signedXmlContent.value_or("");
         return json(out, k202Accepted);
     }
 
@@ -593,6 +625,7 @@ HttpResponsePtr signAndSend(domain::EcfDocument& doc, AppServices::Scope& scope,
     out["state"] = doc.state;
     out["trackId"] = doc.trackId.value_or("");
     out["securityCode"] = doc.securityCode.value_or("");
+    out["signedXml"] = doc.signedXmlContent.value_or("");
     return json(out, k202Accepted);
 }
 
@@ -615,6 +648,7 @@ HttpResponsePtr reconcileUncertain(domain::EcfDocument& doc,
             out["state"] = doc.state;
             out["trackId"] = doc.trackId.value_or("");
             out["securityCode"] = doc.securityCode.value_or("");
+            out["signedXml"] = doc.signedXmlContent.value_or("");
             return json(out, k202Accepted);
         }
     }
@@ -635,6 +669,7 @@ HttpResponsePtr reconcileUncertain(domain::EcfDocument& doc,
         out["state"] = doc.state;
         out["trackId"] = doc.trackId.value_or("");
         out["securityCode"] = doc.securityCode.value_or("");
+        out["signedXml"] = doc.signedXmlContent.value_or("");
         return json(out, k202Accepted);
     }
 
@@ -653,6 +688,7 @@ HttpResponsePtr reconcileUncertain(domain::EcfDocument& doc,
         out["state"] = doc.state;
         out["trackId"] = doc.trackId.value_or("");
         out["securityCode"] = doc.securityCode.value_or("");
+        out["signedXml"] = doc.signedXmlContent.value_or("");
         return json(out, k202Accepted);
     }
 
@@ -699,6 +735,7 @@ HttpResponsePtr handleExistingDocument(domain::EcfDocument& existingDoc,
     out["state"] = existingDoc.state;
     out["trackId"] = existingDoc.trackId.value_or("");
     out["securityCode"] = existingDoc.securityCode.value_or("");
+    out["signedXml"] = existingDoc.signedXmlContent.value_or("");
     return json(out, k202Accepted);
 }
 
@@ -895,6 +932,113 @@ void DocumentsController::getBySourceTxnId(const HttpRequestPtr& req,
         out["trackId"] = doc->trackId.value_or("");
         out["securityCode"] = doc->securityCode.value_or("");
         out["receiptDate"] = doc->receiptDate.value_or("");
+        out["signedXml"] = doc->signedXmlContent.value_or("");
+
+        callback(json(out, k200OK));
+    } catch (const std::exception& ex) {
+        Json::Value errBody;
+        errBody["error"] = ex.what();
+        callback(json(errBody, k500InternalServerError));
+    }
+}
+
+void DocumentsController::getXmlBySourceTxnId(const HttpRequestPtr& req,
+                                              std::function<void(const HttpResponsePtr&)>&& callback,
+                                              std::string txnId) {
+    std::string tenantId = "default-tenant";
+    if (req->attributes()->find("tenantId")) {
+        tenantId = req->attributes()->get<std::string>("tenantId");
+    }
+
+    try {
+        auto& services = AppServices::instance();
+        auto scope = services.makeScope(mapping::currentUserFrom(req));
+
+        auto doc = scope.docs->getBySourceTxnId(tenantId, txnId);
+        if (!doc.has_value() || !doc->signedXmlContent.has_value() || doc->signedXmlContent->empty()) {
+            Json::Value errBody;
+            errBody["error"] = "Document with source TxnId '" + txnId + "' not found or has no XML.";
+            callback(json(errBody, k404NotFound));
+            return;
+        }
+
+        auto resp = HttpResponse::newHttpResponse();
+        resp->setStatusCode(k200OK);
+        resp->setContentTypeCode(CT_APPLICATION_XML);
+        std::string fileName = doc->rncEmisor + "-" + doc->eNcf + ".xml";
+        resp->addHeader("Content-Disposition", "attachment; filename=\"" + fileName + "\"");
+        resp->setBody(*doc->signedXmlContent);
+        callback(resp);
+    } catch (const std::exception& ex) {
+        Json::Value errBody;
+        errBody["error"] = ex.what();
+        callback(json(errBody, k500InternalServerError));
+    }
+}
+
+void DocumentsController::getXmlById(const HttpRequestPtr& req,
+                                    std::function<void(const HttpResponsePtr&)>&& callback,
+                                    std::string id) {
+    std::string tenantId = "default-tenant";
+    if (req->attributes()->find("tenantId")) {
+        tenantId = req->attributes()->get<std::string>("tenantId");
+    }
+
+    try {
+        auto& services = AppServices::instance();
+        auto scope = services.makeScope(mapping::currentUserFrom(req));
+
+        auto doc = scope.docs->getById(id);
+        if (!doc.has_value() || !doc->signedXmlContent.has_value() || doc->signedXmlContent->empty()) {
+            Json::Value errBody;
+            errBody["error"] = "Document '" + id + "' not found or has no XML.";
+            callback(json(errBody, k404NotFound));
+            return;
+        }
+
+        auto resp = HttpResponse::newHttpResponse();
+        resp->setStatusCode(k200OK);
+        resp->setContentTypeCode(CT_APPLICATION_XML);
+        std::string fileName = doc->rncEmisor + "-" + doc->eNcf + ".xml";
+        resp->addHeader("Content-Disposition", "attachment; filename=\"" + fileName + "\"");
+        resp->setBody(*doc->signedXmlContent);
+        callback(resp);
+    } catch (const std::exception& ex) {
+        Json::Value errBody;
+        errBody["error"] = ex.what();
+        callback(json(errBody, k500InternalServerError));
+    }
+}
+
+void DocumentsController::getById(const HttpRequestPtr& req,
+                                  std::function<void(const HttpResponsePtr&)>&& callback,
+                                  std::string id) {
+    std::string tenantId = "default-tenant";
+    if (req->attributes()->find("tenantId")) {
+        tenantId = req->attributes()->get<std::string>("tenantId");
+    }
+
+    try {
+        auto& services = AppServices::instance();
+        auto scope = services.makeScope(mapping::currentUserFrom(req));
+
+        auto doc = scope.docs->getById(id);
+        if (!doc.has_value()) {
+            Json::Value errBody;
+            errBody["error"] = "Document '" + id + "' not found.";
+            callback(json(errBody, k404NotFound));
+            return;
+        }
+
+        Json::Value out;
+        out["documentId"] = doc->id;
+        if (doc->ncf.has_value()) out["ncf"] = *doc->ncf;
+        out["eNcf"] = doc->eNcf;
+        out["state"] = doc->state;
+        out["trackId"] = doc->trackId.value_or("");
+        out["securityCode"] = doc->securityCode.value_or("");
+        out["receiptDate"] = doc->receiptDate.value_or("");
+        out["signedXml"] = doc->signedXmlContent.value_or("");
 
         callback(json(out, k200OK));
     } catch (const std::exception& ex) {
