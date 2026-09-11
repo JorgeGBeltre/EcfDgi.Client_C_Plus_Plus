@@ -8,14 +8,14 @@
 #include <string>
 
 #include "Domain/Interfaces/ICacheService.h"
+#include "Domain/Interfaces/IEcfXmlSigner.h"
 #include "Infrastructure/Dgii/EcfEnvironmentConfig.h"
-#include "Infrastructure/Security/EcfXmlSigner.h"
 
 namespace ecf::infra {
 
 class EcfTokenManager {
 public:
-    EcfTokenManager(std::shared_ptr<EcfXmlSigner> signer,
+    EcfTokenManager(std::shared_ptr<domain::IEcfXmlSigner> signer,
                     EcfEnvironmentConfig config, std::string rncEmisor,
                     std::shared_ptr<domain::ICacheService> cacheService = nullptr);
 
@@ -24,7 +24,7 @@ public:
 private:
     void renewToken();
 
-    std::shared_ptr<EcfXmlSigner> signer_;
+    std::shared_ptr<domain::IEcfXmlSigner> signer_;
     EcfEnvironmentConfig config_;
     std::string rncEmisor_;
     std::shared_ptr<domain::ICacheService> cacheService_;

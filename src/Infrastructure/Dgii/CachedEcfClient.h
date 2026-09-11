@@ -30,11 +30,14 @@ public:
     domain::TimbreFcResponse validarTimbreFc(const domain::TimbreFcRequest& request) override;
 
     std::vector<domain::DirectorioContribuyente> consultarDirectorio() override;
+    domain::DirectorioContribuyente consultarDirectorioPorRnc(const std::string& rnc) override;
     std::vector<domain::EstatusServicio> consultarEstatusServicios() override;
     std::vector<domain::VentanaMantenimiento> consultarVentanasMantenimiento() override;
 
     std::string verificarEstadoAmbiente(domain::AmbienteEnum ambiente) override;
     domain::AnulacionResponse anularRangos(const std::string& xmlContent) override;
+    domain::AprobacionComercialResponse sendAprobacionComercial(
+        const std::string& xmlContent, const std::string& fileName) override;
 
 private:
     std::shared_ptr<domain::IEcfClient> innerClient_;

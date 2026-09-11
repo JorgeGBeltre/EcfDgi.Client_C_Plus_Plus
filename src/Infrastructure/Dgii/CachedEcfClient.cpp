@@ -63,7 +63,23 @@ std::vector<DirectorioContribuyente> CachedEcfClient::consultarDirectorio() {
 
     auto result = innerClient_->consultarDirectorio();
     if (!result.empty()) {
-        cacheService_->setObject(cacheKey, result, std::chrono::hours(24));
+        cacheService_->setObject(cacheKey, result, std::chrono::seconds(86400));  // Cache for 24 hours
+    }
+    return result;
+}
+
+DirectorioContribuyente CachedEcfClient::consultarDirectorioPorRnc(const std::string& rnc) {
+    const std::string cacheKey = "ecf:directory:" + rnc;
+    if (auto cached = cacheService_->getObject<DirectorioContribuyente>(cacheKey)) {
+        if (!cached->rnc.empty()) {
+            spdlog::debug("Directorio for RNC {} retrieved from cache.", rnc);
+            return *cached;
+        }
+    }
+
+    auto result = innerClient_->consultarDirectorioPorRnc(rnc);
+    if (!result.rnc.empty()) {
+        cacheService_->setObject(cacheKey, result, std::chrono::seconds(86400));  // Cache for 24 hours
     }
     return result;
 }
@@ -72,32 +88,20 @@ std::vector<EstatusServicio> CachedEcfClient::consultarEstatusServicios() {
     const std::string cacheKey = "ecf:services:status";
     if (auto cached = cacheService_->getObject<std::vector<EstatusServicio>>(cacheKey)) {
         if (!cached->empty()) {
-            spdlog::debug("Estatus de servicios retrieved from cache.");
+            spdlog::debug("Estatus servicios retrieved from cache.");
             return *cached;
         }
     }
 
     auto result = innerClient_->consultarEstatusServicios();
     if (!result.empty()) {
-        cacheService_->setObject(cacheKey, result, std::chrono::minutes(5));
+        cacheService_->setObject(cacheKey, result, std::chrono::seconds(300));  // Cache for 5 minutes
     }
     return result;
 }
 
 std::vector<VentanaMantenimiento> CachedEcfClient::consultarVentanasMantenimiento() {
-    const std::string cacheKey = "ecf:maintenance:windows";
-    if (auto cached = cacheService_->getObject<std::vector<VentanaMantenimiento>>(cacheKey)) {
-        if (!cached->empty()) {
-            spdlog::debug("Ventanas de mantenimiento retrieved from cache.");
-            return *cached;
-        }
-    }
-
-    auto result = innerClient_->consultarVentanasMantenimiento();
-    if (!result.empty()) {
-        cacheService_->setObject(cacheKey, result, std::chrono::hours(1));
-    }
-    return result;
+    return innerClient_->consultarVentanasMantenimiento();
 }
 
 std::string CachedEcfClient::verificarEstadoAmbiente(AmbienteEnum ambiente) {
@@ -106,6 +110,11 @@ std::string CachedEcfClient::verificarEstadoAmbiente(AmbienteEnum ambiente) {
 
 AnulacionResponse CachedEcfClient::anularRangos(const std::string& xmlContent) {
     return innerClient_->anularRangos(xmlContent);
+}
+
+AprobacionComercialResponse CachedEcfClient::sendAprobacionComercial(
+    const std::string& xmlContent, const std::string& fileName) {
+    return innerClient_->sendAprobacionComercial(xmlContent, fileName);
 }
 
 }  // namespace ecf::infra

@@ -17,26 +17,46 @@ struct CanonicalHeaderDto {
     std::string razonSocialEmisor;
     std::string rncComprador;
     std::string razonSocialComprador;
+    // ISO 8601 (yyyy-MM-dd) or DGII format (dd-MM-yyyy)
     std::string fechaEmision;
 };
 
 struct CanonicalLineDto {
     int lineNumber = 0;
     std::string itemName;
-    double quantity = 0;
-    double unitPrice = 0;
-    double amount = 0;
+    double quantity = 0.0;
+    double unitPrice = 0.0;
+    double amount = 0.0;
+};
+
+struct CanonicalTaxBucketDto {
+    int rate = 18;       // 18, 16, 0
+    double base = 0.0;
+    double tax = 0.0;
 };
 
 struct CanonicalTotalsDto {
-    double montoSubtotal = 0;
-    double montoItbis = 0;
-    double montoTotal = 0;
+    double montoSubtotal = 0.0;
+    std::optional<double> montoGravadoTotal;
+    std::optional<double> montoExento;
+    std::vector<CanonicalTaxBucketDto> taxBuckets;
+    double montoItbis = 0.0;
+    double montoTotal = 0.0;
 };
 
 struct CanonicalReferencesDto {
     std::string correctsTxnId;
     std::string correctsENcf;
+    std::optional<int> codigoModificacion;
+    std::optional<std::string> razonModificacion;
+    std::optional<std::string> fechaNcfModificado;
+    std::optional<std::string> rncOtroContribuyente;
+};
+
+struct CanonicalRetentionDto {
+    int indicadorAgenteRetencionoPercepcion = 1;
+    double montoItbisRetenido = 0.0;
+    std::optional<double> montoIsrRetenido;
 };
 
 struct CanonicalDocumentDto {
@@ -48,6 +68,7 @@ struct CanonicalDocumentDto {
     std::vector<CanonicalLineDto> lines;
     CanonicalTotalsDto totals;
     CanonicalReferencesDto references;
+    std::optional<CanonicalRetentionDto> retention;
 };
 
 } // namespace ecf::app

@@ -26,8 +26,11 @@ std::string newUuid() {
 }
 
 std::string utcNowIso() {
-    const auto now = std::chrono::system_clock::now();
-    const std::time_t t = std::chrono::system_clock::to_time_t(now);
+    return toIsoUtc(std::chrono::system_clock::now());
+}
+
+std::string toIsoUtc(std::chrono::system_clock::time_point tp) {
+    const std::time_t t = std::chrono::system_clock::to_time_t(tp);
     std::tm tm{};
 #if defined(_WIN32)
     gmtime_s(&tm, &t);
@@ -37,6 +40,28 @@ std::string utcNowIso() {
     char buf[32];
     std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &tm);
     return std::string(buf);
+}
+
+std::chrono::system_clock::time_point parseIsoUtc(const std::string& iso) {
+    if (iso.empty()) return std::chrono::system_clock::time_point{};
+    std::tm tm{};
+    int year, month, day, hour, minute, second;
+    if (std::sscanf(iso.c_str(), "%d-%d-%dT%d:%d:%d", &year, &month, &day, &hour, &minute, &second) >= 6) {
+        tm.tm_year = year - 1900;
+        tm.tm_mon = month - 1;
+        tm.tm_mday = day;
+        tm.tm_hour = hour;
+        tm.tm_min = minute;
+        tm.tm_sec = second;
+        tm.tm_isdst = 0;
+#if defined(_WIN32)
+        std::time_t t = _mkgmtime(&tm);
+#else
+        std::time_t t = timegm(&tm);
+#endif
+        return std::chrono::system_clock::from_time_t(t);
+    }
+    return std::chrono::system_clock::time_point{};
 }
 
 }  // namespace ecf::sys

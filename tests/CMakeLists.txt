@@ -7,3 +7,6 @@ add_executable(hmac_tests hmac_tests.cpp)
 target_link_libraries(hmac_tests PRIVATE ecfdgii_core)
 add_test(NAME hmac_tests COMMAND hmac_tests)
 
+add_executable(xsd_tests xsd_tests.cpp)
+target_link_libraries(xsd_tests PRIVATE ecfdgii_core)
+add_test(NAME xsd_tests COMMAND xsd_tests)

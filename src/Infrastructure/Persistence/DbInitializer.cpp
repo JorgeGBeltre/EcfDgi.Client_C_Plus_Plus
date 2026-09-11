@@ -30,6 +30,15 @@ void DbInitializer::initialize(const std::string& connectionString,
         const std::string sql = readAll(schemaPath);
         pqxx::work w(conn);
         w.exec(sql);
+
+        // Migrations for existing deployments
+        w.exec("ALTER TABLE ecf_documents ADD COLUMN IF NOT EXISTS edit_sequence varchar(50) NOT NULL DEFAULT '';");
+        w.exec("ALTER TABLE ecf_documents ADD COLUMN IF NOT EXISTS sent_to_dgii_at timestamptz;");
+        w.exec("ALTER TABLE ecf_documents ADD COLUMN IF NOT EXISTS last_status_check_at timestamptz;");
+        w.exec("ALTER TABLE ecf_documents ADD COLUMN IF NOT EXISTS status_check_attempts integer NOT NULL DEFAULT 0;");
+        w.exec("CREATE UNIQUE INDEX IF NOT EXISTS uq_ecf_documents_tenant_source_txn ON ecf_documents (tenant_id, source_txn_id);");
+        w.exec("CREATE INDEX IF NOT EXISTS ix_ecf_documents_state_last_status_check_at ON ecf_documents (state, last_status_check_at);");
+
         w.commit();
     }
 

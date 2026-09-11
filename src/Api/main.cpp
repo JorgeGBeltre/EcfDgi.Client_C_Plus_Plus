@@ -5,6 +5,8 @@
 #include <drogon/drogon.h>
 #include <spdlog/spdlog.h>
 
+#include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <exception>
 #include <string>
@@ -13,6 +15,7 @@
 #include "Api/AppServices.h"
 #include "Api/Configuration/AppConfig.h"
 #include "Application/Common/Exceptions/ValidationException.h"
+#include "Application/Services/EcfStatusReconciler.h"
 #include "Infrastructure/Persistence/DbInitializer.h"
 
 using namespace drogon;
@@ -39,10 +42,14 @@ int main() {
 
     ecf::api::AppConfig config;
     try {
-        config = ecf::api::AppConfig::load("appsettings.json");
-    } catch (const std::exception& ex) {
-        spdlog::error("Failed to load configuration: {}", ex.what());
-        return 1;
+        config = ecf::api::AppConfig::load("config/appsettings.json");
+    } catch (...) {
+        try {
+            config = ecf::api::AppConfig::load("appsettings.json");
+        } catch (const std::exception& ex) {
+            spdlog::error("Failed to load configuration: {}", ex.what());
+            return 1;
+        }
     }
 
     auto& services = ecf::api::AppServices::instance();
@@ -56,6 +63,33 @@ int main() {
     } catch (const std::exception& ex) {
         spdlog::warn("Database initialization skipped/failed: {}", ex.what());
     }
+
+    // Start background status reconciliation thread
+    std::thread pollerThread([&services]() {
+        spdlog::info("Started EcfStatusReconciler background poller thread.");
+        int intervalSeconds = services.statusPollingOptions().pollingIntervalMinutes * 60;
+        if (intervalSeconds <= 0) intervalSeconds = 900; // 15 minutes
+
+        while (true) {
+            std::this_thread::sleep_for(std::chrono::seconds(intervalSeconds));
+            try {
+                auto scope = services.makeScope(nullptr);
+                ecf::app::EcfStatusReconciler reconciler(
+                    scope.docs,
+                    scope.uow,
+                    services.ecfClient(),
+                    services.statusPollingOptions()
+                );
+                int processed = reconciler.reconcile();
+                if (processed > 0) {
+                    spdlog::info("EcfStatusReconciler pass completed: {} documents processed.", processed);
+                }
+            } catch (const std::exception& ex) {
+                spdlog::warn("EcfStatusReconciler pass encountered exception: {}", ex.what());
+            }
+        }
+    });
+    pollerThread.detach();
 
     // Global exception handler -> RFC 9457 ProblemDetails: a validation error
     // yields 400 with the field errors; any other error yields 500.
@@ -106,7 +140,7 @@ int main() {
   "openapi": "3.0.3",
   "info": {
     "title": "EcfDgii.Client API (C++)",
-    "description": "Dominican Republic e-CF Enterprise REST API client wrapper.",
+    "description": "Dominican Republic e-CF Enterprise High-Performance REST API client wrapper.",
     "version": "2.0.0"
   },
   "servers": [{ "url": "/" }],
@@ -126,96 +160,42 @@ int main() {
         "responses": { "200": { "description": "System operational" } }
       }
     },
-    "/api/auth/register": {
+    "/api/documents": {
       "post": {
-        "summary": "Register new user",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "username": { "type": "string" },
-                  "email": { "type": "string" },
-                  "password": { "type": "string" },
-                  "role": { "type": "string" }
-                }
-              }
-            }
-          }
-        },
-        "responses": { "200": { "description": "Registration successful" } }
+        "summary": "ERP integration: compiles canonical document into XML, signs, validates XSD, and sends to DGII",
+        "security": [{ "BearerAuth": [] }],
+        "responses": { "202": { "description": "Document accepted or processed" } }
       }
     },
-    "/api/auth/login": {
-      "post": {
-        "summary": "User login to acquire JWT token",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "username": { "type": "string" },
-                  "password": { "type": "string" }
-                }
-              }
-            }
-          }
-        },
-        "responses": { "200": { "description": "JWT authentication token returned" } }
-      }
-    },
-    "/api/customers": {
+    "/api/documents/by-source/{txnId}": {
       "get": {
-        "summary": "List all customers",
+        "summary": "Query document by ERP source transaction ID",
         "security": [{ "BearerAuth": [] }],
-        "responses": { "200": { "description": "Customer list" } }
-      },
-      "post": {
-        "summary": "Create new customer",
-        "security": [{ "BearerAuth": [] }],
-        "responses": { "201": { "description": "Customer created" } }
+        "responses": { "200": { "description": "Document details" } }
       }
     },
-    "/api/customers/{id}": {
+    "/fe/recepcion/api/ecf": {
+      "post": {
+        "summary": "B2B reception of e-CF XML and generation of signed Acuse de Recibo (ARECF)",
+        "responses": { "200": { "description": "Signed ARECF XML" } }
+      }
+    },
+    "/fe/aprobacioncomercial/api/ecf": {
+      "post": {
+        "summary": "Commercial approval endpoint",
+        "responses": { "200": { "description": "Approval accepted" } }
+      }
+    },
+    "/fe/autenticacion/api/semilla": {
       "get": {
-        "summary": "Get customer by ID",
-        "security": [{ "BearerAuth": [] }],
-        "responses": { "200": { "description": "Customer details" } }
-      },
-      "put": {
-        "summary": "Update customer",
-        "security": [{ "BearerAuth": [] }],
-        "responses": { "204": { "description": "Customer updated" } }
-      },
-      "delete": {
-        "summary": "Delete customer (Admin only)",
-        "security": [{ "BearerAuth": [] }],
-        "responses": { "204": { "description": "Customer deleted" } }
+        "summary": "Get authentication seed XML",
+        "responses": { "200": { "description": "SemillaModel XML" } }
       }
     },
-    "/api/ecf/send": {
+    "/fe/autenticacion/api/validacioncertificado": {
       "post": {
-        "summary": "Send electronic invoice (e-CF)",
-        "security": [{ "BearerAuth": [] }],
-        "responses": { "200": { "description": "e-CF response" } }
-      }
-    },
-    "/api/ecf/send-rfce": {
-      "post": {
-        "summary": "Send RFCE document",
-        "security": [{ "BearerAuth": [] }],
-        "responses": { "200": { "description": "RFCE response" } }
-      }
-    },
-    "/api/ecf/status": {
-      "get": {
-        "summary": "Query e-CF status",
-        "security": [{ "BearerAuth": [] }],
-        "responses": { "200": { "description": "Status response" } }
+        "summary": "Validate signed seed XML and issue bearer token",
+        "responses": { "200": { "description": "Authentication token" } }
       }
     }
   }

@@ -19,6 +19,8 @@ struct AppConfig {
 
     infra::JwtSettings jwt;
     domain::EcfClientOptions ecfOptions;
+    domain::EcfEmisorOptions emisorOptions;
+    domain::EcfStatusPollingOptions statusPollingOptions;
 
     std::string workerKeyId = "default-worker-id";
     std::string workerSecretKey = "WorkerSecretKey";

@@ -15,6 +15,8 @@
 #include "Domain/Interfaces/IEcfClient.h"
 #include "Domain/Interfaces/IEcfDocumentRepository.h"
 #include "Domain/Interfaces/IEcfXmlSerializer.h"
+#include "Domain/Interfaces/IEcfXmlSigner.h"
+#include "Domain/Interfaces/IEcfSchemaValidator.h"
 #include "Domain/Interfaces/ISecurity.h"
 #include "Domain/Interfaces/IUnitOfWork.h"
 #include "Domain/Interfaces/IUserRepository.h"
@@ -48,7 +50,13 @@ public:
     std::shared_ptr<NonceCache> nonceCache() const { return nonceCache_; }
     std::shared_ptr<domain::IEcfSequenceManager> sequenceManager() const { return sequenceManager_; }
     std::shared_ptr<domain::IIdempotencyStore> idempotencyStore() const { return idempotencyStore_; }
-    std::shared_ptr<domain::IEcfClient> ecfClient();  // lazily built (needs certificate)
+    std::shared_ptr<domain::IEcfXmlSigner> signer() const { return signer_; }
+    std::shared_ptr<domain::IEcfSchemaValidator> schemaValidator() const { return schemaValidator_; }
+    const domain::EcfEmisorOptions& emisorOptions() const { return config_.emisorOptions; }
+    const domain::EcfStatusPollingOptions& statusPollingOptions() const { return config_.statusPollingOptions; }
+    const domain::EcfClientOptions& ecfClientOptions() const { return config_.ecfOptions; }
+
+    std::shared_ptr<domain::IEcfClient> ecfClient();  // lazily built
 
     // Per-request scope (new DB connection + repositories bound to currentUser).
     Scope makeScope(std::shared_ptr<domain::ICurrentUserService> currentUser);
@@ -62,6 +70,8 @@ private:
     std::shared_ptr<NonceCache> nonceCache_;
     std::shared_ptr<domain::IEcfSequenceManager> sequenceManager_;
     std::shared_ptr<domain::IIdempotencyStore> idempotencyStore_;
+    std::shared_ptr<domain::IEcfXmlSigner> signer_;
+    std::shared_ptr<domain::IEcfSchemaValidator> schemaValidator_;
 
     std::shared_ptr<domain::IEcfClient> ecfClient_;
     std::once_flag ecfClientFlag_;

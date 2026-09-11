@@ -75,7 +75,35 @@ AppConfig AppConfig::load(const std::string& path) {
         o.certificatePassword = getStr(s, "CertificatePassword");
         if (s.contains("AutoRetryOnReuseableSequence"))
             o.autoRetryOnReuseableSequence = s["AutoRetryOnReuseableSequence"].get<bool>();
+        if (s.contains("ValidateSchemasLocal"))
+            o.validateSchemasLocal = s["ValidateSchemasLocal"].get<bool>();
+        if (s.contains("XsdDirectoryPath"))
+            o.xsdDirectoryPath = getStr(s, "XsdDirectoryPath");
     }
+
+    if (j.contains("EcfEmisor")) {
+        const auto& s = j["EcfEmisor"];
+        cfg.emisorOptions.rnc = getStr(s, "Rnc");
+        cfg.emisorOptions.razonSocial = getStr(s, "RazonSocial");
+    } else if (cfg.ecfOptions.rncEmisor.has_value() && !cfg.ecfOptions.rncEmisor->empty()) {
+        cfg.emisorOptions.rnc = *cfg.ecfOptions.rncEmisor;
+        cfg.emisorOptions.razonSocial = "WILLY CHIC DOMINICANA SRL";
+    }
+
+    if (j.contains("EcfStatusPolling")) {
+        const auto& s = j["EcfStatusPolling"];
+        if (s.contains("PollingIntervalMinutes"))
+            cfg.statusPollingOptions.pollingIntervalMinutes = s["PollingIntervalMinutes"].get<int>();
+        if (s.contains("MinDocumentAgeMinutes"))
+            cfg.statusPollingOptions.minDocumentAgeMinutes = s["MinDocumentAgeMinutes"].get<int>();
+        if (s.contains("MaxPollingWindowHours"))
+            cfg.statusPollingOptions.maxPollingWindowHours = s["MaxPollingWindowHours"].get<int>();
+    }
+
+    // Support env overrides
+    if (const char* envRnc = std::getenv("ECF_EMISOR_RNC")) cfg.emisorOptions.rnc = envRnc;
+    if (const char* envRazon = std::getenv("ECF_EMISOR_RAZON_SOCIAL")) cfg.emisorOptions.razonSocial = envRazon;
+    if (const char* envXsd = std::getenv("ECF_XSD_DIR")) cfg.ecfOptions.xsdDirectoryPath = envXsd;
 
     // Parse Worker configurations
     cfg.workerKeyId = getStr(j, "WorkerKeyId", cfg.workerKeyId);
@@ -86,7 +114,6 @@ AppConfig AppConfig::load(const std::string& path) {
     cfg.workerTenantId = getStr(j, "WorkerTenantId", cfg.workerTenantId);
     cfg.workerAllowedRncs = getStr(j, "WorkerAllowedRncs", cfg.workerAllowedRncs);
 
-    // Support env overrides
     if (const char* envKeyId = std::getenv("WORKER_KEY_ID")) cfg.workerKeyId = envKeyId;
     if (const char* envSecret = std::getenv("WORKER_SECRET_KEY")) cfg.workerSecretKey = envSecret;
     if (const char* envTenant = std::getenv("WORKER_TENANT_ID")) cfg.workerTenantId = envTenant;

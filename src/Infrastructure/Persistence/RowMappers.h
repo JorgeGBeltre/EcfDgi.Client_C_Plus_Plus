@@ -73,6 +73,7 @@ inline domain::EcfDocument mapEcfDocument(const Row& r) {
     d.rncComprador = optStr(r["rnc_comprador"]);
     d.tenantId = r["tenant_id"].template as<std::string>();
     d.sourceTxnId = r["source_txn_id"].template as<std::string>();
+    d.editSequence = r["edit_sequence"].template as<std::string>();
     d.documentKind = r["document_kind"].template as<std::string>();
     d.ncf = optStr(r["ncf"]);
     d.trackId = optStr(r["track_id"]);
@@ -84,6 +85,9 @@ inline domain::EcfDocument mapEcfDocument(const Row& r) {
     d.signedXmlContent = optStr(r["signed_xml_content"]);
     d.dgiiResponseXml = optStr(r["dgii_response_xml"]);
     d.receiptDate = optStr(r["receipt_date"]);
+    d.sentToDgiiAt = optStr(r["sent_to_dgii_at"]);
+    d.lastStatusCheckAt = optStr(r["last_status_check_at"]);
+    d.statusCheckAttempts = r["status_check_attempts"].template as<int>();
     return d;
 }
 
@@ -131,9 +135,10 @@ inline const char* customerColumns() {
            "deleted_at::text, deleted_by, is_deleted";
 }
 inline const char* ecfDocumentColumns() {
-    return "id::text, e_ncf, rnc_emisor, rnc_comprador, tenant_id, source_txn_id, document_kind, ncf, track_id, state, "
+    return "id::text, e_ncf, rnc_emisor, rnc_comprador, tenant_id, source_txn_id, edit_sequence, document_kind, ncf, track_id, state, "
            "total_amount, itbis_amount, security_code, xml_content, signed_xml_content, dgii_response_xml, "
-           "receipt_date::text, created_at::text, created_by, updated_at::text, "
+           "receipt_date::text, sent_to_dgii_at::text, last_status_check_at::text, status_check_attempts, "
+           "created_at::text, created_by, updated_at::text, "
            "updated_by, deleted_at::text, deleted_by, is_deleted";
 }
 inline const char* ecfSequenceColumns() {
