@@ -101,7 +101,19 @@ std::vector<EstatusServicio> CachedEcfClient::consultarEstatusServicios() {
 }
 
 std::vector<VentanaMantenimiento> CachedEcfClient::consultarVentanasMantenimiento() {
-    return innerClient_->consultarVentanasMantenimiento();
+    const std::string cacheKey = "ecf:maintenance:windows";
+    if (auto cached = cacheService_->getObject<std::vector<VentanaMantenimiento>>(cacheKey)) {
+        if (!cached->empty()) {
+            spdlog::debug("Ventanas mantenimiento retrieved from cache.");
+            return *cached;
+        }
+    }
+
+    auto result = innerClient_->consultarVentanasMantenimiento();
+    if (!result.empty()) {
+        cacheService_->setObject(cacheKey, result, std::chrono::seconds(3600));  // Cache for 1 hour
+    }
+    return result;
 }
 
 std::string CachedEcfClient::verificarEstadoAmbiente(AmbienteEnum ambiente) {

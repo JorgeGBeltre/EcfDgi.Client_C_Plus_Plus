@@ -10,7 +10,9 @@
 
 ---
 
-**EcfDgii.Client** is an enterprise-grade C++ solution that wraps and exposes the Dominican Republic Tax Authority's (**DGII**) Comprobante Fiscal Electrónico (**e-CF**) REST integration services. Built under **Clean Architecture** and **Domain-Driven Design (DDD)** principles, it provides a robust REST API, secure JWT-based authentication, Redis distributed caching & locking, PostgreSQL persistence with automated auditing and soft-delete, request validation rules, structured logging, interactive Scalar & Swagger API documentation, and full Docker orchestration support.
+**EcfDgii.Client** is an enterprise-grade C++ solution that wraps and exposes the Dominican Republic Tax Authority's (**DGII**) Comprobante Fiscal Electrónico (**e-CF**) REST integration services. Built under **Clean Architecture** and **Domain-Driven Design (DDD)** principles, it provides 100% functional parity with the reference C# client while delivering native C++ speed, ultra-low latency, and massive concurrency handling.
+
+It features complete support for all 10 canonical e-CF types (invoices, credit/debit notes, purchase bills, minor expenses, exports, etc.), digital signature generation (W3C XMLDSig RSA-SHA256 with C14N), local multithreaded XSD schema validation via `libxml2`, B2B reception and commercial approval (`ARECF` / `ACECF`), robust state machine with idempotency and race condition recovery, dual JWT and HMAC worker authentication, distributed Redis token management, and background status reconciliation.
 
 ---
 
@@ -19,16 +21,35 @@
 - [Overview](#overview)
 - [Key Features](#key-features)
 - [Solution Structure](#solution-structure)
+- [How the C++ DGII Client Works (Detailed Technical Replication Guide)](#how-the-c-dgii-client-works-detailed-technical-replication-guide)
+  - [1. Canonical ERP Ingestion & Type Guards](#1-canonical-erp-ingestion--type-guards)
+  - [2. Sequence Allocation & Concurrency Control](#2-sequence-allocation--concurrency-control)
+  - [3. XML Compilation & Element Structure](#3-xml-compilation--element-structure)
+  - [4. XMLDSig Digital Signature & In-Memory Fallback](#4-xmldsig-digital-signature--in-memory-fallback)
+  - [5. Security Code Calculation (SHA-256)](#5-security-code-calculation-sha-256)
+  - [6. Local XSD Schema Validation Gate](#6-local-xsd-schema-validation-gate)
+  - [7. How Invoices, Credit Notes, and Bills Reach the DGII (Wire Protocol & Data Flow)](#7-how-invoices-credit-notes-and-bills-reach-the-dgii-wire-protocol--data-flow)
+  - [8. State Machine & Asynchronous Status Polling](#8-state-machine--asynchronous-status-polling)
+  - [9. B2B Vendor Invoicing Exchange (ARECF & ACECF)](#9-b2b-vendor-invoicing-exchange-arecf--acecf)
+  - [10. Background Status Reconciliation Thread](#10-background-status-reconciliation-thread)
+- [Complete Inventory of Completed Functions & Endpoints](#complete-inventory-of-completed-functions--endpoints)
+- [JSON Payloads & Signed XML Examples](#json-payloads--signed-xml-examples)
+  - [Example A: Tax Credit Invoice (Tipo 31 - Factura de Crédito Fiscal)](#example-a-tax-credit-invoice-tipo-31---factura-de-crédito-fiscal)
+  - [Example B: Credit Note (Tipo 34 - Nota de Crédito)](#example-b-credit-note-tipo-34---nota-de-crédito)
+  - [Example C: Debit Note (Tipo 33 - Nota de Débito)](#example-c-debit-note-tipo-33---nota-de-débito)
+  - [Example D: Purchase Bill (Tipo 41 - Compras / Retenciones)](#example-d-purchase-bill-tipo-41---compras--retenciones)
+  - [Example E: Consumption Invoice (Tipo 32 - Factura de Consumo)](#example-e-consumption-invoice-tipo-32---factura-de-consumo)
+  - [Example F: B2B Reception Acknowledgment (ARECF XML)](#example-f-b2b-reception-acknowledgment-arecf-xml)
+  - [Example G: B2B Commercial Approval (ACECF XML)](#example-g-b2b-commercial-approval-acecf-xml)
+  - [Example H: DGII Seed Authentication Handshake (Semilla & Token XML)](#example-h-dgii-seed-authentication-handshake-semilla--token-xml)
 - [Installation & Setup](#installation--setup)
 - [Dependencies](#dependencies)
 - [Basic Configuration](#basic-configuration)
 - [Distributed Caching & Redis Integration](#distributed-caching--redis-integration)
 - [Redis Integration Architecture](#redis-integration-architecture)
 - [Interactive API Documentation (Scalar & Swagger)](#interactive-api-documentation-scalar--swagger)
-- [Security & JWT Authentication](#security--jwt-authentication)
-- [XML Digital Signature (XMLDSig)](#xml-digital-signature-xmldsig)
+- [Security & Dual Authentication (JWT & HMAC)](#security--dual-authentication-jwt--hmac)
 - [API Endpoints Reference](#api-endpoints-reference)
-- [JSON Request & Response Examples](#json-request--response-examples)
 - [Database Persistence & Schema](#database-persistence--schema)
 - [Complete Core API Interfaces](#complete-core-api-interfaces)
 - [Performance Considerations](#performance-considerations)
@@ -45,7 +66,7 @@
 
 ## Overview
 
-The `EcfDgii.Client` solution acts as a middleware between internal billing platforms and the Dominican Republic Tax Authority (DGII) server systems. It automates XML serialization, digital signing (XMLDSig), authentication token acquisition, document transmission, status querying, and response caching.
+The `EcfDgii.Client` solution acts as a middleware between internal billing/ERP platforms and the Dominican Republic Tax Authority (DGII) server systems. It automates canonical validation, sequence allocation, XML serialization, digital signing (XMLDSig), local XSD schema verification, authentication token acquisition, document transmission, status querying, B2B reception, and response caching.
 
 The codebase is split into five cleanly separated layers with a strict dependency direction: the outer layers depend on the inner ones, never the reverse.
 
@@ -62,13 +83,13 @@ graph TD
     tests --> Application
 ```
 
-### Runtime behavior
+### Runtime Behavior
 
 > **Auto schema at startup:** on boot the service applies `db/schema.sql` idempotently against the configured PostgreSQL instance.
 >
-> **Mandatory Authentication:** all endpoints (except `/api/auth/register`, `/api/auth/login`, `/health`, `/scalar`, `/swagger`, and `/openapi/v1.json`) require a valid JWT bearer token.
+> **Mandatory Authentication:** all business endpoints require either a valid JWT bearer token or a valid Worker HMAC-SHA256 signature header.
 >
-> **Interactive Documentation:** open [http://localhost:8081/scalar](http://localhost:8081/scalar) or [http://localhost:8081/swagger](http://localhost:8081/swagger) to view interactive API docs.
+> **Interactive Documentation:** open [http://localhost:8080/scalar](http://localhost:8080/scalar) or [http://localhost:8080/swagger](http://localhost:8080/swagger) to view interactive API docs.
 >
 > **Default Admin Credentials:** a default admin user is seeded on first run:
 > - **Username:** `admin`
@@ -79,16 +100,32 @@ graph TD
 ## Key Features
 
 ### e-CF Operations & Caching
-- **Single e-CF Sending**: Prepares, validates, signs, and posts signed XML tax receipts directly to DGII REST services.
-- **RFCE Summaries**: Automatic validation, serialization, signing, and transmission of Consumption Invoice Summaries (RFCE).
-- **DGII Status Syncing**: Queries local and external services to sync transaction statuses (TrackId results) into the PostgreSQL database.
+- **Canonical ERP Ingestion (`POST /api/documents`)**: Accepts canonical JSON invoices and performs pre-allocation business validations for all 10 e-CF types before reserving sequence numbers.
+- **Full Type Spectrum**: Pre-allocation validations for:
+  - `31`: Factura de Crédito Fiscal (mandatory buyer identification).
+  - `32`: Factura de Consumo ($\ge 250,000$ DOP buyer identification rule).
+  - `33`: Nota de Débito (mandatory reference to modified eNCF and modification code).
+  - `34`: Nota de Crédito (mandatory reference to modified eNCF and modification code).
+  - `41`: Compras (mandatory ITBIS and/or ISR withholding block).
+  - `43`: Gastos Menores (strict zero fiscal credit enforcement).
+  - `44`: Regímenes Especiales (buyer identification & exemption rules).
+  - `45`: Gubernamental (government entity buyer verification).
+  - `46`: Exportaciones (ISO 3166-1 alpha-2 destination country & foreign currency).
+  - `47`: Pagos al Exterior (foreign payee tax withholding).
+- **Single e-CF Sending (`POST /api/ecf/send`)**: Prepares, validates, signs, and posts pre-built XML tax receipts directly to DGII REST services.
+- **RFCE Summaries (`POST /api/ecf/send-rfce`)**: Automatic validation, serialization, signing, and transmission of Consumption Invoice Summaries (RFCE).
+- **DGII Status Syncing (`GET /api/ecf/status`)**: Queries local and external services to sync transaction statuses (TrackId results) into the PostgreSQL database.
 - **Sequence Collision Recovery**: Automatically retries transmitting with a newly acquired sequence number if the DGII responds with a sequence-in-use error.
+- **B2B Receptor Exchange**: Endpoints for vendor e-CF reception (`/fe/recepcion/api/ecf`), producing signed `ARECF` acknowledgments, commercial approval (`/fe/aprobacioncomercial/api/ecf`), and mutual seed authentication (`/fe/autenticacion/api/semilla` and `/validacioncertificado`).
 - **Redis & Decorator Caching (`CachedEcfClient`)**: Caches taxpayer directories (24h), service status (5m), and maintenance windows (1h) with graceful in-memory fallback.
 - **Distributed Token Lock**: `EcfTokenManager` uses Redis distributed locks (`ecf:tokens:lock:{rnc}`) and token caching (`ecf:tokens:{rnc}`) to prevent token request thundering herds across distributed nodes.
 
 ### Cryptography & Security
-- **JWT Authorization**: Protects REST API endpoints with JWT token verification and role policies (`jwt-cpp`, HS256).
+- **Dual Authorization (JWT & Worker HMAC)**: Protects REST API endpoints with either JWT bearer tokens or machine-to-machine HMAC-SHA256 headers (`X-Worker-Key-Id`, `X-Request-Timestamp`, `X-Request-Nonce`, `X-Request-Signature`).
 - **XMLDSig (RSA-SHA256)**: Digitally signs invoices using enveloped signature transformations with Exclusive C14N (`xmlsec1` + OpenSSL), and validates certificate RNC ownership.
+- **Zero-Config Fallback Certificate**: Auto-generates self-signed X.509 certificates in memory when no physical certificate is configured, allowing instant test execution without blocking.
+- **Security Code Calculation**: Computes SHA-256 over `<ds:SignatureValue>` to derive the 6-character security code for invoice printing and QR verification.
+- **Local XSD Schema Gate**: Automatically matches and validates signed documents against 15 bundled official DGII XSD schemas using `libxml2` with multithreaded caching.
 - **Argon2id Password Hashing**: User credentials are stored using libsodium's `crypto_pwhash` (salted, adaptive).
 - **Auditing & Tracking**: Automatically registers creation, update, and soft-deletion dates/users for all tables.
 
@@ -106,27 +143,726 @@ graph TD
 ```text
 src/
 ├── Domain/              # Enterprise core: entities, value objects, exceptions, abstractions
-│   ├── Common/          # AuditableEntity base model
+│   ├── Common/          # AuditableEntity base model (created_at, updated_at, is_deleted)
 │   ├── Entities/        # User, Customer, EcfDocument, Rfce, ResponseModels, EcfClientOptions
-│   ├── Interfaces/      # Abstractions (IEcfClient, ICacheService, IEcfXmlSerializer, repositories, security)
+│   ├── Interfaces/      # Abstractions (IEcfClient, IEcfTransport, IEcfXmlSigner, IEcfSchemaValidator, repositories)
 │   └── Exceptions/      # Domain-specific exceptions (EcfSigningException, EcfValidationException)
 ├── Application/         # Application use cases, request handlers, validation rules
 │   ├── Common/          # Logging & validation behaviors, ValidationException, request validators
 │   ├── Customers/       # Customer CRUD handlers + DTOs
+│   ├── Documents/       # CanonicalDocumentDto, item normalization, and tax calculation
 │   ├── Ecf/             # SendEcf, SendRfce, and GetStatus handlers + DTOs
 │   ├── Auth/            # Authentication use cases + DTOs
-│   └── Services/        # EcfValidator, PollingHelper
+│   └── Services/        # EcfValidator, PollingHelper, EcfStatusReconciler
 ├── Infrastructure/      # Concrete implementations, DB access, DGII REST client
 │   ├── Caching/         # ICacheService implementation (RedisCacheService + In-Memory Fallback)
-│   ├── Persistence/     # DbContext, repositories, schema bootstrap, sequence provider
-│   ├── Security/        # PasswordHasher, TokenService, EcfXmlSigner, EcfSecurityUtils
-│   ├── Serialization/   # EcfXmlSerializer
+│   ├── Persistence/     # DbContext, repositories, RowMappers, UnitOfWork, DbInitializer, EcfSequenceManager
+│   ├── Security/        # PasswordHasher, TokenService, EcfXmlSigner, EcfSecurityUtils, CanonicalRequestHelper
+│   ├── Serialization/   # EcfXmlSerializer, EcfSchemaValidator, EcfXsdFileNameResolver
 │   └── Dgii/            # DgiiDirectTransport, EcfTokenManager, CachedEcfClient, EcfEnvironmentConfig
-├── Shared/              # Result<T> wrapper, cross-cutting helpers
+├── Shared/              # Result<T> wrapper, Sys (ISO-8601 UTC clocks), cross-cutting helpers
 └── Api/                 # Drogon host, controllers, filters, composition root
+    ├── Configuration/   # AppConfig JSON / environment variable loader
+    ├── Controllers/     # DocumentsController, EcfController, EmisorReceptorController, CustomersController, AuthController
+    ├── Filters/         # JwtAuthFilter, AdminRoleFilter, UserOrWorkerFilter (HMAC + Bearer)
+    └── Security/        # IdempotencyHandler, NonceCache
 db/schema.sql            # PostgreSQL schema (applied at startup)
 config/appsettings.json  # Runtime configuration
-tests/                   # Unit tests
+Documentación Técnica (XSD)/ # 15 official DGII XSD schema files
+tests/                   # Unit and integration test suites
+```
+
+---
+
+## How the C++ DGII Client Works (Detailed Technical Replication Guide)
+
+This section details every phase of the client pipeline so that any developer can understand, extend, or replicate the C++ implementation.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor ERP as Internal ERP
+    participant API as DocumentsController
+    participant Seq as EcfSequenceManager
+    participant Signer as EcfXmlSigner
+    participant XSD as EcfSchemaValidator
+    participant DB as PostgreSQL
+    participant DGII as DGII Web Service
+
+    ERP->>API: POST /api/documents (Canonical JSON)
+    Note over API: Step 1: Pre-allocation validation (10 types & ITBIS buckets)
+    Note over API: Step 2: Idempotency & EditSequence conflict check
+    API->>Seq: GetNextEncf(TenantId, TipoComprobante)
+    Seq-->>API: eNCF (e.g. E310000000001)
+    Note over API: Step 3: Build XML from canonical DTO
+    API->>Signer: SignXml(unsignedXml, rncEmisor)
+    Signer-->>API: Signed XML with <ds:Signature>
+    Note over API: Step 4: Extract Security Code (SHA-256)
+    API->>XSD: Validate(signedXml, xsdPath)
+    XSD-->>API: IsValid = true
+    API->>DB: Save EcfDocument (state = "AwaitingTransmission")
+    API->>DGII: POST /fe/recepcion/api/ecf (Signed XML)
+    alt Synchronous Response with TrackId
+        DGII-->>API: 200 OK (TrackId: d748f219-...)
+        API->>DB: Update (state = "Signed", TrackId)
+        API-->>ERP: 202 Accepted (documentId, eNCF, TrackId, securityCode)
+    else Network Timeout / 5xx
+        Note over API: Mark as "Uncertain", return 202 Accepted
+        API-->>ERP: 202 Accepted (state = "Uncertain")
+    end
+```
+
+### 1. Canonical ERP Ingestion & Type Guards
+Instead of forcing internal billing software to generate complex DGII XML, the API accepts a normalized `CanonicalDocumentDto`:
+- **Crédito Fiscal (31)**: Requires a valid buyer RNC (9 digits) or Cédula (11 digits).
+- **Consumo (32)**: For amounts $\ge 250,000$ DOP, the buyer must be identified with a valid RNC or Cédula.
+- **Notas de Débito (33) & Notas de Crédito (34)**: Must include the `References` block with `CorrectsENcf` (11 traditional or 13 e-CF digits) and `CodigoModificacion` (1: Anula, 2: Corrige Texto, 3: Corrige Montos).
+- **Compras (41)**: Must specify withholding amounts (`Retention` block with `montoRetencionRenta` and/or `montoItbisRetenido`).
+- **Gastos Menores (43)**: Enforces `montoGravadoTotal == 0` and `itbisTotal == 0` (no tax credits allowed under DGII regulation).
+- **Regímenes Especiales (44)**: Validates buyer tax identification and tax exemption requirements.
+- **Gubernamental (45)**: Requires government entity identification.
+- **Exportaciones (46)**: Requires ISO 3166-1 alpha-2 destination country code and foreign currency specification.
+- **Pagos al Exterior (47)**: Requires foreign payee withholding documentation.
+- **ITBIS Tax Buckets**: Only rates 18%, 16%, and 0% (`I1`, `I2`, `I3`) are allowed. Any other rate is rejected *before* allocating a sequence number.
+
+### 2. Sequence Allocation & Concurrency Control
+- Sequences are managed atomically in PostgreSQL (`ecf_sequences` table) with `SELECT ... FOR UPDATE` locks per `(tenant_id, tipo_comprobante)`.
+- If an existing invoice `SourceReference.TxnId` has already been processed:
+  - If it is in a `NeverTransmittedStates` (`Received`, `SequenceAllocated`, `Unsigned`, `RequiresManualReview`), its content is refreshed and retransmitted.
+  - If it is in `Uncertain` state and less than 2 minutes old, the API immediately returns `202 Accepted` to prevent duplicate DGII issuance.
+  - If the incoming `EditSequence` differs from the stored version, the API returns **HTTP 409 Conflict** (modified invoices require a corrective credit note, not re-submission).
+- Race condition recovery: If concurrent threads race on `uq_ecf_documents_tenant_source_txn`, the loser catches the unique constraint violation, refetches the winning row, and returns it safely.
+
+### 3. XML Compilation & Element Structure
+`buildXmlFromCanonical` compiles the document into the standard DGII structure:
+- Root element `<ECF>` with child `<Encabezado>`.
+- `<IdDoc>`: Contains `<TipoeCF>`, `<eNCF>`, `<FechaVencimientoSecuencia>`, `<IndicadorMontoNeto>`, `<TipoIngresos>`, `<TipoPago>`.
+- `<Emisor>`: Contains `<RNCEmisor>`, `<RazonSocialEmisor>`, `<FechaEmision>`, `<DireccionEmisor>`, etc.
+- `<Comprador>`: Contains `<RNCComprador>`, `<RazonSocialComprador>`, etc.
+- `<Totales>`: Contains `<MontoGravadoTotal>`, `<MontoGravadoI1>`, `<TotalITBIS>`, `<TotalITBIS1>`, `<MontoTotal>`.
+- `<DetallesItems>`: Contains `<Item>` with line number, item name, quantity, unit price, ITBIS indicator, item amount.
+- `<InformacionReferencia>`: Appended for credit notes (34) and debit notes (33) referencing the original eNCF.
+- `<Retencion>`: Appended for purchase bills (41) and foreign payments (47) with tax withholding amounts.
+
+### 4. XMLDSig Digital Signature & In-Memory Fallback
+- `EcfXmlSigner` uses `xmlsec1` and OpenSSL:
+  - Exclusive Canonicalization (C14N) transform (`http://www.w3.org/2001/10/xml-exc-c14n#`).
+  - Enveloped signature transform (`http://www.w3.org/2000/09/xmldsig#enveloped-signature`).
+  - RSA-SHA256 signature method (`http://www.w3.org/2001/04/xmldsig-more#rsa-sha256`).
+  - Embeds the public certificate inside `<ds:KeyInfo><ds:X509Data>`.
+- **Fallback Certificate**: When no certificate file is supplied, an in-memory 2048-bit RSA key and self-signed X.509 certificate are generated dynamically. The document is signed and stored as `Unsigned`, allowing test suites and offline staging to run without real DGII credentials.
+
+### 5. Security Code Calculation (SHA-256)
+- DGII requires a 6-character security code printed on invoices and encoded in QR codes.
+- `EcfSecurityUtils::calcularCodigoSeguridad` queries `//ds:SignatureValue` with XPath, computes the SHA-256 hash in OpenSSL, and takes the first 6 hexadecimal characters.
+
+### 6. Local XSD Schema Validation Gate
+- `EcfXsdFileNameResolver` inspects root elements and `<TipoeCF>` to select the exact official schema (e.g. `e-CF 31 v.1.0.xsd`, `RFCE 32 v.1.0.xsd`, `ARECF v1.0.xsd`).
+- `EcfSchemaValidator` compiles the XSD into an in-memory `xmlSchemaPtr` and validates the signed document.
+- Cached in memory using `std::shared_mutex` for lock-free concurrent validation across all worker threads.
+
+### 7. How Invoices, Credit Notes, and Bills Reach the DGII (Wire Protocol & Data Flow)
+
+Understanding the exact wire communication is critical to replicating this client in any language. The following breakdown describes the network protocol, headers, endpoints, and payloads used by `DgiiDirectTransport`:
+
+#### A. DGII Mutual Authentication Handshake (Seed & Token)
+Before transmitting any invoice, credit note, or bill, the client must obtain an ephemeral bearer token from the DGII authentication service:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Client as EcfDgii.Client (C++)
+    participant Redis as Redis Cache
+    participant Auth as DGII Autenticación
+
+    Client->>Redis: GET ecf:tokens:{rncEmisor}
+    alt Token Valid in Cache
+        Redis-->>Client: Cached Bearer Token
+    else Token Expired or Missing
+        Client->>Redis: SET ecf:tokens:lock:{rncEmisor} (NX, EX=30s)
+        Client->>Auth: GET /fe/autenticacion/api/semilla
+        Auth-->>Client: XML with <semilla>123456789</semilla>
+        Client->>Client: Sign XML with Certificate (XMLDSig RSA-SHA256)
+        Client->>Auth: POST /fe/autenticacion/api/validarsemilla (multipart: xml=semilla.xml)
+        Auth-->>Client: XML with <token>eyJhbGciOi...</token><expira>2026-09-11T16:00:00Z</expira>
+        Client->>Redis: SET ecf:tokens:{rncEmisor} (TTL = expira - 5min)
+        Client->>Redis: DEL ecf:tokens:lock:{rncEmisor}
+    end
+```
+
+#### B. Invoices (Tax Credit 31, Export 46, Government 45, etc.)
+1. **Endpoint**: `POST {RecepcionUrl}/api/facturaselectronicas`
+2. **HTTP Headers**:
+   ```http
+   POST /api/facturaselectronicas HTTP/1.1
+   Host: ecf.dgii.gov.do
+   Authorization: Bearer <dgii_jwt_token>
+   Content-Type: multipart/form-data; boundary=---------------------------974767299852498929531610575
+   ```
+3. **Multipart Body**:
+   - Field Name: `"xml"`
+   - Filename: `"{RNCEmisor}{TipoeCF}{eNCF}.xml"` (e.g. `10188906331E310000000001.xml`)
+   - Content: Complete UTF-8 signed XML document.
+4. **DGII Response**:
+   ```xml
+   <?xml version="1.0" encoding="utf-8"?>
+   <RecepcionEcfModel>
+     <codigo>0</codigo>
+     <estado>Recibido</estado>
+     <mensaje>Documento recibido exitosamente</mensaje>
+     <trackId>d748f219-c44d-4b92-944a-853503cb3659</trackId>
+     <fechaRecepcion>2026-09-11T08:15:30Z</fechaRecepcion>
+   </RecepcionEcfModel>
+   ```
+
+#### C. Credit Notes (Tipo 34) & Debit Notes (Tipo 33)
+Credit and debit notes travel through the **identical wire endpoint** (`POST /api/facturaselectronicas`), but DGII requires the `<InformacionReferencia>` tag inside the XML:
+- `NCFModificado`: The 11-character traditional NCF or 13-character eNCF (e.g. `E310000000001`).
+- `CodigoModificacion`:
+  - `1`: **Anula** (Complete invoice cancellation).
+  - `2`: **Corrige Texto** (Corrects description/metadata without altering financial sums).
+  - `3`: **Corrige Montos** (Partial refund, discount, or price adjustment).
+
+#### D. Purchase Bills (Tipo 41 - Compras / Retenciones)
+Purchase bills are issued when purchasing from informal vendors or individuals without tax receipts.
+- Wire endpoint: `POST /api/facturaselectronicas`.
+- Mandatory XML block `<Retencion>` inside `<Totales>`:
+  - `<MontoRetencionRenta>`: ISR amount withheld.
+  - `<MontoITBISRetenido>`: ITBIS amount withheld.
+
+#### E. Consumption Invoices Summary (RFCE - Resumen Facturas de Consumo)
+Consumption invoices (Tipo 32) under 250,000 DOP can be submitted in bulk using the electronic summary:
+- Endpoint: `POST {RecepcionFcUrl}/api/recepcion/ecf`.
+- Filename: `"{RNCEmisor}RFCE{eNCF}.xml"`.
+- Response contains a `trackId` corresponding to the batch submission.
+
+### 8. State Machine & Asynchronous Status Polling
+DGII validates electronic documents asynchronously. A document sent to DGII progresses through the following lifecycle states:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Received: ERP Ingests JSON
+    Received --> SequenceAllocated: eNCF Reserved (DB Lock)
+    SequenceAllocated --> Signed: XML Compiled & Signed
+    Signed --> AwaitingTransmission: Enqueued for DGII
+    AwaitingTransmission --> SignedWithTrackId: 200 OK + TrackId
+    AwaitingTransmission --> Uncertain: Network Timeout / 5xx
+    SignedWithTrackId --> AcceptedByDgii: TrackId Poller (Estado 0)
+    SignedWithTrackId --> RejectedByDgii: TrackId Poller (Errors)
+    Uncertain --> SignedWithTrackId: Reconciler verifies TrackId
+    Uncertain --> AcceptedByDgii: Reconciler queries eNCF Status
+    AcceptedByDgii --> [*]
+    RejectedByDgii --> [*]
+```
+
+- When DGII returns `TrackId`, state becomes `Signed` with `trackId` recorded.
+- If network drops or DGII returns 502/503/504, state becomes `Uncertain`.
+- Polling endpoint: `GET {ConsultasUrl}/api/consultas/trackids?trackId={trackId}`.
+- Status query endpoint: `GET {ConsultasUrl}/api/consultas/estatus?rncEmisor={rnc}&eNcf={eNcf}&rncComprador={comprador}&codigoSeguridad={secCode}`.
+
+### 9. B2B Vendor Invoicing Exchange (ARECF & ACECF)
+When trading with other electronic billing taxpayers, documents flow directly between peers:
+1. **Invoice Reception (`POST /fe/recepcion/api/ecf`)**:
+   - The vendor sends their signed XML invoice as multipart `xml`.
+   - The recipient parses the XML, validates the sender's signature, and creates an `ARECF` (Acuse de Recibo de Comprobante Fiscal Electrónico).
+   - The recipient digitally signs the `ARECF` using their own certificate and returns the signed XML directly in the HTTP 200 response.
+2. **Commercial Approval (`POST /fe/aprobacioncomercial/api/ecf`)**:
+   - Once goods or services are inspected, the buyer sends an `ACECF` (Aprobación Comercial de e-CF) document (`0`: Aprobado, `1`: Rechazado).
+   - The server validates the signature and registers the commercial approval.
+
+### 10. Background Status Reconciliation Thread
+- `EcfStatusReconciler` daemon thread runs every 15 minutes.
+- Scans `ecf_documents` where state is `AwaitingTransmission`, `Signed`, or `Uncertain` with age $> 2$ minutes.
+- Performs batched DGII status queries to reconcile processing states to `AcceptedByDgii` or `RejectedByDgii`.
+
+---
+
+## Complete Inventory of Completed Functions & Endpoints
+
+Every endpoint and service interface from the reference C# implementation is fully realized in C++:
+
+### REST API Endpoints
+
+| Category | Route | Method | Auth Scheme | Request Payload | Response Model | Description |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **ERP Documents** | `/api/documents` | `POST` | Bearer / Worker HMAC | `CanonicalDocumentDto` (JSON) | `DocumentSubmissionResponse` | Canonical invoice ingestion, validation of all 10 e-CF types, sequential allocation, signing, XSD gate, and DGII dispatch. |
+| **ERP Documents** | `/api/documents/by-source/{txnId}` | `GET` | Bearer / Worker HMAC | None | `DocumentSummaryDto` | Queries invoice state, eNCF, and security code by ERP source transaction ID. |
+| **Direct e-CF** | `/api/ecf/send` | `POST` | Bearer / Worker HMAC | `SendEcfCommand` (JSON) | `EcfRecepcionResponse` | Submits pre-built signed e-CF XML directly to DGII REST services. |
+| **Direct e-CF** | `/api/ecf/send-rfce` | `POST` | Bearer / Worker HMAC | `SendRfceCommand` (JSON) | `RfceRecepcionResponse` | Submits Consumption Summary (RFCE) to DGII. |
+| **Direct e-CF** | `/api/ecf/status` | `GET` | Bearer / Worker HMAC | Query Params (`rncEmisor`, `eNcf`, `trackId`) | `ConsultaEstadoResponse` | Queries DGII TrackId and eNCF processing status. |
+| **B2B Reception** | `/fe/recepcion/api/ecf` | `POST` | Anonymous / Multipart | `xml` (Vendor signed e-CF) | `ARECF` (Signed XML) | Receives vendor e-CF, verifies signature, and yields signed Acuse de Recibo (`ARECF`). |
+| **B2B Approval** | `/fe/aprobacioncomercial/api/ecf` | `POST` | Anonymous / Multipart | `xml` (Vendor `ACECF`) | HTTP 200 OK | Receives B2B commercial approval/rejection document. |
+| **B2B Auth** | `/fe/autenticacion/api/semilla` | `GET` | Anonymous | None | `SemillaModel` (XML) | Generates new cryptographic authentication seed for B2B peers. |
+| **B2B Auth** | `/fe/autenticacion/api/validacioncertificado` | `POST` | Anonymous / Multipart | `xml` (Signed seed XML) | `AutenticacionModel` (XML) | Validates signed seed and yields bearer session token. |
+| **Customers** | `/api/customers` | `GET` | Bearer Token | None | `CustomerListResponse` | Lists active customers for the authenticated tenant. |
+| **Customers** | `/api/customers/{id}` | `GET` | Bearer Token | None | `CustomerResponse` | Retrieves customer details by ID. |
+| **Customers** | `/api/customers` | `POST` | Bearer Token | `CreateCustomerCommand` | `CustomerResponse` | Registers a new customer record. |
+| **Customers** | `/api/customers/{id}` | `PUT` | Bearer Token | `UpdateCustomerCommand` | `CustomerResponse` | Updates an existing customer record. |
+| **Customers** | `/api/customers/{id}` | `DELETE` | Admin Role | None | HTTP 204 No Content | Soft-deletes a customer record. |
+| **User Auth** | `/api/auth/register` | `POST` | Anonymous | `RegisterUserCommand` | `AuthResponse` | Registers a new user with Argon2id password hashing. |
+| **User Auth** | `/api/auth/login` | `POST` | Anonymous | `LoginUserCommand` | `AuthResponse` | Authenticates user and issues JWT bearer token. |
+| **Observability**| `/health` | `GET` | Anonymous | None | Health JSON | Probes API, PostgreSQL, and Redis status. |
+| **Docs** | `/scalar` | `GET` | Anonymous | None | HTML | Interactive modern Scalar API reference. |
+| **Docs** | `/swagger` | `GET` | Anonymous | None | HTML | Interactive Swagger UI. |
+| **Docs** | `/openapi/v1.json` | `GET` | Anonymous | None | OpenAPI 3.0 JSON | Machine-readable OpenAPI 3.0 specification. |
+
+### Core `IEcfClient` Methods
+
+1. `sendEcf(xmlContent, fileName)`: Posts signed e-CF to DGII `/api/facturaselectronicas`.
+2. `sendRfce(rfce)`: Posts consumption summary to DGII `/api/recepcion/ecf`.
+3. `consultarResultado(trackId)`: Queries processing result by TrackId.
+4. `consultarEstado(rncEmisor, eNcf, rncComprador, codigoSeguridad)`: Queries status of specific eNCF.
+5. `consultarTrackIds(rncEmisor, eNcf)`: Retrieves list of TrackIds for a given eNCF.
+6. `consultarRfce(rncEmisor, eNcf, codigoSeguridad)`: Queries status of RFCE summary.
+7. `validarTimbreEcf(request)`: Validates electronic stamp and security code for e-CF.
+8. `validarTimbreFc(request)`: Validates electronic stamp for consumption invoices.
+9. `consultarDirectorio()`: Queries full DGII taxpayer directory (cached 24 hours in Redis).
+10. `consultarDirectorioPorRnc(rnc)`: Queries taxpayer status by RNC (cached 24 hours in Redis).
+11. `consultarEstatusServicios()`: Queries DGII web service availability status (cached 5 minutes).
+12. `consultarVentanasMantenimiento()`: Queries DGII scheduled maintenance windows (cached 1 hour).
+13. `verificarEstadoAmbiente(ambiente)`: Validates operational state of Test, Cert, or Prod environment.
+14. `anularRangos(xmlContent)`: Submits range cancellation requests for unused eNCFs.
+15. `sendAprobacionComercial(xmlContent, fileName)`: Sends B2B commercial approval (`ACECF`).
+
+---
+
+## JSON Payloads & Signed XML Examples
+
+### Example A: Tax Credit Invoice (Tipo 31 - Factura de Crédito Fiscal)
+
+#### Request (`POST /api/documents`)
+```json
+{
+  "tipoComprobante": "E31",
+  "sourceReference": {
+    "txnId": "INV-2026-00100",
+    "editSequence": "1"
+  },
+  "comprador": {
+    "rnc": "101672919",
+    "razonSocial": "DISTRIBUIDORA NACIONAL SAS"
+  },
+  "lines": [
+    {
+      "numeroLinea": 1,
+      "nombre": "Servicio de Mantenimiento de Servidores",
+      "cantidad": 1.0,
+      "precioUnitario": 25000.00,
+      "tasaItbis": 18.0
+    }
+  ],
+  "totals": {
+    "montoGravadoTotal": 25000.00,
+    "itbisTotal": 4500.00,
+    "montoTotal": 29500.00,
+    "taxBuckets": [
+      { "rate": 18.0, "taxableAmount": 25000.00, "taxAmount": 4500.00 }
+    ]
+  }
+}
+```
+
+#### Response (`202 Accepted`)
+```json
+{
+  "documentId": "550e8400-e29b-41d4-a716-446655440000",
+  "eNcf": "E310000000001",
+  "state": "Signed",
+  "trackId": "c4b31a89-0fa3-421d-91b3-4f932822a101",
+  "securityCode": "7a8b9c"
+}
+```
+
+#### Resulting Signed XML Generated & Sent to DGII
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<ECF>
+  <Encabezado>
+    <IdDoc>
+      <TipoeCF>31</TipoeCF>
+      <eNCF>E310000000001</eNCF>
+      <FechaVencimientoSecuencia>31-12-2026</FechaVencimientoSecuencia>
+      <IndicadorMontoNeto>1</IndicadorMontoNeto>
+      <TipoIngresos>01</TipoIngresos>
+      <TipoPago>1</TipoPago>
+    </IdDoc>
+    <Emisor>
+      <RNCEmisor>101889063</RNCEmisor>
+      <RazonSocialEmisor>WILLY CHIC DOMINICANA SRL</RazonSocialEmisor>
+      <FechaEmision>11-09-2026</FechaEmision>
+    </Emisor>
+    <Comprador>
+      <RNCComprador>101672919</RNCComprador>
+      <RazonSocialComprador>DISTRIBUIDORA NACIONAL SAS</RazonSocialComprador>
+    </Comprador>
+    <Totales>
+      <MontoGravadoTotal>25000.00</MontoGravadoTotal>
+      <MontoGravadoI1>25000.00</MontoGravadoI1>
+      <TotalITBIS>4500.00</TotalITBIS>
+      <TotalITBIS1>4500.00</TotalITBIS1>
+      <MontoTotal>29500.00</MontoTotal>
+    </Totales>
+  </Encabezado>
+  <DetallesItems>
+    <Item>
+      <NumeroLinea>1</NumeroLinea>
+      <IndicadorFacturacion>1</IndicadorFacturacion>
+      <NombreItem>Servicio de Mantenimiento de Servidores</NombreItem>
+      <CantidadItem>1.00</CantidadItem>
+      <PrecioUnitarioItem>25000.00</PrecioUnitarioItem>
+      <MontoItem>25000.00</MontoItem>
+    </Item>
+  </DetallesItems>
+  <Signature xmlns="http://www.w3.org/2000/09/xmldsig#">
+    <SignedInfo>
+      <CanonicalizationMethod Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>
+      <SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"/>
+      <Reference URI="">
+        <Transforms>
+          <Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/>
+          <Transform Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>
+        </Transforms>
+        <DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>
+        <DigestValue>y7yEAgwG9W0m9X6m9n...</DigestValue>
+      </Reference>
+    </SignedInfo>
+    <SignatureValue>7a8b9c...open-ssl-signature-bytes...</SignatureValue>
+    <KeyInfo>
+      <X509Data>
+        <X509Certificate>MIIFkzCCBHugAwIBAgIQ...</X509Certificate>
+      </X509Data>
+    </KeyInfo>
+  </Signature>
+</ECF>
+```
+
+---
+
+### Example B: Credit Note (Tipo 34 - Nota de Crédito)
+
+#### Request (`POST /api/documents`)
+```json
+{
+  "tipoComprobante": "E34",
+  "sourceReference": {
+    "txnId": "CN-2026-00050",
+    "editSequence": "1"
+  },
+  "comprador": {
+    "rnc": "101672919",
+    "razonSocial": "DISTRIBUIDORA NACIONAL SAS"
+  },
+  "references": {
+    "correctsENcf": "E310000000001",
+    "codigoModificacion": 1
+  },
+  "lines": [
+    {
+      "numeroLinea": 1,
+      "nombre": "Anulación Total Factura E310000000001",
+      "cantidad": 1.0,
+      "precioUnitario": 25000.00,
+      "tasaItbis": 18.0
+    }
+  ],
+  "totals": {
+    "montoGravadoTotal": 25000.00,
+    "itbisTotal": 4500.00,
+    "montoTotal": 29500.00,
+    "taxBuckets": [
+      { "rate": 18.0, "taxableAmount": 25000.00, "taxAmount": 4500.00 }
+    ]
+  }
+}
+```
+
+#### Signed XML Generated & Sent to DGII (Excerpt)
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<ECF>
+  <Encabezado>
+    <IdDoc>
+      <TipoeCF>34</TipoeCF>
+      <eNCF>E340000000001</eNCF>
+      <FechaVencimientoSecuencia>31-12-2026</FechaVencimientoSecuencia>
+      <IndicadorMontoNeto>1</IndicadorMontoNeto>
+    </IdDoc>
+    <Emisor>
+      <RNCEmisor>101889063</RNCEmisor>
+      <RazonSocialEmisor>WILLY CHIC DOMINICANA SRL</RazonSocialEmisor>
+    </Emisor>
+    <Comprador>
+      <RNCComprador>101672919</RNCComprador>
+      <RazonSocialComprador>DISTRIBUIDORA NACIONAL SAS</RazonSocialComprador>
+    </Comprador>
+    <Totales>
+      <MontoGravadoTotal>25000.00</MontoGravadoTotal>
+      <TotalITBIS>4500.00</TotalITBIS>
+      <MontoTotal>29500.00</MontoTotal>
+    </Totales>
+  </Encabezado>
+  <DetallesItems>
+    <Item>
+      <NumeroLinea>1</NumeroLinea>
+      <NombreItem>Anulación Total Factura E310000000001</NombreItem>
+      <MontoItem>25000.00</MontoItem>
+    </Item>
+  </DetallesItems>
+  <InformacionReferencia>
+    <NCFModificado>E310000000001</NCFModificado>
+    <CodigoModificacion>1</CodigoModificacion>
+  </InformacionReferencia>
+  <Signature xmlns="http://www.w3.org/2000/09/xmldsig#">
+    <SignedInfo>
+      <CanonicalizationMethod Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>
+      <SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"/>
+      <Reference URI="">
+        <Transforms>
+          <Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/>
+          <Transform Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>
+        </Transforms>
+        <DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>
+        <DigestValue>dGhpcyBpcyBhIHZhbGlkIHNoYTI1NiBkaWdlc3Q=</DigestValue>
+      </Reference>
+    </SignedInfo>
+    <SignatureValue>b3BlbnNzbCBzaWduYXR1cmUgdmFsdWUgaGV4...</SignatureValue>
+    <KeyInfo>
+      <X509Data>
+        <X509Certificate>MIIFkzCCA...cert...data...</X509Certificate>
+      </X509Data>
+    </KeyInfo>
+  </Signature>
+</ECF>
+```
+
+---
+
+### Example C: Debit Note (Tipo 33 - Nota de Débito)
+
+#### Request (`POST /api/documents`)
+```json
+{
+  "tipoComprobante": "E33",
+  "sourceReference": {
+    "txnId": "DN-2026-00012",
+    "editSequence": "1"
+  },
+  "comprador": {
+    "rnc": "101672919",
+    "razonSocial": "DISTRIBUIDORA NACIONAL SAS"
+  },
+  "references": {
+    "correctsENcf": "E310000000001",
+    "codigoModificacion": 3
+  },
+  "lines": [
+    {
+      "numeroLinea": 1,
+      "nombre": "Cargo Adicional por Flete no facturado",
+      "cantidad": 1.0,
+      "precioUnitario": 3000.00,
+      "tasaItbis": 18.0
+    }
+  ],
+  "totals": {
+    "montoGravadoTotal": 3000.00,
+    "itbisTotal": 540.00,
+    "montoTotal": 3540.00
+  }
+}
+```
+
+---
+
+### Example D: Purchase Bill (Tipo 41 - Compras / Retenciones)
+
+#### Request (`POST /api/documents`)
+```json
+{
+  "tipoComprobante": "E41",
+  "sourceReference": {
+    "txnId": "BILL-2026-0045",
+    "editSequence": "1"
+  },
+  "comprador": {
+    "rnc": "101889063",
+    "razonSocial": "WILLY CHIC DOMINICANA SRL"
+  },
+  "retention": {
+    "montoRetencionRenta": 2000.00,
+    "montoItbisRetenido": 1800.00
+  },
+  "lines": [
+    {
+      "numeroLinea": 1,
+      "nombre": "Servicios Profesionales de Auditoría Independiente",
+      "cantidad": 1.0,
+      "precioUnitario": 20000.00,
+      "tasaItbis": 18.0
+    }
+  ],
+  "totals": {
+    "montoGravadoTotal": 20000.00,
+    "itbisTotal": 3600.00,
+    "montoTotal": 23600.00
+  }
+}
+```
+
+#### Resulting XML Withholding Block
+```xml
+    <Totales>
+      <MontoGravadoTotal>20000.00</MontoGravadoTotal>
+      <TotalITBIS>3600.00</TotalITBIS>
+      <MontoTotal>23600.00</MontoTotal>
+    </Totales>
+    <Retencion>
+      <MontoRetencionRenta>2000.00</MontoRetencionRenta>
+      <MontoITBISRetenido>1800.00</MontoITBISRetenido>
+    </Retencion>
+```
+
+---
+
+### Example E: Consumption Invoice (Tipo 32 - Factura de Consumo)
+
+#### Request (`POST /api/documents`)
+```json
+{
+  "tipoComprobante": "E32",
+  "sourceReference": {
+    "txnId": "POS-2026-99381",
+    "editSequence": "1"
+  },
+  "lines": [
+    {
+      "numeroLinea": 1,
+      "nombre": "Venta de Mercancía al Detalle",
+      "cantidad": 2.0,
+      "precioUnitario": 1200.00,
+      "tasaItbis": 18.0
+    }
+  ],
+  "totals": {
+    "montoGravadoTotal": 2400.00,
+    "itbisTotal": 432.00,
+    "montoTotal": 2832.00
+  }
+}
+```
+
+*(Note: If `montoTotal` is $\ge 250,000.00$ DOP, the pre-allocation guard rejects the request unless `comprador.rnc` is provided).*
+
+---
+
+### Example F: B2B Reception Acknowledgment (ARECF XML)
+
+When an incoming vendor invoice is posted to `POST /fe/recepcion/api/ecf`, the client automatically generates, digitally signs, and responds with an `ARECF` document:
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<ARECF>
+  <DetalleAcusedeRecibo>
+    <Version>1.0</Version>
+    <RNCEmisor>101889063</RNCEmisor>
+    <RNCComprador>101672919</RNCComprador>
+    <eNCF>E310000000001</eNCF>
+    <Estado>0</Estado>
+    <FechaHoraAcuseRecibo>11-09-2026 14:30:00</FechaHoraAcuseRecibo>
+  </DetalleAcusedeRecibo>
+  <Signature xmlns="http://www.w3.org/2000/09/xmldsig#">
+    <SignedInfo>
+      <CanonicalizationMethod Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>
+      <SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"/>
+      <Reference URI="">
+        <Transforms>
+          <Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/>
+          <Transform Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>
+        </Transforms>
+        <DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>
+        <DigestValue>y1w2A...ARECF...Digest==</DigestValue>
+      </Reference>
+    </SignedInfo>
+    <SignatureValue>ARecfSignatureBytes...</SignatureValue>
+    <KeyInfo>
+      <X509Data>
+        <X509Certificate>MIIFkzCCA...receiver-certificate...</X509Certificate>
+      </X509Data>
+    </KeyInfo>
+  </Signature>
+</ARECF>
+```
+
+---
+
+### Example G: B2B Commercial Approval (ACECF XML)
+
+When a recipient approves an invoice commercially via `POST /fe/aprobacioncomercial/api/ecf`:
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<ACECF>
+  <DetalleAprobacionComercial>
+    <Version>1.0</Version>
+    <RNCEmisor>101889063</RNCEmisor>
+    <RNCComprador>101672919</RNCComprador>
+    <eNCF>E310000000001</eNCF>
+    <EstadoAprobacion>1</EstadoAprobacion>
+    <FechaHoraAprobacion>11-09-2026 15:45:00</FechaHoraAprobacion>
+  </DetalleAprobacionComercial>
+  <Signature xmlns="http://www.w3.org/2000/09/xmldsig#">
+    <!-- Enveloped digital signature of the approving buyer -->
+  </Signature>
+</ACECF>
+```
+
+---
+
+### Example H: DGII Seed Authentication Handshake (Semilla & Token XML)
+
+#### 1. DGII Seed Received (`GET /fe/autenticacion/api/semilla`)
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<SemillaModel>
+  <semilla>1726056930000</semilla>
+</SemillaModel>
+```
+
+#### 2. Seed Digitally Signed with Sender's Certificate
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<SemillaModel>
+  <semilla>1726056930000</semilla>
+  <Signature xmlns="http://www.w3.org/2000/09/xmldsig#">
+    <SignedInfo>
+      <CanonicalizationMethod Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>
+      <SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"/>
+      <Reference URI="">
+        <Transforms>
+          <Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/>
+          <Transform Algorithm="http://www.w3.org/2001/10/xml-exc-c14n#"/>
+        </Transforms>
+        <DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>
+        <DigestValue>K91jXp88...</DigestValue>
+      </Reference>
+    </SignedInfo>
+    <SignatureValue>SignedSeedHashValue...</SignatureValue>
+    <KeyInfo>
+      <X509Data>
+        <X509Certificate>MIIFkzCCA...</X509Certificate>
+      </X509Data>
+    </KeyInfo>
+  </Signature>
+</SemillaModel>
+```
+
+#### 3. DGII Bearer Token Returned (`POST /fe/autenticacion/api/validarsemilla`)
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<AutenticacionModel>
+  <token>eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJybmMiOiIxMDE4ODkwNjMiLCJleHAiOjE3MjYwNjA1MzB9...</token>
+  <expira>2026-09-11T16:00:00Z</expira>
+</AutenticacionModel>
 ```
 
 ---
@@ -148,8 +884,8 @@ tests/                   # Unit tests
    ```
 2. Configure and build (vcpkg resolves all dependencies from `vcpkg.json`):
    ```bash
-   cmake --preset default
-   cmake --build build --target ecfdgii_api
+   cmake -B build -S . -G Ninja -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" -DCMAKE_BUILD_TYPE=Release
+   cmake --build build
    ```
 3. Start the API:
    ```bash
@@ -157,7 +893,7 @@ tests/                   # Unit tests
    ./ecfdgii_api
    ```
 
-The build copies `appsettings.json` and `db/schema.sql` next to the produced binary.
+The build copies `appsettings.json`, `Documentación Técnica (XSD)`, and `db/schema.sql` next to the produced binary.
 
 ### Method 2: Docker Compose Run
 
@@ -170,9 +906,9 @@ The build copies `appsettings.json` and `db/schema.sql` next to the produced bin
    docker compose ps
    ```
 3. Access API and Interactive Documentation:
-   - **Scalar UI**: [http://localhost:8081/scalar](http://localhost:8081/scalar)
-   - **Swagger UI**: [http://localhost:8081/swagger](http://localhost:8081/swagger)
-   - **Health Check**: [http://localhost:8081/health](http://localhost:8081/health)
+   - **Scalar UI**: [http://localhost:8080/scalar](http://localhost:8080/scalar)
+   - **Swagger UI**: [http://localhost:8080/swagger](http://localhost:8080/swagger)
+   - **Health Check**: [http://localhost:8080/health](http://localhost:8080/health)
 
 ---
 
@@ -185,7 +921,7 @@ Dependencies are declared in `vcpkg.json` and resolved automatically during conf
   "dependencies": [
     "drogon",         // HTTP server framework (controllers, routing, filters)
     "cpr",            // HTTP client for outbound DGII calls (libcurl)
-    "libxml2",        // XML building and parsing
+    "libxml2",        // XML building, parsing, and XSD validation
     { "name": "xmlsec", "features": ["openssl"] }, // XMLDSig signing
     "openssl",        // SHA-256, PKCS#12, X.509, RSA
     "nlohmann-json",  // JSON (core & caching serialization)
@@ -209,33 +945,54 @@ Configure your server, database, Redis connection, credentials, and signing cert
 
 ```json
 {
-  "Server": { "Host": "0.0.0.0", "Port": 8080, "Threads": 0 },
+  "Server": {
+    "Host": "0.0.0.0",
+    "Port": 8080,
+    "Threads": 0
+  },
   "ConnectionStrings": {
     "DefaultConnection": "host=localhost port=5432 dbname=ecf_dgii user=postgres password=postgres",
     "Redis": "localhost:6379"
   },
   "JwtSettings": {
-    "Secret": "e_CF_Dominican_Tax_Authority_Secure_JWT_Secret_Token_2026_Key_Length_Minimum_32_Bytes!",
+    "Secret": "Your_Super_Secret_Key_Minimum_32_Bytes_Long!",
     "ExpirationMinutes": 60,
     "Issuer": "EcfDgiiClientIssuer",
     "Audience": "EcfDgiiClientAudience"
+  },
+  "EcfEmisor": {
+    "Rnc": "101889063",
+    "RazonSocial": "WILLY CHIC DOMINICANA SRL"
   },
   "EcfClientOptions": {
     "ApiKey": "",
     "BaseUrl": "https://ecf.dgii.gov.do",
     "Environment": "Test",
     "Mode": "DgiiDirect",
-    "RncEmisor": "101672919",
+    "RncEmisor": "101889063",
     "CertificatePath": "C:/config/credentials/dgii_certificate.p12",
     "CertificatePassword": "SecurePassword123",
-    "AutoRetryOnReuseableSequence": true
-  }
+    "AutoRetryOnReuseableSequence": true,
+    "ValidateSchemasLocal": true,
+    "XsdDirectoryPath": "Documentación Técnica (XSD)"
+  },
+  "EcfStatusPolling": {
+    "PollingIntervalMinutes": 15,
+    "MinDocumentAgeMinutes": 2,
+    "MaxPollingWindowHours": 72
+  },
+  "WorkerKeyId": "erp-worker-1",
+  "WorkerSecretKey": "ErpWorkerSecretKey_AtLeast32BytesLong!",
+  "WorkerTenantId": "default-tenant"
 }
 ```
 
 The database connection string uses the libpq keyword/value format. Environment variables override configuration settings at runtime:
 - `ConnectionStrings__DefaultConnection` -> PostgreSQL Connection String
 - `ConnectionStrings__Redis` / `REDIS_URL` -> Redis Connection String
+- `ECF_EMISOR_RNC` / `ECF_EMISOR_RAZON_SOCIAL` -> Sender Identity
+- `ECF_XSD_DIR` -> Local XSD Schemas Path
+- `WORKER_KEY_ID` / `WORKER_SECRET_KEY` -> HMAC Worker Credentials
 
 ---
 
@@ -246,6 +1003,7 @@ The solution includes an enterprise caching layer conforming to `domain::ICacheS
 - **`RedisCacheService`**: Communicates with Redis servers using TCP RESP protocol and supports expiration TTL and atomic distributed locking (`acquireLock` / `releaseLock`). If Redis is unreachable or unconfigured, it seamlessly operates in a thread-safe **In-Memory Fallback Mode**.
 - **`CachedEcfClient`**: Implements the Decorator pattern over `IEcfClient`, transparently serving:
   - `consultarDirectorio()` from cache for **24 Hours** (`ecf:directory:all`)
+  - `consultarDirectorioPorRnc(rnc)` from cache for **24 Hours** (`ecf:directory:<rnc>`)
   - `consultarEstatusServicios()` from cache for **5 Minutes** (`ecf:services:status`)
   - `consultarVentanasMantenimiento()` from cache for **1 Hour** (`ecf:maintenance:windows`)
 - **`EcfTokenManager` Distributed Renewal**: Uses Redis key `ecf:tokens:{rncEmisor}` and lock `ecf:tokens:lock:{rncEmisor}` to avoid unnecessary auth token requests to DGII endpoints.
@@ -278,7 +1036,7 @@ graph TD
 
 > [!IMPORTANT]
 > **Fallback Strategy (High Availability)**:
-> A resilience strategy is implemented where, if Redis is unavailable or temporarily fails, the system will gracefully degrade using `IMemoryCache` as a local in-memory fallback without interrupting the operation of the DGII client.
+> A resilience strategy is implemented where, if Redis is unavailable or temporarily fails, the system will gracefully degrade using local in-memory fallback without interrupting the operation of the DGII client.
 
 > [!NOTE]
 > **Orchestration with Docker Compose**:
@@ -296,41 +1054,30 @@ graph TD
 
 ---
 
-## Security & JWT Authentication
+## Security & Dual Authentication (JWT & HMAC)
 
-Endpoints are protected by a Drogon request filter (`JwtAuthFilter`) that validates the `Authorization: Bearer <token>` header. Validation checks the signing key, issuer, and audience, then stashes the user claims (`nameid`, `name`, `role`) on the request for downstream use. A second filter (`AdminRoleFilter`) enforces role-based authorization on privileged routes.
+Endpoints are protected by `UserOrWorkerFilter` which accepts two authentication schemes:
 
-```cpp
-// JwtAuthFilter.cpp — token validation with jwt-cpp
-auto decoded = jwt::decode(token);
-auto verifier = jwt::verify()
-    .allow_algorithm(jwt::algorithm::hs256{ jwtCfg.secret })
-    .with_issuer(jwtCfg.issuer)
-    .with_audience(jwtCfg.audience);
-verifier.verify(decoded);   // throws if invalid/expired
+1. **JWT Bearer Token**: Evaluated by `jwt-cpp`. Claims extracted: `userId`, `username`, `role`, `tenantId`.
+2. **Worker HMAC-SHA256**: Authenticates machine-to-machine worker clients using request headers:
+   - `X-Worker-Key-Id`: Worker identifier.
+   - `X-Request-Timestamp`: Unix epoch timestamp (validated within a 5-minute skew window).
+   - `X-Request-Nonce`: Random GUID checked against an in-memory anti-replay cache (`NonceCache`).
+   - `X-Request-Signature`: HMAC-SHA256 computed over `METHOD\nPATH_AND_QUERY\nTIMESTAMP\nNONCE\nSHA256(BODY)`.
 
-req->attributes()->insert("userId",   decoded.get_payload_claim("nameid").as_string());
-req->attributes()->insert("username", decoded.get_payload_claim("name").as_string());
-req->attributes()->insert("role",     decoded.get_payload_claim("role").as_string());
-```
-
----
-
-## XML Digital Signature (XMLDSig)
-
-The cryptographic signature of XML receipts is handled by the `EcfXmlSigner` service. It loads the private key from the client PKCS#12 certificate, validates that the certificate subject matches the sender's RNC, builds an enveloped signature template (Exclusive C14N + RSA-SHA256), computes the signature, and appends the `<Signature>` block.
+A second filter (`AdminRoleFilter`) enforces role-based authorization on privileged routes (e.g. deleting customers).
 
 ---
 
 ## API Endpoints Reference
 
-All endpoints except `Auth`, `/health`, `/scalar`, `/swagger`, and `/openapi/v1.json` require a valid JWT Bearer header: `Authorization: Bearer <your-token>`.
+All endpoints except `Auth`, `/health`, `/scalar`, `/swagger`, and `/openapi/v1.json` require a valid JWT Bearer header or Worker HMAC signature headers.
 
 | Route | Method | Authentication | Request Body | Description |
 | :--- | :--- | :--- | :--- | :--- |
 | `/scalar` | `GET` | Anonymous | None | Interactive Scalar API Reference UI |
 | `/swagger` | `GET` | Anonymous | None | Interactive Swagger UI |
-| `/openapi/v1.json` | `GET` | Anonymous | None | OpenAPI 3.0 specification JSON |
+| `/openapi/v1.json` | `GET` | Anonymous | None | Interactive OpenAPI 3.0 specification JSON |
 | `/health` | `GET` | Anonymous | None | System readiness and component health probe |
 | `/api/auth/register` | `POST` | Anonymous | `RegisterUserCommand` | Creates a new user |
 | `/api/auth/login` | `POST` | Anonymous | `LoginUserCommand` | Verifies user password and yields a JWT token |
@@ -339,77 +1086,15 @@ All endpoints except `Auth`, `/health`, `/scalar`, `/swagger`, and `/openapi/v1.
 | `/api/customers` | `POST` | Bearer Token | `CreateCustomerCommand` | Creates a new customer record |
 | `/api/customers/{id}` | `PUT` | Bearer Token | `UpdateCustomerCommand` | Updates an existing customer record |
 | `/api/customers/{id}` | `DELETE` | Admin Role | None | Soft-deletes a customer |
-| `/api/ecf/send` | `POST` | Bearer Token | `SendEcfCommand` | Signs and sends an XML e-CF document |
-| `/api/ecf/send-rfce` | `POST` | Bearer Token | `SendRfceCommand` | Signs and sends a Consumption Summary |
-| `/api/ecf/status` | `GET` | Bearer Token | Query Parameters | Queries current processing status |
-
----
-
-## JSON Request & Response Examples
-
-### 1. User Registration (`POST /api/auth/register`)
-
-**Request Payload:**
-```json
-{
-  "username": "jorge_admin",
-  "email": "jorge@domain.com",
-  "password": "SecurePassword123!",
-  "role": "Admin"
-}
-```
-
-**Response Payload (200 OK):**
-```json
-{
-  "username": "jorge_admin",
-  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "role": "Admin"
-}
-```
-
-### 2. User Login (`POST /api/auth/login`)
-
-**Request Payload:**
-```json
-{
-  "username": "jorge_admin",
-  "password": "SecurePassword123!"
-}
-```
-
-**Response Payload (200 OK):**
-```json
-{
-  "username": "jorge_admin",
-  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-  "role": "Admin"
-}
-```
-
-### 3. Send e-CF invoice (`POST /api/ecf/send`)
-
-**Request Payload:**
-```json
-{
-  "xmlContent": "<eCF xmlns=\"http://dgii.gov.do/eCF\">...</eCF>",
-  "fileName": "101672919E3100000001.xml",
-  "rncEmisor": "101672919",
-  "eNcf": "E310000000001",
-  "rncComprador": "22400013743",
-  "totalAmount": 1180.00,
-  "itbisAmount": 180.00
-}
-```
-
-**Response Payload (200 OK):**
-```json
-{
-  "trackId": "d748f219-c0ad-4d43-9878-837cc21087ab",
-  "error": null,
-  "mensaje": "e-CF recibido exitosamente"
-}
-```
+| `/api/documents` | `POST` | Bearer or HMAC | `CanonicalDocumentDto` | Ingests canonical ERP invoice, compiles XML, signs, checks XSD, and dispatches to DGII |
+| `/api/documents/by-source/{txnId}` | `GET` | Bearer or HMAC | None | Queries document state and eNCF by ERP source transaction ID |
+| `/api/ecf/send` | `POST` | Bearer or HMAC | `SendEcfCommand` | Submits pre-built signed XML e-CF document |
+| `/api/ecf/send-rfce` | `POST` | Bearer or HMAC | `SendRfceCommand` | Submits Consumption Summary (RFCE) |
+| `/api/ecf/status` | `GET` | Bearer or HMAC | Query Parameters | Queries current DGII processing status |
+| `/fe/recepcion/api/ecf` | `POST` | Multipart | XML File | B2B receptor endpoint: validates vendor e-CF and returns signed `ARECF` XML |
+| `/fe/aprobacioncomercial/api/ecf` | `POST` | Multipart | XML File | B2B commercial approval endpoint (`ACECF`) |
+| `/fe/autenticacion/api/semilla` | `GET` | Anonymous | None | Issues authentication seed XML (`SemillaModel`) |
+| `/fe/autenticacion/api/validacioncertificado` | `POST` | Multipart | XML File | Validates signed seed and returns authentication token |
 
 ---
 
@@ -419,21 +1104,40 @@ Column names use the database `snake_case` convention. The `DbContext` intercept
 
 ```sql
 -- db/schema.sql (excerpt)
-CREATE TABLE IF NOT EXISTS customers (
-    id         uuid PRIMARY KEY,
-    name       varchar(200) NOT NULL,
-    email      varchar(150),
-    rnc        varchar(20)  NOT NULL,
-    created_at timestamptz  NOT NULL,
-    created_by varchar(100),
-    updated_at timestamptz,
-    updated_by varchar(100),
-    deleted_at timestamptz,
-    deleted_by varchar(100),
-    is_deleted boolean      NOT NULL DEFAULT false
+CREATE TABLE IF NOT EXISTS ecf_documents (
+    id                     UUID PRIMARY KEY,
+    tenant_id              VARCHAR(50) NOT NULL DEFAULT 'default-tenant',
+    rnc_emisor             VARCHAR(20) NOT NULL,
+    rnc_comprador          VARCHAR(20),
+    e_ncf                  VARCHAR(13) NOT NULL,
+    source_txn_id          VARCHAR(100),
+    edit_sequence          VARCHAR(100),
+    document_kind          VARCHAR(50) NOT NULL DEFAULT 'Invoice',
+    ncf                    VARCHAR(19),
+    track_id               VARCHAR(100),
+    state                  VARCHAR(50) NOT NULL,
+    total_amount           NUMERIC(18, 2) NOT NULL DEFAULT 0,
+    itbis_amount           NUMERIC(18, 2) NOT NULL DEFAULT 0,
+    security_code          VARCHAR(10),
+    xml_content            TEXT NOT NULL,
+    signed_xml_content     TEXT,
+    dgii_response_xml      TEXT,
+    receipt_date           TIMESTAMPTZ,
+    sent_to_dgii_at        TIMESTAMPTZ,
+    last_status_check_at   TIMESTAMPTZ,
+    status_check_attempts  INT NOT NULL DEFAULT 0,
+    created_at             TIMESTAMPTZ NOT NULL,
+    created_by             VARCHAR(100),
+    updated_at             TIMESTAMPTZ,
+    updated_by             VARCHAR(100),
+    deleted_at             TIMESTAMPTZ,
+    deleted_by             VARCHAR(100),
+    is_deleted             BOOLEAN NOT NULL DEFAULT FALSE
 );
 
-CREATE INDEX IF NOT EXISTS ix_customers_rnc ON customers (rnc);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_ecf_documents_tenant_source_txn 
+ON ecf_documents (tenant_id, source_txn_id) 
+WHERE is_deleted = FALSE AND source_txn_id IS NOT NULL;
 ```
 
 ---
@@ -474,15 +1178,18 @@ public:
     virtual std::vector<TrackIdDetalle> consultarTrackIds(const std::string& rncEmisor,
                                                           const std::string& eNcf) = 0;
     virtual RfceConsultaResponse consultarRfce(const std::string& rncEmisor,
-                                               const std::string& eNcf,
-                                               const std::string& codigoSeguridad) = 0;
+                                                const std::string& eNcf,
+                                                const std::string& codigoSeguridad) = 0;
     virtual TimbreResponse   validarTimbreEcf(const TimbreEcfRequest& request) = 0;
     virtual TimbreFcResponse validarTimbreFc(const TimbreFcRequest& request) = 0;
     virtual std::vector<DirectorioContribuyente> consultarDirectorio() = 0;
+    virtual DirectorioContribuyente              consultarDirectorioPorRnc(const std::string& rnc) = 0;
     virtual std::vector<EstatusServicio>         consultarEstatusServicios() = 0;
     virtual std::vector<VentanaMantenimiento>    consultarVentanasMantenimiento() = 0;
     virtual std::string      verificarEstadoAmbiente(AmbienteEnum ambiente) = 0;
     virtual AnulacionResponse anularRangos(const std::string& xmlContent) = 0;
+    virtual AprobacionComercialResponse sendAprobacionComercial(
+        const std::string& xmlContent, const std::string& fileName) = 0;
 };
 }  // namespace ecf::domain
 ```
@@ -494,6 +1201,7 @@ public:
 - **Threaded HTTP server**: Drogon serves requests across a configurable worker-thread pool (`Server.Threads`, `0` = hardware concurrency).
 - **Cached DGII token & Distributed Locks**: `EcfTokenManager` uses Redis distributed locking and caches bearer tokens to avoid unnecessary token acquisition requests to DGII servers.
 - **Decorator Caching**: `CachedEcfClient` serves static/slow-changing DGII queries (Directorio, EstatusServicios, VentanasMantenimiento) directly from Redis.
+- **Multithreaded XSD Caching**: `EcfSchemaValidator` caches parsed schemas in memory protected by `std::shared_mutex`, eliminating schema compilation overhead on every request.
 - **Scoped database connections**: each request builds its own scope; mutations are staged and committed atomically by the unit of work in a single transaction.
 
 ---
@@ -507,21 +1215,23 @@ public:
 
 ---
 
-## Workflows
+## Complete Workflows
 
 ### Successful e-CF Invoice Submission Workflow
 
 ```
 Client App                   EcfDgii.Client API              DGII Gateway
    │                                 │                             │
-   │── POST /api/ecf/send ──────────►│                             │
-   │   (JWT authentication check)    │── 1. Sign XML (XMLDSig)     │
-   │                                 │── 2. Authenticate token     │
-   │                                 │── 3. Post payload ─────────►│
-   │                                 │◄── 4. Return TrackId ───────│
+   │── POST /api/documents ─────────►│                             │
+   │   (JWT / Worker HMAC check)     │── 1. Validate rules & types │
+   │                                 │── 2. Allocate sequence      │
+   │                                 │── 3. Compile & Sign (XML)   │
+   │                                 │── 4. Local XSD check        │
+   │                                 │── 5. Post payload ─────────►│
+   │                                 │◄── 6. Return TrackId ───────│
    │                                 │                             │
-   │                                 │── 5. Save to local Database │
-   │◄── Return TrackId ──────────────│                             │
+   │                                 │── 7. Save to local Database │
+   │◄── 202 Accepted (TrackId) ──────│                             │
 ```
 
 ---
@@ -604,9 +1314,22 @@ A GitHub Actions pipeline at `.github/workflows/ci.yml` runs on every push to `d
 Enable and run the test target:
 
 ```bash
-cmake --preset default -DECF_BUILD_TESTS=ON
-cmake --build build --target validator_tests
+cmake -B build -S . -G Ninja -DECF_BUILD_TESTS=ON
+cmake --build build
 ctest --test-dir build --output-on-failure
+```
+
+```text
+Test project C:/Users/Jorge/Pictures/DGII/EcfDgi.Client_C_Plus_Plus/build
+    Start 1: validator_tests
+1/3 Test #1: validator_tests ..................   Passed    0.05 sec
+    Start 2: hmac_tests
+2/3 Test #2: hmac_tests .......................   Passed    0.13 sec
+    Start 3: xsd_tests
+3/3 Test #3: xsd_tests ........................   Passed    0.99 sec
+
+100% tests passed, 0 tests failed out of 3
+Total Test time (real) = 1.26 sec
 ```
 
 ### Health Check Endpoint
@@ -614,7 +1337,7 @@ Check API, Database, and Redis status by requesting the `/health` endpoint:
 
 **Example Request:**
 ```bash
-curl http://localhost:8081/health
+curl http://localhost:8080/health
 ```
 
 **Example Response:**
