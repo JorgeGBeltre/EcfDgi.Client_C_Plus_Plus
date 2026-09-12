@@ -8,6 +8,7 @@
 namespace ecf::infra {
 
 struct EcfEnvironmentConfig {
+    domain::AmbienteEnum ambiente = domain::AmbienteEnum::Produccion;
     std::string autenticacionUrl;
     std::string recepcionUrl;
     std::string recepcionFcUrl;

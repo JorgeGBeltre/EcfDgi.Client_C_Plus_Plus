@@ -60,7 +60,16 @@ struct CanonicalRetentionDto {
     std::optional<double> montoIsrRetenido;
 };
 
+struct CanonicalCertificateDto {
+    std::optional<std::string> certificateBase64;
+    std::optional<std::string> password;
+    std::optional<std::string> certificatePath;
+};
+
 struct CanonicalDocumentDto {
+    std::optional<std::string> tenantId;
+    std::optional<std::string> environment;
+    std::optional<CanonicalCertificateDto> certificate;
     std::optional<std::string> ncf;
     SourceReferenceDto sourceReference;
     std::string documentKind = "Invoice"; // Invoice, CreditNote, DebitNote, Bill

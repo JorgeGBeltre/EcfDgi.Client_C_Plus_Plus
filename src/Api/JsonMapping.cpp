@@ -257,6 +257,16 @@ Rfce rfceFromJson(const Json::Value& j) {
 
 app::CanonicalDocumentDto canonicalDocumentFromJson(const Json::Value& j) {
     app::CanonicalDocumentDto d;
+    d.tenantId = optStr(j, "tenantId");
+    d.environment = optStr(j, "environment");
+    if (has(j, "certificate")) {
+        const auto& c = j["certificate"];
+        app::CanonicalCertificateDto cert;
+        cert.certificateBase64 = optStr(c, "certificateBase64");
+        cert.password = optStr(c, "password");
+        cert.certificatePath = optStr(c, "certificatePath");
+        d.certificate = cert;
+    }
     d.ncf = optStr(j, "ncf");
     d.documentKind = jstr(j, "documentKind", "Invoice");
     d.tipoComprobante = jstr(j, "tipoComprobante", "E31");

@@ -13,6 +13,7 @@ class EcfXmlSigner : public domain::IEcfXmlSigner {
 public:
     EcfXmlSigner();
     EcfXmlSigner(const std::string& pfxPath, const std::string& pfxPassword);
+    EcfXmlSigner(const std::vector<unsigned char>& pfxBytes, const std::string& pfxPassword);
 
     // Signs the document and returns the serialized signed XML.
     std::string signXml(const std::string& xmlContent, const std::string& rncEmisor) override;

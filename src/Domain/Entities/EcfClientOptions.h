@@ -12,6 +12,15 @@ enum class IntegrationMode { DgiiDirect };
 // DGII environment identifier used when selecting endpoints.
 enum class AmbienteEnum { PreCertificacion = 1, Certificacion = 2, Produccion = 3 };
 
+inline AmbienteEnum toAmbiente(EcfEnvironment env) {
+    switch (env) {
+        case EcfEnvironment::Test: return AmbienteEnum::PreCertificacion;
+        case EcfEnvironment::Cert: return AmbienteEnum::Certificacion;
+        case EcfEnvironment::Prod: return AmbienteEnum::Produccion;
+        default: return AmbienteEnum::Certificacion;
+    }
+}
+
 struct EcfClientOptions {
     std::optional<std::string> apiKey;
     std::optional<std::string> baseUrl;
@@ -23,6 +32,13 @@ struct EcfClientOptions {
     bool autoRetryOnReuseableSequence = true;
     std::optional<std::string> xsdDirectoryPath;
     bool validateSchemasLocal = true;
+
+    AmbienteEnum toAmbiente(EcfEnvironment env) const {
+        return ecf::domain::toAmbiente(env);
+    }
+    AmbienteEnum toAmbiente() const {
+        return ecf::domain::toAmbiente(environment);
+    }
 };
 
 struct EcfEmisorOptions {

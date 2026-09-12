@@ -8,6 +8,7 @@ using domain::AmbienteEnum;
 
 EcfEnvironmentConfig EcfEnvironmentConfig::getConfig(AmbienteEnum ambiente) {
     EcfEnvironmentConfig c;
+    c.ambiente = ambiente;
     switch (ambiente) {
         case AmbienteEnum::PreCertificacion:
             c.autenticacionUrl = "https://ecf.dgii.gov.do/testecf/autenticacion";

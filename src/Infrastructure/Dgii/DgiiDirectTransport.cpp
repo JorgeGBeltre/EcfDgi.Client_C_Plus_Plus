@@ -107,9 +107,10 @@ std::string DgiiDirectTransport::getAuthToken() {
 
 EcfRecepcionResponse DgiiDirectTransport::sendEcf(const std::string& xmlContent,
                                                   const std::string& fileName) {
-    auto token = getAuthToken();
-    auto resp = cpr::Post(cpr::Url{config_.recepcionUrl + "/api/facturaselectronicas"},
-                          cpr::Bearer{token}, xmlPart(xmlContent, fileName));
+    auto resp = sendWithReactiveAuth([&](const std::string& token) {
+        return cpr::Post(cpr::Url{config_.recepcionUrl + "/api/facturaselectronicas"},
+                         cpr::Bearer{token}, xmlPart(xmlContent, fileName));
+    });
     if (looksLikeXml(resp.text, contentTypeOf(resp)))
         return xmlSerializer_.deserializeEcfRecepcion(resp.text);
 
@@ -125,9 +126,10 @@ EcfRecepcionResponse DgiiDirectTransport::sendEcf(const std::string& xmlContent,
 
 RfceRecepcionResponse DgiiDirectTransport::sendRfce(const std::string& xmlContent,
                                                     const std::string& fileName) {
-    auto token = getAuthToken();
-    auto resp = cpr::Post(cpr::Url{config_.recepcionFcUrl + "/api/recepcion/ecf"},
-                          cpr::Bearer{token}, xmlPart(xmlContent, fileName));
+    auto resp = sendWithReactiveAuth([&](const std::string& token) {
+        return cpr::Post(cpr::Url{config_.recepcionFcUrl + "/api/recepcion/ecf"},
+                         cpr::Bearer{token}, xmlPart(xmlContent, fileName));
+    });
     if (looksLikeXml(resp.text, contentTypeOf(resp)))
         return xmlSerializer_.deserializeRfceRecepcion(resp.text);
 
@@ -142,10 +144,11 @@ RfceRecepcionResponse DgiiDirectTransport::sendRfce(const std::string& xmlConten
 }
 
 ConsultaResultadoResponse DgiiDirectTransport::consultarResultado(const std::string& trackId) {
-    auto token = getAuthToken();
-    auto resp = cpr::Get(
-        cpr::Url{config_.consultaResultadoUrl + "/api/consultas/estado?trackid=" + trackId},
-        cpr::Bearer{token}, cpr::Header{{"Accept", "application/json"}});
+    auto resp = sendWithReactiveAuth([&](const std::string& token) {
+        return cpr::Get(
+            cpr::Url{config_.consultaResultadoUrl + "/api/consultas/estado?trackid=" + trackId},
+            cpr::Bearer{token}, cpr::Header{{"Accept", "application/json"}});
+    });
     json j = parseJson(resp.text);
     ConsultaResultadoResponse r;
     r.trackId = jstr(j, "trackId");
@@ -160,7 +163,6 @@ ConsultaResultadoResponse DgiiDirectTransport::consultarResultado(const std::str
 }
 
 ConsultaEstadoResponse DgiiDirectTransport::consultarEstado(const ConsultaEstadoRequest& req) {
-    auto token = getAuthToken();
     std::string url = config_.consultaEstadoUrl +
                       "/api/consultas/estado?rncemisor=" + req.rncEmisor +
                       "&ncfelectronico=" + req.eNcf;
@@ -169,8 +171,10 @@ ConsultaEstadoResponse DgiiDirectTransport::consultarEstado(const ConsultaEstado
     if (req.codigoSeguridad && !req.codigoSeguridad->empty())
         url += "&codigoseguridad=" + *req.codigoSeguridad;
 
-    auto resp = cpr::Get(cpr::Url{url}, cpr::Bearer{token},
-                         cpr::Header{{"Accept", "application/json"}});
+    auto resp = sendWithReactiveAuth([&](const std::string& token) {
+        return cpr::Get(cpr::Url{url}, cpr::Bearer{token},
+                        cpr::Header{{"Accept", "application/json"}});
+    });
     json j = parseJson(resp.text);
     ConsultaEstadoResponse r;
     r.codigo = jint(j, "codigo");
@@ -189,11 +193,12 @@ ConsultaEstadoResponse DgiiDirectTransport::consultarEstado(const ConsultaEstado
 
 std::vector<TrackIdDetalle> DgiiDirectTransport::consultarTrackIds(const std::string& rncEmisor,
                                                                    const std::string& eNcf) {
-    auto token = getAuthToken();
-    auto resp = cpr::Get(cpr::Url{config_.consultaTrackIdsUrl +
-                                  "/api/trackids/consulta?rncemisor=" + rncEmisor +
-                                  "&encf=" + eNcf},
-                         cpr::Bearer{token}, cpr::Header{{"Accept", "application/json"}});
+    auto resp = sendWithReactiveAuth([&](const std::string& token) {
+        return cpr::Get(cpr::Url{config_.consultaTrackIdsUrl +
+                                 "/api/trackids/consulta?rncemisor=" + rncEmisor +
+                                 "&encf=" + eNcf},
+                        cpr::Bearer{token}, cpr::Header{{"Accept", "application/json"}});
+    });
     json j = parseJson(resp.text);
     std::vector<TrackIdDetalle> out;
     if (j.is_array()) {
@@ -211,11 +216,12 @@ std::vector<TrackIdDetalle> DgiiDirectTransport::consultarTrackIds(const std::st
 RfceConsultaResponse DgiiDirectTransport::consultarRfce(const std::string& rncEmisor,
                                                         const std::string& eNcf,
                                                         const std::string& codigoSeguridad) {
-    auto token = getAuthToken();
-    auto resp = cpr::Get(cpr::Url{config_.consultaRfceUrl +
-                                  "/api/Consultas/Consulta?RNC_Emisor=" + rncEmisor +
-                                  "&ENCF=" + eNcf + "&Cod_Seguridad_eCF=" + codigoSeguridad},
-                         cpr::Bearer{token}, cpr::Header{{"Accept", "application/json"}});
+    auto resp = sendWithReactiveAuth([&](const std::string& token) {
+        return cpr::Get(cpr::Url{config_.consultaRfceUrl +
+                                 "/api/Consultas/Consulta?RNC_Emisor=" + rncEmisor +
+                                 "&ENCF=" + eNcf + "&Cod_Seguridad_eCF=" + codigoSeguridad},
+                        cpr::Bearer{token}, cpr::Header{{"Accept", "application/json"}});
+    });
     json j = parseJson(resp.text);
     RfceConsultaResponse r;
     r.rnc = jstr(j, "rnc");
@@ -229,9 +235,10 @@ RfceConsultaResponse DgiiDirectTransport::consultarRfce(const std::string& rncEm
 
 AprobacionComercialResponse DgiiDirectTransport::sendAprobacionComercial(
     const std::string& xmlContent, const std::string& fileName) {
-    auto token = getAuthToken();
-    auto resp = cpr::Post(cpr::Url{config_.aprobacionComercialUrl + "/api/aprobacioncomercial"},
-                          cpr::Bearer{token}, xmlPart(xmlContent, fileName));
+    auto resp = sendWithReactiveAuth([&](const std::string& token) {
+        return cpr::Post(cpr::Url{config_.aprobacionComercialUrl + "/api/aprobacioncomercial"},
+                         cpr::Bearer{token}, xmlPart(xmlContent, fileName));
+    });
     json j = parseJson(resp.text);
     AprobacionComercialResponse r;
     r.codigo = jstr(j, "codigo");
@@ -243,11 +250,12 @@ AprobacionComercialResponse DgiiDirectTransport::sendAprobacionComercial(
 }
 
 AnulacionResponse DgiiDirectTransport::anularRangos(const std::string& xmlContent) {
-    auto token = getAuthToken();
-    auto resp = cpr::Post(cpr::Url{config_.anulacionRangosUrl + "/api/operaciones/anularrango"},
-                          cpr::Bearer{token},
-                          cpr::Header{{"Content-Type", "text/xml; charset=utf-8"}},
-                          cpr::Body{xmlContent});
+    auto resp = sendWithReactiveAuth([&](const std::string& token) {
+        return cpr::Post(cpr::Url{config_.anulacionRangosUrl + "/api/operaciones/anularrango"},
+                         cpr::Bearer{token},
+                         cpr::Header{{"Content-Type", "text/xml; charset=utf-8"}},
+                         cpr::Body{xmlContent});
+    });
     json j = parseJson(resp.text);
     AnulacionResponse r;
     r.rnc = jstr(j, "rnc");

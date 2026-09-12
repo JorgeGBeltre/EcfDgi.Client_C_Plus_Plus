@@ -163,6 +163,19 @@ std::vector<unsigned char> generateSelfSignedPfx(const std::string& password) {
 
 EcfXmlSigner::EcfXmlSigner() : EcfXmlSigner("", "") {}
 
+EcfXmlSigner::EcfXmlSigner(const std::vector<unsigned char>& pfxBytes, const std::string& pfxPassword)
+    : pfxBytes_(pfxBytes), pfxPassword_(pfxPassword) {
+    ensureXmlSecInit();
+    if (pfxBytes_.empty()) {
+        pfxPassword_ = "EcfTestPassword123!";
+        pfxBytes_ = generateSelfSignedPfx(pfxPassword_);
+        usesFallbackCertificate_ = true;
+    } else {
+        usesFallbackCertificate_ = false;
+    }
+    certSubject_ = parseSubject(pfxBytes_, pfxPassword_);
+}
+
 EcfXmlSigner::EcfXmlSigner(const std::string& pfxPath, const std::string& pfxPassword)
     : pfxPassword_(pfxPassword) {
     ensureXmlSecInit();

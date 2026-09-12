@@ -4,6 +4,7 @@
 #include <cctype>
 #include <chrono>
 #include <ctime>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <regex>
@@ -11,11 +12,16 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include <drogon/utils/Utilities.h>
+
 #include "Api/AppServices.h"
 #include "Api/JsonMapping.h"
 #include "Api/Security/IdempotencyHandler.h"
+#include "Infrastructure/Dgii/EcfEnvironmentConfig.h"
+#include "Infrastructure/EcfClient.h"
 #include "Infrastructure/Persistence/RowMappers.h"
 #include "Infrastructure/Security/EcfSecurityUtils.h"
+#include "Infrastructure/Security/EcfXmlSigner.h"
 #include "Infrastructure/Serialization/EcfXsdFileNameResolver.h"
 #include "Shared/Common/Sys.h"
 
@@ -547,10 +553,119 @@ void applyCanonicalContent(domain::EcfDocument& doc,
     doc.state = "SequenceAllocated";
 }
 
-HttpResponsePtr signAndSend(domain::EcfDocument& doc, AppServices::Scope& scope, AppServices& services) {
+domain::AmbienteEnum resolveAmbienteEnum(const std::string& rawEnv, domain::AmbienteEnum defaultAmbiente) {
+    if (rawEnv.empty()) return defaultAmbiente;
+    std::string lower = rawEnv;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+    if (lower == "test" || lower == "testecf" || lower.find("precert") != std::string::npos)
+        return domain::AmbienteEnum::PreCertificacion;
+    if (lower == "cert" || lower == "certecf" || lower.find("certific") != std::string::npos || lower.find("homolog") != std::string::npos)
+        return domain::AmbienteEnum::Certificacion;
+    if (lower == "prod" || lower == "ecf" || lower.find("producc") != std::string::npos)
+        return domain::AmbienteEnum::Produccion;
+    if (lower == "1" || lower == "precertificacion") return domain::AmbienteEnum::PreCertificacion;
+    if (lower == "2" || lower == "produccion") return domain::AmbienteEnum::Produccion;
+    if (lower == "3" || lower == "certificacion") return domain::AmbienteEnum::Certificacion;
+    return defaultAmbiente;
+}
+
+std::string ambienteToString(domain::AmbienteEnum amb) {
+    switch (amb) {
+        case domain::AmbienteEnum::PreCertificacion: return "PreCertificacion";
+        case domain::AmbienteEnum::Produccion: return "Produccion";
+        case domain::AmbienteEnum::Certificacion: return "Certificacion";
+        default: return "Certificacion";
+    }
+}
+
+std::shared_ptr<domain::IEcfXmlSigner> resolveSigner(
+    const std::string& tenantId,
+    const std::string& rncEmisor,
+    const std::optional<app::CanonicalCertificateDto>& certDto,
+    bool isDefaultFallback,
+    AppServices& services) {
+    if (isDefaultFallback) {
+        return services.signer();
+    }
+
+    if (certDto.has_value() && certDto->certificateBase64.has_value() && !certDto->certificateBase64->empty()) {
+        try {
+            auto rawBytes = drogon::utils::base64Decode(*certDto->certificateBase64);
+            std::vector<unsigned char> bytes(rawBytes.begin(), rawBytes.end());
+            std::string pwd = certDto->password.value_or("");
+            return std::make_shared<infra::EcfXmlSigner>(bytes, pwd);
+        } catch (...) {
+            // fallback
+        }
+    }
+
+    if (certDto.has_value() && certDto->certificatePath.has_value() && !certDto->certificatePath->empty()) {
+        try {
+            std::string pwd = certDto->password.value_or("");
+            return std::make_shared<infra::EcfXmlSigner>(*certDto->certificatePath, pwd);
+        } catch (...) {
+            // fallback
+        }
+    }
+
+    // Default certificate directory search
+    std::string defaultCertDir = "/app/certificates";
+    std::string tenantCertFile = defaultCertDir + "/" + tenantId + ".pfx";
+    std::ifstream tf(tenantCertFile);
+    if (tf.good()) {
+        std::string pwd = (certDto.has_value() && certDto->password.has_value()) ? *certDto->password : "EcfTestPassword123!";
+        try {
+            return std::make_shared<infra::EcfXmlSigner>(tenantCertFile, pwd);
+        } catch (...) {}
+    }
+
+    std::string rncCertFile = defaultCertDir + "/" + rncEmisor + ".pfx";
+    std::ifstream rf(rncCertFile);
+    if (rf.good()) {
+        std::string pwd = (certDto.has_value() && certDto->password.has_value()) ? *certDto->password : "EcfTestPassword123!";
+        try {
+            return std::make_shared<infra::EcfXmlSigner>(rncCertFile, pwd);
+        } catch (...) {}
+    }
+
+    return services.signer();
+}
+
+std::shared_ptr<domain::IEcfClient> resolveEcfClient(
+    const std::string& rncEmisor,
+    std::shared_ptr<domain::IEcfXmlSigner> signer,
+    domain::AmbienteEnum ambiente,
+    bool isDefaultFallback,
+    AppServices& services) {
+    if (isDefaultFallback || (signer == services.signer() &&
+        rncEmisor == services.emisorOptions().rnc &&
+        ambiente == services.ecfClientOptions().toAmbiente(services.ecfClientOptions().environment))) {
+        return services.ecfClient();
+    }
+
+    domain::EcfClientOptions tenantOptions;
+    tenantOptions.rncEmisor = rncEmisor;
+    switch (ambiente) {
+        case domain::AmbienteEnum::PreCertificacion: tenantOptions.environment = domain::EcfEnvironment::Test; break;
+        case domain::AmbienteEnum::Certificacion: tenantOptions.environment = domain::EcfEnvironment::Cert; break;
+        case domain::AmbienteEnum::Produccion: tenantOptions.environment = domain::EcfEnvironment::Prod; break;
+    }
+    tenantOptions.mode = domain::IntegrationMode::DgiiDirect;
+    tenantOptions.validateSchemasLocal = services.ecfClientOptions().validateSchemasLocal;
+    tenantOptions.xsdDirectoryPath = services.ecfClientOptions().xsdDirectoryPath;
+
+    return std::make_shared<infra::EcfClient>(tenantOptions, nullptr, services.cacheService(), services.schemaValidator(), signer);
+}
+
+HttpResponsePtr signAndSend(domain::EcfDocument& doc, AppServices::Scope& scope, AppServices& services,
+                            std::shared_ptr<domain::IEcfXmlSigner> effectiveSigner = nullptr,
+                            std::shared_ptr<domain::IEcfClient> effectiveClient = nullptr) {
+    auto signer = effectiveSigner ? effectiveSigner : services.signer();
+    auto client = effectiveClient ? effectiveClient : services.ecfClient();
+
     std::string signedXml;
     try {
-        signedXml = services.signer()->signXml(doc.xmlContent, doc.rncEmisor);
+        signedXml = signer->signXml(doc.xmlContent, doc.rncEmisor);
         std::string secCode = EcfSecurityUtils::calcularCodigoSeguridad(signedXml);
         for (auto& c : secCode) c = static_cast<char>(std::toupper(c));
 
@@ -585,7 +700,7 @@ HttpResponsePtr signAndSend(domain::EcfDocument& doc, AppServices::Scope& scope,
         }
     }
 
-    if (services.signer()->usesFallbackCertificate()) {
+    if (signer->usesFallbackCertificate()) {
         doc.state = "Unsigned";
         scope.docs->update(doc);
         scope.uow->saveChanges();
@@ -604,7 +719,7 @@ HttpResponsePtr signAndSend(domain::EcfDocument& doc, AppServices::Scope& scope,
 
     try {
         std::string fileName = doc.rncEmisor + doc.eNcf + ".xml";
-        auto response = services.ecfClient()->sendEcf(doc.signedXmlContent.value(), fileName);
+        auto response = client->sendEcf(doc.signedXmlContent.value(), fileName);
         if (!response.trackId.empty()) {
             doc.trackId = response.trackId;
             doc.state = "Signed";
@@ -635,7 +750,11 @@ HttpResponsePtr reconcileUncertain(domain::EcfDocument& doc,
                                    AppServices::Scope& scope,
                                    AppServices& services,
                                    const std::string& emisorRnc,
-                                   const std::string& emisorRazonSocial) {
+                                   const std::string& emisorRazonSocial,
+                                   std::shared_ptr<domain::IEcfXmlSigner> effectiveSigner = nullptr,
+                                   std::shared_ptr<domain::IEcfClient> effectiveClient = nullptr) {
+    auto client = effectiveClient ? effectiveClient : services.ecfClient();
+
     // Check minimum age: updatedAt or createdAt
     std::string timestampStr = doc.updatedAt.value_or(doc.createdAt);
     if (!timestampStr.empty()) {
@@ -656,7 +775,7 @@ HttpResponsePtr reconcileUncertain(domain::EcfDocument& doc,
     domain::ConsultaEstadoResponse status;
     bool querySucceeded = false;
     try {
-        status = services.ecfClient()->consultarEstado(doc.rncEmisor, doc.eNcf);
+        status = client->consultarEstado(doc.rncEmisor, doc.eNcf);
         querySucceeded = true;
     } catch (...) {
         querySucceeded = false;
@@ -696,7 +815,7 @@ HttpResponsePtr reconcileUncertain(domain::EcfDocument& doc,
     applyCanonicalContent(doc, dto, editSequence, emisorRnc, emisorRazonSocial);
     scope.docs->update(doc);
     scope.uow->saveChanges();
-    return signAndSend(doc, scope, services);
+    return signAndSend(doc, scope, services, effectiveSigner, effectiveClient);
 }
 
 HttpResponsePtr handleExistingDocument(domain::EcfDocument& existingDoc,
@@ -705,16 +824,18 @@ HttpResponsePtr handleExistingDocument(domain::EcfDocument& existingDoc,
                                        AppServices::Scope& scope,
                                        AppServices& services,
                                        const std::string& emisorRnc,
-                                       const std::string& emisorRazonSocial) {
+                                       const std::string& emisorRazonSocial,
+                                       std::shared_ptr<domain::IEcfXmlSigner> effectiveSigner = nullptr,
+                                       std::shared_ptr<domain::IEcfClient> effectiveClient = nullptr) {
     if (NeverTransmittedStates.count(existingDoc.state)) {
         applyCanonicalContent(existingDoc, dto, editSequence, emisorRnc, emisorRazonSocial);
         scope.docs->update(existingDoc);
         scope.uow->saveChanges();
-        return signAndSend(existingDoc, scope, services);
+        return signAndSend(existingDoc, scope, services, effectiveSigner, effectiveClient);
     }
 
     if (existingDoc.state == "Uncertain") {
-        return reconcileUncertain(existingDoc, dto, editSequence, scope, services, emisorRnc, emisorRazonSocial);
+        return reconcileUncertain(existingDoc, dto, editSequence, scope, services, emisorRnc, emisorRazonSocial, effectiveSigner, effectiveClient);
     }
 
     if (existingDoc.editSequence != editSequence) {
@@ -848,14 +969,39 @@ void DocumentsController::submit(const HttpRequestPtr& req,
             std::string emisorRazonSocial = services.emisorOptions().razonSocial;
             if (emisorRazonSocial.empty()) emisorRazonSocial = "WILLY CHIC DOMINICANA SRL";
 
+            std::string effectiveTenantId = tenantId;
+            if (effectiveTenantId == "default-tenant") {
+                std::string hTenant = req->getHeader("X-Tenant-Id");
+                if (!hTenant.empty()) {
+                    effectiveTenantId = hTenant;
+                } else if (dto.tenantId.has_value() && !dto.tenantId->empty()) {
+                    effectiveTenantId = *dto.tenantId;
+                }
+            }
+
+            std::string rawEnv = req->getHeader("X-Environment");
+            if (rawEnv.empty() && dto.environment.has_value()) {
+                rawEnv = *dto.environment;
+            }
+            auto defaultAmbiente = services.ecfClientOptions().toAmbiente(services.ecfClientOptions().environment);
+            auto ambiente = resolveAmbienteEnum(rawEnv, defaultAmbiente);
+
+            bool isDefaultFallback = (effectiveTenantId == "default-tenant" && rawEnv.empty() &&
+                                      req->getHeader("X-Tenant-Id").empty() &&
+                                      (!dto.tenantId.has_value() || dto.tenantId->empty()));
+            std::string sequenceScope = isDefaultFallback ? "default-tenant" : (effectiveTenantId + ":" + ambienteToString(ambiente));
+
+            auto effectiveSigner = resolveSigner(effectiveTenantId, emisorRnc, dto.certificate, isDefaultFallback, services);
+            auto effectiveClient = resolveEcfClient(emisorRnc, effectiveSigner, ambiente, isDefaultFallback, services);
+
             auto scope = services.makeScope(mapping::currentUserFrom(req));
             std::string editSequence = dto.sourceReference.editSequence;
 
             // Check if document for this TxnId has already been processed
             try {
-                auto existing = scope.docs->getBySourceTxnId(tenantId, dto.sourceReference.txnId);
+                auto existing = scope.docs->getBySourceTxnId(effectiveTenantId, dto.sourceReference.txnId);
                 if (existing.has_value()) {
-                    auto res = handleExistingDocument(*existing, dto, editSequence, scope, services, emisorRnc, emisorRazonSocial);
+                    auto res = handleExistingDocument(*existing, dto, editSequence, scope, services, emisorRnc, emisorRazonSocial, effectiveSigner, effectiveClient);
                     cb(res);
                     return;
                 }
@@ -867,7 +1013,7 @@ void DocumentsController::submit(const HttpRequestPtr& req,
             // Allocate eNCF Sequence
             std::string eNcf;
             try {
-                eNcf = services.sequenceManager()->getNextEncf(tenantId, dto.tipoComprobante);
+                eNcf = services.sequenceManager()->getNextEncf(sequenceScope, dto.tipoComprobante);
             } catch (const std::exception& ex) {
                 cb(json(err(ex.what()), k400BadRequest));
                 return;
@@ -875,7 +1021,7 @@ void DocumentsController::submit(const HttpRequestPtr& req,
 
             domain::EcfDocument doc;
             doc.id = sys::newUuid();
-            doc.tenantId = tenantId;
+            doc.tenantId = effectiveTenantId;
             doc.sourceTxnId = dto.sourceReference.txnId;
             doc.eNcf = eNcf;
             applyCanonicalContent(doc, dto, editSequence, emisorRnc, emisorRazonSocial);
@@ -887,9 +1033,9 @@ void DocumentsController::submit(const HttpRequestPtr& req,
                 std::string what = ex.what();
                 if (what.find(TenantSourceTxnUniqueConstraint) != std::string::npos || what.find("23505") != std::string::npos) {
                     // Concurrent insert race condition: winner exists
-                    auto winner = scope.docs->getBySourceTxnId(tenantId, dto.sourceReference.txnId);
+                    auto winner = scope.docs->getBySourceTxnId(effectiveTenantId, dto.sourceReference.txnId);
                     if (winner.has_value()) {
-                        auto res = handleExistingDocument(*winner, dto, editSequence, scope, services, emisorRnc, emisorRazonSocial);
+                        auto res = handleExistingDocument(*winner, dto, editSequence, scope, services, emisorRnc, emisorRazonSocial, effectiveSigner, effectiveClient);
                         cb(res);
                         return;
                     }
@@ -898,7 +1044,7 @@ void DocumentsController::submit(const HttpRequestPtr& req,
                 return;
             }
 
-            auto res = signAndSend(doc, scope, services);
+            auto res = signAndSend(doc, scope, services, effectiveSigner, effectiveClient);
             cb(res);
         }
     );
@@ -909,7 +1055,12 @@ void DocumentsController::getBySourceTxnId(const HttpRequestPtr& req,
                                           std::string txnId) {
     std::string tenantId = "default-tenant";
     if (req->attributes()->find("tenantId")) {
-        tenantId = req->attributes()->get<std::string>("tenantId");
+        std::string t = req->attributes()->get<std::string>("tenantId");
+        if (!t.empty() && t != "default-tenant") tenantId = t;
+    }
+    if (tenantId == "default-tenant") {
+        std::string hTenant = req->getHeader("X-Tenant-Id");
+        if (!hTenant.empty()) tenantId = hTenant;
     }
 
     try {
@@ -947,7 +1098,12 @@ void DocumentsController::getXmlBySourceTxnId(const HttpRequestPtr& req,
                                               std::string txnId) {
     std::string tenantId = "default-tenant";
     if (req->attributes()->find("tenantId")) {
-        tenantId = req->attributes()->get<std::string>("tenantId");
+        std::string t = req->attributes()->get<std::string>("tenantId");
+        if (!t.empty() && t != "default-tenant") tenantId = t;
+    }
+    if (tenantId == "default-tenant") {
+        std::string hTenant = req->getHeader("X-Tenant-Id");
+        if (!hTenant.empty()) tenantId = hTenant;
     }
 
     try {
@@ -981,7 +1137,12 @@ void DocumentsController::getXmlById(const HttpRequestPtr& req,
                                     std::string id) {
     std::string tenantId = "default-tenant";
     if (req->attributes()->find("tenantId")) {
-        tenantId = req->attributes()->get<std::string>("tenantId");
+        std::string t = req->attributes()->get<std::string>("tenantId");
+        if (!t.empty() && t != "default-tenant") tenantId = t;
+    }
+    if (tenantId == "default-tenant") {
+        std::string hTenant = req->getHeader("X-Tenant-Id");
+        if (!hTenant.empty()) tenantId = hTenant;
     }
 
     try {
@@ -989,7 +1150,7 @@ void DocumentsController::getXmlById(const HttpRequestPtr& req,
         auto scope = services.makeScope(mapping::currentUserFrom(req));
 
         auto doc = scope.docs->getById(id);
-        if (!doc.has_value() || !doc->signedXmlContent.has_value() || doc->signedXmlContent->empty()) {
+        if (!doc.has_value() || (tenantId != "default-tenant" && doc->tenantId != tenantId) || !doc->signedXmlContent.has_value() || doc->signedXmlContent->empty()) {
             Json::Value errBody;
             errBody["error"] = "Document '" + id + "' not found or has no XML.";
             callback(json(errBody, k404NotFound));
@@ -1015,7 +1176,12 @@ void DocumentsController::getById(const HttpRequestPtr& req,
                                   std::string id) {
     std::string tenantId = "default-tenant";
     if (req->attributes()->find("tenantId")) {
-        tenantId = req->attributes()->get<std::string>("tenantId");
+        std::string t = req->attributes()->get<std::string>("tenantId");
+        if (!t.empty() && t != "default-tenant") tenantId = t;
+    }
+    if (tenantId == "default-tenant") {
+        std::string hTenant = req->getHeader("X-Tenant-Id");
+        if (!hTenant.empty()) tenantId = hTenant;
     }
 
     try {
@@ -1023,7 +1189,7 @@ void DocumentsController::getById(const HttpRequestPtr& req,
         auto scope = services.makeScope(mapping::currentUserFrom(req));
 
         auto doc = scope.docs->getById(id);
-        if (!doc.has_value()) {
+        if (!doc.has_value() || (tenantId != "default-tenant" && doc->tenantId != tenantId)) {
             Json::Value errBody;
             errBody["error"] = "Document '" + id + "' not found.";
             callback(json(errBody, k404NotFound));

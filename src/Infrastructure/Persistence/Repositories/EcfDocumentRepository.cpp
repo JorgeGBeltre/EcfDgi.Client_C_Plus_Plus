@@ -35,12 +35,21 @@ std::optional<EcfDocument> EcfDocumentRepository::getByTrackId(const std::string
 std::optional<EcfDocument> EcfDocumentRepository::getBySourceTxnId(const std::string& tenantId,
                                                                   const std::string& sourceTxnId) {
     pqxx::nontransaction n(db_->connection());
-    pqxx::result r = n.exec_params(
-        std::string("SELECT ") + ecfDocumentColumns() +
-        " FROM ecf_documents WHERE tenant_id = $1 AND source_txn_id = $2 AND is_deleted = false",
-        tenantId, sourceTxnId);
-    if (r.empty()) return std::nullopt;
-    return mapEcfDocument(r[0]);
+    if (tenantId == "default-tenant") {
+        pqxx::result r = n.exec_params(
+            std::string("SELECT ") + ecfDocumentColumns() +
+            " FROM ecf_documents WHERE (source_txn_id = $1 OR track_id = $1 OR e_ncf = $1) AND is_deleted = false LIMIT 1",
+            sourceTxnId);
+        if (r.empty()) return std::nullopt;
+        return mapEcfDocument(r[0]);
+    } else {
+        pqxx::result r = n.exec_params(
+            std::string("SELECT ") + ecfDocumentColumns() +
+            " FROM ecf_documents WHERE tenant_id = $1 AND (source_txn_id = $2 OR track_id = $2 OR e_ncf = $2) AND is_deleted = false LIMIT 1",
+            tenantId, sourceTxnId);
+        if (r.empty()) return std::nullopt;
+        return mapEcfDocument(r[0]);
+    }
 }
 
 std::vector<EcfDocument> EcfDocumentRepository::getDueForStatusCheck(

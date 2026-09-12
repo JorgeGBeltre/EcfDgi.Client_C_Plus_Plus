@@ -11,16 +11,7 @@ namespace ecf::infra {
 
 using namespace ecf::domain;
 
-namespace {
-AmbienteEnum toAmbiente(EcfEnvironment env) {
-    switch (env) {
-        case EcfEnvironment::Test: return AmbienteEnum::PreCertificacion;
-        case EcfEnvironment::Cert: return AmbienteEnum::Certificacion;
-        case EcfEnvironment::Prod: return AmbienteEnum::Produccion;
-    }
-    return AmbienteEnum::PreCertificacion;
-}
-}  // namespace
+
 
 EcfFrontendClient::EcfFrontendClient(EcfClientOptions options,
                                      std::shared_ptr<IEcfTransport> transport) {
