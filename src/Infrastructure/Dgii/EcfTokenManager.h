@@ -20,6 +20,7 @@ public:
                     std::shared_ptr<domain::ICacheService> cacheService = nullptr);
 
     std::string getToken();
+    void invalidate();
 
 private:
     void renewToken();

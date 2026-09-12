@@ -226,9 +226,14 @@ Instead of forcing internal billing software to generate complex DGII XML, the A
 - **ITBIS Tax Buckets**: Only rates 18%, 16%, and 0% (`I1`, `I2`, `I3`) are allowed. Any other rate is rejected *before* allocating a sequence number.
 
 ### 2. Sequence Allocation & Concurrency Control
-- Sequences are managed atomically in PostgreSQL (`ecf_sequences` table) with `SELECT ... FOR UPDATE` locks per `(tenant_id, tipo_comprobante)`.
+- Sequences are managed atomically in PostgreSQL (`ecf_sequences` table) with `SELECT ... FOR UPDATE` row locks per `(tenant_id, tipo_comprobante)`.
+- **Tenant & Environment Sequence Scope Partitioning**:
+  In a multi-tenant or multi-environment architecture, sequence numbers must never collide between environments (e.g., testing in `PreCertificacion` vs production in `Produccion`) or across distinct enterprise tenants:
+  - If the caller belongs to the default tenant with default environment settings, the sequence scope resolves to `"default-tenant"`.
+  - When a custom tenant is specified (via `X-Tenant-Id` header or `dto.tenantId`) or a custom environment is requested (via `X-Environment` header or `dto.environment`), the sequence scope is partitioned dynamically as `"{tenantId}:{ambiente}"` (e.g. `tenant-abc:Produccion` or `tenant-abc:PreCertificacion`).
+  - This ensures independent, consecutive, and strictly auditable eNCF sequences across all tenants and DGII environments.
 - If an existing invoice `SourceReference.TxnId` has already been processed:
-  - If it is in a `NeverTransmittedStates` (`Received`, `SequenceAllocated`, `Unsigned`, `RequiresManualReview`), its content is refreshed and retransmitted.
+  - If it is in a `NeverTransmittedStates` (`Received`, `SequenceAllocated`, `Unsigned`, `SigningFailed`, `SchemaInvalid`, `RequiresManualReview`), its content is refreshed and retransmitted under the *same* allocated eNCF.
   - If it is in `Uncertain` state and less than 2 minutes old, the API immediately returns `202 Accepted` to prevent duplicate DGII issuance.
   - If the incoming `EditSequence` differs from the stored version, the API returns **HTTP 409 Conflict** (modified invoices require a corrective credit note, not re-submission).
 - Race condition recovery: If concurrent threads race on `uq_ecf_documents_tenant_source_txn`, the loser catches the unique constraint violation, refetches the winning row, and returns it safely.
@@ -248,13 +253,18 @@ Instead of forcing internal billing software to generate complex DGII XML, the A
 - `<Retencion>`: Appended for purchase bills (41) and foreign payments (47) with tax withholding amounts.
 - **Immediate Signed XML in Responses**: All `202 Accepted` response payloads from `POST /api/documents` return `signedXml` along with `documentId`, `eNcf`, `state`, `trackId`, and `securityCode`, allowing upstream callers and ERP connectors to instantly archive the certified XML without an additional roundtrip.
 
-### 4. XMLDSig Digital Signature & In-Memory Fallback
-- `EcfXmlSigner` uses `xmlsec1` and OpenSSL:
+### 4. XMLDSig Digital Signature & Dynamic Multi-Tenant Resolution
+- `EcfXmlSigner` implements standard W3C XMLDSig using `xmlsec1` and OpenSSL:
   - Exclusive Canonicalization (C14N) transform (`http://www.w3.org/2001/10/xml-exc-c14n#`).
   - Enveloped signature transform (`http://www.w3.org/2000/09/xmldsig#enveloped-signature`).
   - RSA-SHA256 signature method (`http://www.w3.org/2001/04/xmldsig-more#rsa-sha256`).
   - Embeds the public certificate inside `<ds:KeyInfo><ds:X509Data>`.
-- **Fallback Certificate**: When no certificate file is supplied, an in-memory 2048-bit RSA key and self-signed X.509 certificate are generated dynamically. The document is signed and stored as `Unsigned`, allowing test suites and offline staging to run without real DGII credentials.
+- **Dynamic Multi-Tenant Certificate Loading**:
+  Rather than binding to a single static certificate at boot, the client resolves certificates per-request:
+  1. **Inline Base64 PKCS#12 (`dto.certificate.certificateBase64`)**: The caller passes the certificate directly in the payload with its password. Decoded in-memory into `std::vector<unsigned char>` with zero disk leakage.
+  2. **Explicit File Path (`dto.certificate.certificatePath`)**: Directly loaded from disk if specified.
+  3. **Conventions Directory Lookup**: Automatically inspects `/app/certificates/{tenantId}.pfx` or `/app/certificates/{rncEmisor}.pfx`.
+  4. **Fallback Certificate**: If no tenant certificate is specified or available, the client gracefully falls back to the globally configured certificate or in-memory self-signed fallback.
 
 ### 5. Security Code Calculation (SHA-256)
 - DGII requires a 6-character security code printed on invoices and encoded in QR codes.
@@ -283,16 +293,36 @@ sequenceDiagram
     alt Token Valid in Cache
         Redis-->>Client: Cached Bearer Token
     else Token Expired or Missing
-        Client->>Redis: SET ecf:tokens:lock:{rncEmisor} (NX, EX=30s)
+        Client->>Redis: SET ecf:tokens:lock:{rncEmisor}:{ambiente} (NX, EX=30s)
         Client->>Auth: GET /fe/autenticacion/api/semilla
         Auth-->>Client: XML with <semilla>123456789</semilla>
         Client->>Client: Sign XML with Certificate (XMLDSig RSA-SHA256)
         Client->>Auth: POST /fe/autenticacion/api/validarsemilla (multipart: xml=semilla.xml)
         Auth-->>Client: XML with <token>eyJhbGciOi...</token><expira>2026-09-11T16:00:00Z</expira>
-        Client->>Redis: SET ecf:tokens:{rncEmisor} (TTL = expira - 5min)
-        Client->>Redis: DEL ecf:tokens:lock:{rncEmisor}
+        Client->>Redis: SET ecf:tokens:{rncEmisor}:{ambiente} (TTL = expira - 5min)
+        Client->>Redis: DEL ecf:tokens:lock:{rncEmisor}:{ambiente}
     end
 ```
+
+##### Reactive 401 Re-Authentication Architecture (`sendWithReactiveAuth`)
+In high-throughput distributed architectures, an issued token may be prematurely invalidated by the DGII gateway due to load balancer rotation, security policy refreshes, or administrative revocation before its local TTL has elapsed. Traditional clients fail the ongoing transmission with an unhandled 401 Unauthorized error.
+
+`DgiiDirectTransport` solves this with a reactive retry pipeline:
+1. Every authenticated DGII request is executed via `sendWithReactiveAuth<T>()`.
+2. If the initial attempt encounters an **HTTP 401 Unauthorized** response:
+   - The transport immediately triggers `EcfTokenManager::invalidate()`.
+   - The token key `ecf:tokens:{rncEmisor}:{(int)ambiente}` is evicted from Redis and the in-memory fallback cache is reset.
+   - The token manager automatically initiates a brand-new seed handshake (`GET semilla` $\rightarrow$ XMLDSig sign $\rightarrow$ `POST validarsemilla`) to acquire a fresh token.
+   - The failed DGII request is re-dispatched with the new bearer token.
+3. This fail-safe covers all 8 authenticated DGII operations:
+   - `sendEcf` (Electronic Invoice / Credit / Debit / Bill transmission)
+   - `sendRfce` (Consumption invoice summaries)
+   - `consultarResultado` (TrackId batch reconciliation)
+   - `consultarEstado` (eNCF status validation)
+   - `consultarTrackIds` (TrackId history lookups)
+   - `consultarRfce` (RFCE status inquiry)
+   - `sendAprobacionComercial` (B2B commercial acceptance/rejection)
+   - `anularRangos` (Fiscal sequence range voiding)
 
 #### B. Invoices (Tax Credit 31, Export 46, Government 45, etc.)
 1. **Endpoint**: `POST {RecepcionUrl}/api/facturaselectronicas`
@@ -389,11 +419,11 @@ Every endpoint and service interface from the reference C# implementation is ful
 
 | Category | Route | Method | Auth Scheme | Request Payload | Response Model | Description |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **ERP Documents** | `/api/documents` | `POST` | Bearer / Worker HMAC | `CanonicalDocumentDto` (JSON) | `DocumentSubmissionResponse` | Canonical invoice ingestion, validation of all 10 e-CF types, sequential allocation, signing, XSD gate, and DGII dispatch. |
-| **ERP Documents** | `/api/documents/by-source/{txnId}` | `GET` | Bearer / Worker HMAC | None | `DocumentSummaryDto` | Queries invoice state, eNCF, and security code by ERP source transaction ID. |
-| **ERP Documents** | `/api/documents/by-source/{txnId}/xml` | `GET` | Bearer / Worker HMAC | None | XML Attachment | Downloads signed XML e-CF document file by ERP source transaction ID. |
-| **ERP Documents** | `/api/documents/{id}` | `GET` | Bearer / Worker HMAC | None | `DocumentSummaryDto` | Queries document state, eNCF, and security code by document UUID. |
-| **ERP Documents** | `/api/documents/{id}/xml` | `GET` | Bearer / Worker HMAC | None | XML Attachment | Downloads signed XML e-CF document file by document UUID. |
+| **ERP Documents** | `/api/documents` | `POST` | Bearer / Worker HMAC | `CanonicalDocumentDto` (JSON) | `DocumentSubmissionResponse` | Canonical invoice ingestion, validation of all 10 e-CF types, sequential allocation, dynamic multi-tenant certificate resolution, signing, XSD gate, and DGII dispatch with reactive 401 recovery. |
+| **ERP Documents** | `/api/documents/by-source/{txnId}` | `GET` | Bearer / Worker HMAC | None | `DocumentSummaryDto` | Queries invoice state, eNCF, and security code flexibly by ERP source transaction ID, DGII TrackId, or eNCF. |
+| **ERP Documents** | `/api/documents/by-source/{txnId}/xml` | `GET` | Bearer / Worker HMAC | None | XML Attachment | Downloads signed XML e-CF document file flexibly by ERP source transaction ID, DGII TrackId, or eNCF. |
+| **ERP Documents** | `/api/documents/{id}` | `GET` | Bearer / Worker HMAC | None | `DocumentSummaryDto` | Queries document state, eNCF, and security code by document UUID (enforces tenant isolation). |
+| **ERP Documents** | `/api/documents/{id}/xml` | `GET` | Bearer / Worker HMAC | None | XML Attachment | Downloads signed XML e-CF document file by document UUID (enforces tenant isolation). |
 | **Direct e-CF** | `/api/ecf/send` | `POST` | Bearer / Worker HMAC | `SendEcfCommand` (JSON) | `EcfRecepcionResponse` | Submits pre-built signed e-CF XML directly to DGII REST services. |
 | **Direct e-CF** | `/api/ecf/send-rfce` | `POST` | Bearer / Worker HMAC | `SendRfceCommand` (JSON) | `RfceRecepcionResponse` | Submits Consumption Summary (RFCE) to DGII. |
 | **Direct e-CF** | `/api/ecf/status` | `GET` | Bearer / Worker HMAC | Query Params (`rncEmisor`, `eNcf`, `trackId`) | `ConsultaEstadoResponse` | Queries DGII TrackId and eNCF processing status. |

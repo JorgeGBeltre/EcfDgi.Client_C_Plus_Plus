@@ -15,23 +15,13 @@ namespace ecf::infra {
 
 using namespace ecf::domain;
 
-namespace {
 
-AmbienteEnum toAmbiente(EcfEnvironment env) {
-    switch (env) {
-        case EcfEnvironment::Test: return AmbienteEnum::PreCertificacion;
-        case EcfEnvironment::Cert: return AmbienteEnum::Certificacion;
-        case EcfEnvironment::Prod: return AmbienteEnum::Produccion;
-    }
-    return AmbienteEnum::PreCertificacion;
-}
-
-}  // namespace
 
 EcfClient::EcfClient(EcfClientOptions options,
                      std::shared_ptr<IEcfSequenceProvider> sequenceProvider,
                      std::shared_ptr<ICacheService> cacheService,
-                     std::shared_ptr<IEcfSchemaValidator> schemaValidator)
+                     std::shared_ptr<IEcfSchemaValidator> schemaValidator,
+                     std::shared_ptr<IEcfXmlSigner> signer)
     : options_(std::move(options)),
       sequenceProvider_(sequenceProvider ? std::move(sequenceProvider)
                                          : std::make_shared<MemorySequenceProvider>()),
@@ -46,7 +36,9 @@ EcfClient::EcfClient(EcfClientOptions options,
         schemaValidator_ = std::make_shared<EcfSchemaValidator>(options_.xsdDirectoryPath);
     }
 
-    if (options_.certificatePath && !options_.certificatePath->empty()) {
+    if (signer) {
+        signer_ = std::move(signer);
+    } else if (options_.certificatePath && !options_.certificatePath->empty()) {
         signer_ = std::make_shared<EcfXmlSigner>(
             *options_.certificatePath, options_.certificatePassword.value_or(""));
     } else {

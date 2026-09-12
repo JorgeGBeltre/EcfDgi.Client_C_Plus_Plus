@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include <cpr/cpr.h>
+
 #include "Domain/Interfaces/IEcfTransport.h"
 #include "Infrastructure/Dgii/EcfEnvironmentConfig.h"
 #include "Infrastructure/Dgii/EcfTokenManager.h"
@@ -44,6 +46,18 @@ private:
     // Fetches the bearer token; throws if no token manager was supplied
     // (e.g. EcfFrontendClient built without a signing certificate).
     std::string getAuthToken();
+
+    template <typename RequestFn>
+    cpr::Response sendWithReactiveAuth(RequestFn&& fn) {
+        auto token = getAuthToken();
+        auto resp = fn(token);
+        if (resp.status_code == 401 && tokenManager_) {
+            tokenManager_->invalidate();
+            auto freshToken = tokenManager_->getToken();
+            resp = fn(freshToken);
+        }
+        return resp;
+    }
 
     std::shared_ptr<EcfTokenManager> tokenManager_;
     EcfEnvironmentConfig config_;

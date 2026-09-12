@@ -66,7 +66,7 @@ EcfTokenManager::EcfTokenManager(std::shared_ptr<domain::IEcfXmlSigner> signer,
 
 std::string EcfTokenManager::getToken() {
     using namespace std::chrono;
-    std::string cacheKey = "ecf:tokens:" + rncEmisor_;
+    std::string cacheKey = "ecf:tokens:" + rncEmisor_ + ":" + std::to_string(static_cast<int>(config_.ambiente));
 
     // 1. Check Distributed Cache
     if (cacheService_) {
@@ -84,7 +84,7 @@ std::string EcfTokenManager::getToken() {
     if (valid()) return cachedToken_;
 
     // 3. Acquire Distributed / Local Lock
-    std::string lockKey = "ecf:tokens:lock:" + rncEmisor_;
+    std::string lockKey = "ecf:tokens:lock:" + rncEmisor_ + ":" + std::to_string(static_cast<int>(config_.ambiente));
     std::string lockValue = "lock_" + std::to_string(duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
     bool acquiredDistLock = false;
 
@@ -119,6 +119,18 @@ std::string EcfTokenManager::getToken() {
     }
 
     return cachedToken_;
+}
+
+void EcfTokenManager::invalidate() {
+    {
+        std::lock_guard<std::mutex> lock(renewMutex_);
+        cachedToken_.clear();
+        tokenExpiry_ = {};
+    }
+    if (cacheService_) {
+        std::string cacheKey = "ecf:tokens:" + rncEmisor_ + ":" + std::to_string(static_cast<int>(config_.ambiente));
+        cacheService_->remove(cacheKey);
+    }
 }
 
 void EcfTokenManager::renewToken() {
