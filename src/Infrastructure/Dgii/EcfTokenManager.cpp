@@ -29,12 +29,19 @@ std::string childText(xmlNode* parent, const char* name) {
     return {};
 }
 
-// Parses "yyyy-MM-ddTHH:mm:ssZ" into a UTC time_point.
+// Parses ISO timestamps with optional fractional seconds / milliseconds into a UTC time_point.
 bool parseExpiry(const std::string& s, std::chrono::system_clock::time_point& out) {
     std::tm tm{};
-    int y, mo, d, h, mi, se;
-    if (std::sscanf(s.c_str(), "%d-%d-%dT%d:%d:%dZ", &y, &mo, &d, &h, &mi, &se) != 6)
+    int y = 0, mo = 0, d = 0, h = 0, mi = 0, se = 0;
+    int ms = 0;
+    char sep = 'T';
+    if (std::sscanf(s.c_str(), "%d-%d-%d%c%d:%d:%d.%d", &y, &mo, &d, &sep, &h, &mi, &se, &ms) >= 7) {
+        // Parsed with fractional seconds
+    } else if (std::sscanf(s.c_str(), "%d-%d-%d%c%d:%d:%d", &y, &mo, &d, &sep, &h, &mi, &se) >= 7) {
+        // Parsed without fractional seconds
+    } else {
         return false;
+    }
     tm.tm_year = y - 1900;
     tm.tm_mon = mo - 1;
     tm.tm_mday = d;
@@ -47,7 +54,7 @@ bool parseExpiry(const std::string& s, std::chrono::system_clock::time_point& ou
     std::time_t tt = timegm(&tm);
 #endif
     if (tt == static_cast<std::time_t>(-1)) return false;
-    out = std::chrono::system_clock::from_time_t(tt);
+    out = std::chrono::system_clock::from_time_t(tt) + std::chrono::milliseconds(ms);
     return true;
 }
 

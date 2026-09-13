@@ -31,6 +31,8 @@ private:
     std::vector<unsigned char> pfxBytes_;  // raw PKCS#12, fed to xmlsec
     std::string pfxPassword_;
     std::string certSubject_;              // parsed once via OpenSSL
+    std::string certIssuer_;               // parsed once via OpenSSL
+    bool isSelfSigned_ = false;
     bool usesFallbackCertificate_ = false;
 };
 

@@ -4,6 +4,7 @@
 #include <libxml/tree.h>
 #include <cstdarg>
 #include <filesystem>
+#include <fstream>
 #include <sstream>
 
 #include "Infrastructure/Serialization/EcfXsdFileNameResolver.h"
@@ -61,7 +62,41 @@ xmlSchemaPtr EcfSchemaValidator::getOrCompileSchema(const std::string& xsdPath) 
         return it->second;
     }
 
-    xmlSchemaParserCtxtPtr parserCtxt = xmlSchemaNewParserCtxt(xsdPath.c_str());
+    auto p = std::filesystem::path(std::u8string_view(
+        reinterpret_cast<const char8_t*>(xsdPath.data()), xsdPath.size()));
+    std::ifstream file(p, std::ios::binary);
+    if (!file) {
+        return nullptr;
+    }
+    std::string content((std::istreambuf_iterator<char>(file)),
+                        std::istreambuf_iterator<char>());
+
+    // Sanitize DGII non-standard regex syntax for libxml2 W3C compliance
+    // 1. Replace (?: with (
+    size_t pos = 0;
+    while ((pos = content.find("(?:", pos)) != std::string::npos) {
+        content.replace(pos, 3, "(");
+        pos += 1;
+    }
+    // 2. Replace \- with -
+    pos = 0;
+    while ((pos = content.find("\\-", pos)) != std::string::npos) {
+        content.replace(pos, 2, "-");
+        pos += 1;
+    }
+    // 3. Fix missing IndicadorServicioTodoIncluidoType in DGII drafts if present
+    if (content.find("IndicadorServicioTodoIncluidoType") != std::string::npos &&
+        content.find("name=\"IndicadorServicioTodoIncluidoType\"") == std::string::npos) {
+        const std::string missingType =
+            "\n<xs:simpleType name=\"IndicadorServicioTodoIncluidoType\"><xs:restriction base=\"xs:integer\"><xs:enumeration value=\"1\"/><xs:enumeration value=\"2\"/></xs:restriction></xs:simpleType>\n";
+        auto endTag = content.rfind("</xs:schema>");
+        if (endTag != std::string::npos) {
+            content.insert(endTag, missingType);
+        }
+    }
+
+    xmlSchemaParserCtxtPtr parserCtxt =
+        xmlSchemaNewMemParserCtxt(content.c_str(), static_cast<int>(content.size()));
     if (!parserCtxt) {
         return nullptr;
     }
@@ -84,7 +119,9 @@ domain::SchemaValidationResult EcfSchemaValidator::validate(const std::string& x
         return result;
     }
 
-    if (xsdPath.empty() || !std::filesystem::exists(xsdPath)) {
+    auto p = std::filesystem::path(std::u8string_view(
+        reinterpret_cast<const char8_t*>(xsdPath.data()), xsdPath.size()));
+    if (xsdPath.empty() || !std::filesystem::exists(p)) {
         result.addError("XSD schema file not found at: " + xsdPath);
         return result;
     }

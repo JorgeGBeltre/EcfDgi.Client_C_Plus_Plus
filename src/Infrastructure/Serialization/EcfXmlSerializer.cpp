@@ -124,39 +124,44 @@ std::string EcfXmlSerializer::serialize(const Rfce& model) {
     os << "<RFCE>";
     os << "<Encabezado>";
 
-    el(os, "VERSI\xC3\x93N", e.version);  // "VERSIÓN" in UTF-8
+    el(os, "Version", e.version);
 
     // IdDoc
     os << "<IdDoc>";
     el(os, "TipoeCF", e.idDoc.tipoeCF);
-    el(os, "ENcf", e.idDoc.eNcf);
-    el(os, "TipoIngresos", std::to_string(e.idDoc.tipoIngresos));
+    el(os, "eNCF", e.idDoc.eNcf);
+    std::string tipoIngresosStr = (e.idDoc.tipoIngresos > 0 && e.idDoc.tipoIngresos < 10)
+                                      ? "0" + std::to_string(e.idDoc.tipoIngresos)
+                                      : std::to_string(e.idDoc.tipoIngresos);
+    el(os, "TipoIngresos", tipoIngresosStr);
     el(os, "TipoPago", std::to_string(e.idDoc.tipoPago));
-    os << "<TablaFormasPago>";
-    for (const auto& fp : e.idDoc.tablaFormasPago) {
-        os << "<FormaDePago>";
-        el(os, "FormaPago", std::to_string(fp.formaPago));
-        el(os, "MontoPago", money(fp.montoPago));
-        os << "</FormaDePago>";
+    if (!e.idDoc.tablaFormasPago.empty()) {
+        os << "<TablaFormasPago>";
+        for (const auto& fp : e.idDoc.tablaFormasPago) {
+            os << "<FormaDePago>";
+            el(os, "FormaPago", std::to_string(fp.formaPago));
+            el(os, "MontoPago", money(fp.montoPago));
+            os << "</FormaDePago>";
+        }
+        os << "</TablaFormasPago>";
     }
-    os << "</TablaFormasPago>";
     os << "</IdDoc>";
 
     // Emisor
     os << "<Emisor>";
-    el(os, "RncEmisor", e.emisor.rncEmisor);
+    el(os, "RNCEmisor", e.emisor.rncEmisor);
     el(os, "RazonSocialEmisor", e.emisor.razonSocialEmisor);
     el(os, "FechaEmision", e.emisor.fechaEmision);
     os << "</Emisor>";
 
-    // Comprador (optional)
+    // Comprador
+    os << "<Comprador>";
     if (e.comprador.has_value()) {
-        os << "<Comprador>";
-        elOpt(os, "RncComprador", e.comprador->rncComprador);
+        elOpt(os, "RNCComprador", e.comprador->rncComprador);
         elOpt(os, "IdentificadorExtranjero", e.comprador->identificadorExtranjero);
         elOpt(os, "RazonSocialComprador", e.comprador->razonSocialComprador);
-        os << "</Comprador>";
     }
+    os << "</Comprador>";
 
     // Totales
     const auto& t = e.totales;
@@ -188,8 +193,10 @@ std::string EcfXmlSerializer::serialize(const Rfce& model) {
     el(os, "MontoTotal", money(t.montoTotal));
     elMoneyOpt(os, "MontoNoFacturable", t.montoNoFacturable);
     elMoneyOpt(os, "MontoPeriodo", t.montoPeriodo);
-    elOpt(os, "CodigoSeguridadeCF", t.codigoSeguridadeCF);
     os << "</Totales>";
+
+    const auto& secCode = e.codigoSeguridadeCF.has_value() ? e.codigoSeguridadeCF : t.codigoSeguridadeCF;
+    elOpt(os, "CodigoSeguridadeCF", secCode);
 
     os << "</Encabezado>";
     os << "</RFCE>";

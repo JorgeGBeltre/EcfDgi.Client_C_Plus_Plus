@@ -39,6 +39,7 @@ It features complete support for all 10 canonical e-CF types (invoices, credit/d
   - [Example C: Debit Note (Tipo 33 - Nota de Débito)](#example-c-debit-note-tipo-33---nota-de-débito)
   - [Example D: Purchase Bill (Tipo 41 - Compras / Retenciones)](#example-d-purchase-bill-tipo-41---compras--retenciones)
   - [Example E: Consumption Invoice (Tipo 32 - Factura de Consumo)](#example-e-consumption-invoice-tipo-32---factura-de-consumo)
+  - [Example E2: Consumer Invoice Summary (RFCE 32 - Resumen de Factura de Consumo)](#example-e2-consumer-invoice-summary-rfce-32---resumen-de-factura-de-consumo)
   - [Example F: B2B Reception Acknowledgment (ARECF XML)](#example-f-b2b-reception-acknowledgment-arecf-xml)
   - [Example G: B2B Commercial Approval (ACECF XML)](#example-g-b2b-commercial-approval-acecf-xml)
   - [Example H: DGII Seed Authentication Handshake (Semilla & Token XML)](#example-h-dgii-seed-authentication-handshake-semilla--token-xml)
@@ -265,15 +266,29 @@ Instead of forcing internal billing software to generate complex DGII XML, the A
   2. **Explicit File Path (`dto.certificate.certificatePath`)**: Directly loaded from disk if specified.
   3. **Conventions Directory Lookup**: Automatically inspects `/app/certificates/{tenantId}.pfx` or `/app/certificates/{rncEmisor}.pfx`.
   4. **Fallback Certificate**: If no tenant certificate is specified or available, the client gracefully falls back to the globally configured certificate or in-memory self-signed fallback.
+- **Dominican Republic CA & Delegated Tax Representative Validation**:
+  In the Dominican Republic, corporate entities frequently sign electronic tax documents using digital certificates issued to their legal representatives or tax proxies (e.g. natural person certificates containing national identity cédulas `IDCDO-` or `VATDO-`). The validator enforces a 4-tier check:
+  1. Self-signed bypass for development, unit testing, and sandbox environments.
+  2. Direct RNC match against certificate `Subject` or `Issuer`.
+  3. Format-normalized digits comparison (stripping hyphens and punctuation).
+  4. Dominican Authorized Certification Authorities (CAs: `VIAFIRMA`, `AVANSI`, `CAMARA DE COMERCIO`, `DIGIFIRMA`, `DOMINICANA`, `C=DO`) issuing tax procedure certificates (`TAX PROCEDURES`, `PROCEDIMIENTOS TRIBUTARIOS`, `PERSONA FISICA`, `NATURAL PERSON`).
 
-### 5. Security Code Calculation (SHA-256)
-- DGII requires a 6-character security code printed on invoices and encoded in QR codes.
-- `EcfSecurityUtils::calcularCodigoSeguridad` queries `//ds:SignatureValue` with XPath, computes the SHA-256 hash in OpenSSL, and takes the first 6 hexadecimal characters.
+### 5. Security Code Calculation (SHA-256) & Timbre Verification URLs
+- DGII requires a 6-character security code printed on invoices and encoded in QR verification codes.
+- `EcfSecurityUtils::calcularCodigoSeguridad` queries `//ds:SignatureValue` with XPath, computes the SHA-256 hash in OpenSSL, and extracts the first 6 hexadecimal characters.
+- **Timbre URL Construction (`buildTimbreUrl` & `buildTimbreFcUrl`)**:
+  Generates verification URLs for printed representation QR codes:
+  - Standard e-CF: `{baseUrl}?rncemisor={rnc}&rnccomprador={rnc}&encf={encf}&fechaemision={date}&montototal={total}&fechafirma={signDate}&codigoseguridad={secCode}`
+  - Consumer Invoice (FC): `{baseUrl}?rncemisor={rnc}&encf={encf}&montototal={total}&codigoseguridad={secCode}`
+  - Both builders enforce strict DGII parameter naming (`&codigoseguridad=`), avoiding legacy draft typos.
 
-### 6. Local XSD Schema Validation Gate
+### 6. Local XSD Schema Validation Gate & W3C Regex Preprocessing
 - `EcfXsdFileNameResolver` inspects root elements and `<TipoeCF>` to select the exact official schema (e.g. `e-CF 31 v.1.0.xsd`, `RFCE 32 v.1.0.xsd`, `ARECF v1.0.xsd`).
-- `EcfSchemaValidator` compiles the XSD into an in-memory `xmlSchemaPtr` and validates the signed document.
-- Cached in memory using `std::shared_mutex` for lock-free concurrent validation across all worker threads.
+- `EcfSchemaValidator` reads and compiles XSDs into an in-memory `xmlSchemaPtr` and validates the signed document:
+  - **In-Memory W3C Regex Sanitization**: Official DGII XSD schemas occasionally contain PCRE regex extensions (such as non-capturing groups `(?:...)` and escaped hyphens `\-`) which .NET's regex engine tolerated, but strict W3C XML Schema parsers (`libxml2`) reject. The validator automatically transforms non-capturing groups to standard XML schema groups and strips redundant escapes before compiling with `xmlSchemaNewMemParserCtxt`.
+  - **Draft Anomaly Auto-Resolution**: Resolves missing type definitions in DGII official draft schemas (e.g. `IndicadorServicioTodoIncluidoType`).
+  - **UTF-8 Path Compatibility**: Uses native C++20 `std::u8string_view` paths to seamlessly resolve non-ASCII directory paths (`Documentación Técnica (XSD)`) on Windows filesystems.
+  - **Thread-Safe Schema Caching**: Cached in memory using `std::shared_mutex` for lock-free concurrent validation across all worker threads.
 
 ### 7. How Invoices, Credit Notes, and Bills Reach the DGII (Wire Protocol & Data Flow)
 
@@ -789,6 +804,53 @@ Every endpoint and service interface from the reference C# implementation is ful
 ```
 
 *(Note: If `montoTotal` is $\ge 250,000.00$ DOP, the pre-allocation guard rejects the request unless `comprador.rnc` is provided).*
+
+---
+
+### Example E2: Consumer Invoice Summary (RFCE 32 - Resumen de Factura de Consumo)
+
+When reporting low-value consumer invoices under RD$ 250,000 as a daily summary via `POST /api/ecf/send-rfce`, the client generates and signs an `RFCE` document strictly adhering to `RFCE 32 v.1.0.xsd`:
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<RFCE>
+  <Encabezado>
+    <Version>1.0</Version>
+    <IdDoc>
+      <TipoeCF>32</TipoeCF>
+      <eNCF>E320000000001</eNCF>
+      <TipoIngresos>01</TipoIngresos>
+      <TipoPago>1</TipoPago>
+      <TablaFormasPago>
+        <FormaDePago>
+          <FormaPago>1</FormaPago>
+          <MontoPago>100.50</MontoPago>
+        </FormaDePago>
+      </TablaFormasPago>
+    </IdDoc>
+    <Emisor>
+      <RNCEmisor>101672919</RNCEmisor>
+      <RazonSocialEmisor>WILLY CHIC DOMINICANA SRL</RazonSocialEmisor>
+      <FechaEmision>10-10-2020</FechaEmision>
+    </Emisor>
+    <Comprador>
+      <RNCComprador>101889063</RNCComprador>
+      <RazonSocialComprador>Cliente Test</RazonSocialComprador>
+    </Comprador>
+    <Totales>
+      <MontoTotal>100.50</MontoTotal>
+      <TotalITBIS>18.00</TotalITBIS>
+    </Totales>
+    <CodigoSeguridadeCF>ABCD12</CodigoSeguridadeCF>
+  </Encabezado>
+  <Signature xmlns="http://www.w3.org/2000/09/xmldsig#">
+    <!-- Enveloped digital signature of the issuer -->
+  </Signature>
+</RFCE>
+```
+
+> [!NOTE]
+> In accordance with `RFCE 32 v.1.0.xsd`, `<CodigoSeguridadeCF>` is a direct child of `<Encabezado>` placed **after** `</Totales>` and before `</Encabezado>`. `<TipoIngresos>` is zero-padded to two digits (`01`-`06`), and `<TablaFormasPago>` is conditionally omitted when empty.
 
 ---
 

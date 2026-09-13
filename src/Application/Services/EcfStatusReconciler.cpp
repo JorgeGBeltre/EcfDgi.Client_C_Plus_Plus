@@ -1,8 +1,8 @@
 #include "Application/Services/EcfStatusReconciler.h"
 
 #include <chrono>
-#include <iostream>
 #include <string>
+#include <spdlog/spdlog.h>
 
 #include "Shared/Common/Sys.h"
 
@@ -31,7 +31,7 @@ int EcfStatusReconciler::reconcile() {
     try {
         due = docsRepo_->getDueForStatusCheck(minAgeIso, pollDueIso, 100);
     } catch (const std::exception& ex) {
-        std::cerr << "[EcfStatusReconciler] Error fetching due documents: " << ex.what() << std::endl;
+        spdlog::error("[EcfStatusReconciler] Error fetching due documents: {}", ex.what());
         return 0;
     }
 
@@ -47,6 +47,12 @@ int EcfStatusReconciler::reconcile() {
             if (age >= std::chrono::hours(options_.maxPollingWindowHours)) {
                 doc.state = "RequiresManualReview";
                 doc.lastStatusCheckAt = nowIso;
+                spdlog::critical(
+                    "e-CF {} (RNC {}) lleva {}h sin confirmación definitiva de DGII "
+                    "(ventana de {}h agotada); requiere revisión manual.",
+                    doc.eNcf, doc.rncEmisor,
+                    std::chrono::duration_cast<std::chrono::hours>(age).count(),
+                    options_.maxPollingWindowHours);
                 try {
                     docsRepo_->update(doc);
                 } catch (...) {}
@@ -70,10 +76,14 @@ int EcfStatusReconciler::reconcile() {
 
             if (lowerEstado == "aceptado" || lowerEstado == "aceptado condicional") {
                 doc.state = "AcceptedByDgii";
+                spdlog::info("e-CF {}: DGII confirmó '{}'.", doc.eNcf, estado);
             } else if (lowerEstado == "rechazado") {
                 doc.state = "RejectedByDgii";
-                std::cerr << "[EcfStatusReconciler] CRITICAL: e-CF " << doc.eNcf
-                          << " (RNC " << doc.rncEmisor << ") RECHAZADO tras verificacion posterior." << std::endl;
+                spdlog::critical(
+                    "ALERTA: e-CF {} (RNC {}) fue aceptado en recepción y luego "
+                    "RECHAZADO por DGII tras verificación posterior. Requiere atención — el "
+                    "comprobante no tiene validez fiscal.",
+                    doc.eNcf, doc.rncEmisor);
             }
             docsRepo_->update(doc);
         } catch (const std::exception& ex) {
@@ -82,7 +92,7 @@ int EcfStatusReconciler::reconcile() {
             try {
                 docsRepo_->update(doc);
             } catch (...) {}
-            std::cerr << "[EcfStatusReconciler] Error polling e-CF " << doc.eNcf << ": " << ex.what() << std::endl;
+            spdlog::warn("Fallo consultando estado DGII para e-CF {}: {}; se reintentará.", doc.eNcf, ex.what());
         }
     }
 
@@ -90,7 +100,7 @@ int EcfStatusReconciler::reconcile() {
         try {
             uow_->saveChanges();
         } catch (const std::exception& ex) {
-            std::cerr << "[EcfStatusReconciler] Error saving changes: " << ex.what() << std::endl;
+            spdlog::error("[EcfStatusReconciler] Error saving changes: {}", ex.what());
         }
     }
 
