@@ -168,6 +168,8 @@ add_executable(ecfdgii_api
     src/Api/Filters/JwtAuthFilter.h
     src/Api/Filters/UserOrWorkerFilter.cpp
     src/Api/Filters/UserOrWorkerFilter.h
+    src/Api/Filters/OptionalUserOrWorkerFilter.cpp
+    src/Api/Filters/OptionalUserOrWorkerFilter.h
     src/Api/Security/NonceCache.cpp
     src/Api/Security/NonceCache.h
     src/Api/Security/IdempotencyHandler.h

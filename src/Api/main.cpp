@@ -70,6 +70,24 @@ int main() {
         int intervalSeconds = services.statusPollingOptions().pollingIntervalMinutes * 60;
         if (intervalSeconds <= 0) intervalSeconds = 900; // 15 minutes
 
+        // Run one pass immediately on startup (same as C# EcfStatusPollingBackgroundService),
+        // then on the timer's cadence thereafter.
+        try {
+            auto scope = services.makeScope(nullptr);
+            ecf::app::EcfStatusReconciler reconciler(
+                scope.docs,
+                scope.uow,
+                services.ecfClient(),
+                services.statusPollingOptions()
+            );
+            int processed = reconciler.reconcile();
+            if (processed > 0) {
+                spdlog::info("EcfStatusReconciler initial startup pass completed: {} documents processed.", processed);
+            }
+        } catch (const std::exception& ex) {
+            spdlog::warn("EcfStatusReconciler initial startup pass encountered exception: {}", ex.what());
+        }
+
         while (true) {
             std::this_thread::sleep_for(std::chrono::seconds(intervalSeconds));
             try {
