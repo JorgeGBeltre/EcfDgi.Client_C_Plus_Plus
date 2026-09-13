@@ -65,9 +65,12 @@ int EcfStatusReconciler::reconcile() {
             while (!estado.empty() && std::isspace(static_cast<unsigned char>(estado.front()))) estado.erase(estado.begin());
             while (!estado.empty() && std::isspace(static_cast<unsigned char>(estado.back()))) estado.pop_back();
 
-            if (estado == "Aceptado" || estado == "Aceptado condicional") {
+            std::string lowerEstado = estado;
+            std::transform(lowerEstado.begin(), lowerEstado.end(), lowerEstado.begin(), ::tolower);
+
+            if (lowerEstado == "aceptado" || lowerEstado == "aceptado condicional") {
                 doc.state = "AcceptedByDgii";
-            } else if (estado == "Rechazado") {
+            } else if (lowerEstado == "rechazado") {
                 doc.state = "RejectedByDgii";
                 std::cerr << "[EcfStatusReconciler] CRITICAL: e-CF " << doc.eNcf
                           << " (RNC " << doc.rncEmisor << ") RECHAZADO tras verificacion posterior." << std::endl;

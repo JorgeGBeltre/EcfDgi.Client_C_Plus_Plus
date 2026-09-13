@@ -8,15 +8,15 @@ class DocumentsController : public drogon::HttpController<DocumentsController> {
 public:
     METHOD_LIST_BEGIN
     ADD_METHOD_TO(DocumentsController::submit, "/api/documents", drogon::Post,
-                  "ecf::api::UserOrWorkerFilter");
+                  "ecf::api::OptionalUserOrWorkerFilter");
     ADD_METHOD_TO(DocumentsController::getBySourceTxnId, "/api/documents/by-source/{txnId}", drogon::Get,
-                  "ecf::api::UserOrWorkerFilter");
+                  "ecf::api::OptionalUserOrWorkerFilter");
     ADD_METHOD_TO(DocumentsController::getXmlBySourceTxnId, "/api/documents/by-source/{txnId}/xml", drogon::Get,
-                  "ecf::api::UserOrWorkerFilter");
+                  "ecf::api::OptionalUserOrWorkerFilter");
     ADD_METHOD_TO(DocumentsController::getXmlById, "/api/documents/{id}/xml", drogon::Get,
-                  "ecf::api::UserOrWorkerFilter");
+                  "ecf::api::OptionalUserOrWorkerFilter");
     ADD_METHOD_TO(DocumentsController::getById, "/api/documents/{id}", drogon::Get,
-                  "ecf::api::UserOrWorkerFilter");
+                  "ecf::api::OptionalUserOrWorkerFilter");
     METHOD_LIST_END
 
     void submit(const drogon::HttpRequestPtr& req,
