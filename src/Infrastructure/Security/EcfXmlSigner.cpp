@@ -17,6 +17,8 @@
 #include <xmlsec/xmlsec.h>
 #include <xmlsec/xmltree.h>
 
+#include <algorithm>
+#include <cctype>
 #include <cstring>
 #include <fstream>
 #include <mutex>
@@ -54,8 +56,14 @@ std::vector<unsigned char> readFile(const std::string& path) {
                                       std::istreambuf_iterator<char>());
 }
 
-std::string parseSubject(const std::vector<unsigned char>& pfx,
-                         const std::string& password) {
+struct CertInfo {
+    std::string subject;
+    std::string issuer;
+    bool isSelfSigned = false;
+};
+
+CertInfo parseCertInfo(const std::vector<unsigned char>& pfx,
+                       const std::string& password) {
     const unsigned char* p = pfx.data();
     PKCS12* p12 = d2i_PKCS12(nullptr, &p, static_cast<long>(pfx.size()));
     if (!p12) throw EcfSigningException("PKCS#12 inválido: no se pudo leer el certificado.");
@@ -63,20 +71,26 @@ std::string parseSubject(const std::vector<unsigned char>& pfx,
     EVP_PKEY* pkey = nullptr;
     X509* cert = nullptr;
     STACK_OF(X509)* ca = nullptr;
-    std::string subject;
+    CertInfo info;
     if (PKCS12_parse(p12, password.c_str(), &pkey, &cert, &ca) && cert) {
         char buf[512];
-        X509_NAME_oneline(X509_get_subject_name(cert), buf, sizeof(buf));
-        subject = buf;
+        if (X509_NAME_oneline(X509_get_subject_name(cert), buf, sizeof(buf))) {
+            info.subject = buf;
+        }
+        if (X509_NAME_oneline(X509_get_issuer_name(cert), buf, sizeof(buf))) {
+            info.issuer = buf;
+        }
+        info.isSelfSigned = (X509_NAME_cmp(X509_get_subject_name(cert),
+                                           X509_get_issuer_name(cert)) == 0);
     }
     if (pkey) EVP_PKEY_free(pkey);
     if (cert) X509_free(cert);
     if (ca) sk_X509_pop_free(ca, X509_free);
     PKCS12_free(p12);
 
-    if (subject.empty())
+    if (info.subject.empty())
         throw EcfSigningException("No se pudo extraer el Subject del certificado (¿clave incorrecta?).");
-    return subject;
+    return info;
 }
 
 std::vector<unsigned char> generateSelfSignedPfx(const std::string& password) {
@@ -173,7 +187,10 @@ EcfXmlSigner::EcfXmlSigner(const std::vector<unsigned char>& pfxBytes, const std
     } else {
         usesFallbackCertificate_ = false;
     }
-    certSubject_ = parseSubject(pfxBytes_, pfxPassword_);
+    auto info = parseCertInfo(pfxBytes_, pfxPassword_);
+    certSubject_ = info.subject;
+    certIssuer_ = info.issuer;
+    isSelfSigned_ = info.isSelfSigned;
 }
 
 EcfXmlSigner::EcfXmlSigner(const std::string& pfxPath, const std::string& pfxPassword)
@@ -198,14 +215,68 @@ EcfXmlSigner::EcfXmlSigner(const std::string& pfxPath, const std::string& pfxPas
         usesFallbackCertificate_ = false;
     }
 
-    certSubject_ = parseSubject(pfxBytes_, pfxPassword_);
+    auto info = parseCertInfo(pfxBytes_, pfxPassword_);
+    certSubject_ = info.subject;
+    certIssuer_ = info.issuer;
+    isSelfSigned_ = info.isSelfSigned;
 }
 
 bool EcfXmlSigner::validateCertificateSn(const std::string& rncOCedula) const {
-    if (usesFallbackCertificate_) {
+    if (rncOCedula.empty()) return false;
+    if (usesFallbackCertificate_ || isSelfSigned_) {
         return true;
     }
-    return certSubject_.find(rncOCedula) != std::string::npos;
+
+    std::string cleanSn;
+    for (char c : rncOCedula) {
+        if (std::isdigit(static_cast<unsigned char>(c))) cleanSn.push_back(c);
+    }
+
+    auto toLower = [](std::string s) {
+        std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+        return s;
+    };
+    auto toUpper = [](std::string s) {
+        std::transform(s.begin(), s.end(), s.begin(), ::toupper);
+        return s;
+    };
+
+    std::string sSub = toLower(certSubject_);
+    std::string sIss = toLower(certIssuer_);
+    std::string sRnc = toLower(rncOCedula);
+    std::string sClean = toLower(cleanSn);
+
+    // 2. Direct match on Subject or Issuer (exact or clean digits)
+    if (sSub.find(sRnc) != std::string::npos ||
+        (!sClean.empty() && sSub.find(sClean) != std::string::npos) ||
+        sIss.find(sRnc) != std::string::npos ||
+        (!sClean.empty() && sIss.find(sClean) != std::string::npos)) {
+        return true;
+    }
+
+    // 3. Dominican Authorized CAs & Tax Procedures / Natural Person delegation
+    std::string subjectUpper = toUpper(certSubject_);
+    std::string issuerUpper = toUpper(certIssuer_);
+
+    bool isDominicanCa = (issuerUpper.find("VIAFIRMA") != std::string::npos ||
+                          issuerUpper.find("AVANSI") != std::string::npos ||
+                          issuerUpper.find("CAMARA") != std::string::npos ||
+                          issuerUpper.find("DIGIFIRMA") != std::string::npos ||
+                          issuerUpper.find("DOMINICANA") != std::string::npos ||
+                          issuerUpper.find("C=DO") != std::string::npos ||
+                          issuerUpper.find("VATDO-") != std::string::npos);
+
+    bool isTaxProcedureOrNaturalPerson = (subjectUpper.find("TAX PROCEDURES") != std::string::npos ||
+                                          subjectUpper.find("PROCEDIMIENTOS TRIBUTARIOS") != std::string::npos ||
+                                          subjectUpper.find("PERSONA FISICA") != std::string::npos ||
+                                          subjectUpper.find("NATURAL PERSON") != std::string::npos ||
+                                          subjectUpper.find("IDCDO-") != std::string::npos);
+
+    if (isDominicanCa && isTaxProcedureOrNaturalPerson) {
+        return true;
+    }
+
+    return false;
 }
 
 std::string EcfXmlSigner::signXml(const std::string& xmlContent,

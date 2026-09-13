@@ -57,7 +57,9 @@ ResultT<RfceRecepcionResponse> SendRfceCommandHandler::handle(SendRfceCommand cm
         doc.state = response.estado;
         doc.totalAmount = rfce.encabezado.totales.montoTotal;
         doc.itbisAmount = rfce.encabezado.totales.totalITBIS.value_or(0);
-        doc.securityCode = rfce.encabezado.totales.codigoSeguridadeCF;
+        doc.securityCode = rfce.encabezado.codigoSeguridadeCF.has_value()
+                               ? rfce.encabezado.codigoSeguridadeCF
+                               : rfce.encabezado.totales.codigoSeguridadeCF;
         doc.xmlContent = xmlContent;
         doc.receiptDate = sys::utcNowIso();
 

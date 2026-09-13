@@ -64,6 +64,7 @@ struct RfceEncabezado {
     RfceEmisor emisor;
     std::optional<RfceComprador> comprador;
     RfceTotales totales;
+    std::optional<std::string> codigoSeguridadeCF;
 };
 
 struct Rfce {

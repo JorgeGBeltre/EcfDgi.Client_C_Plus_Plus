@@ -97,8 +97,6 @@ std::string calcularCodigoSeguridad(const std::string& signedXml) {
 std::string buildTimbreUrl(const std::string& baseUrl,
                            const domain::TimbreEcfRequest& req) {
     std::ostringstream os;
-    // NOTE: the DGII query parameter is spelled "codigoseuridad" verbatim so the
-    // request matches exactly what the endpoint expects.
     os << baseUrl
        << "?rncemisor=" << urlEncode(req.rncEmisor)
        << "&rnccomprador=" << urlEncode(req.rncComprador)
@@ -106,7 +104,7 @@ std::string buildTimbreUrl(const std::string& baseUrl,
        << "&fechaemision=" << urlEncode(req.fechaEmision)
        << "&montototal=" << urlEncode(money(req.montoTotal))
        << "&fechafirma=" << urlEncode(req.fechaFirma)
-       << "&codigoseuridad=" << urlEncode(req.codigoSeguridad);
+       << "&codigoseguridad=" << urlEncode(req.codigoSeguridad);
     return os.str();
 }
 
@@ -117,7 +115,7 @@ std::string buildTimbreFcUrl(const std::string& baseUrl,
        << "?rncemisor=" << urlEncode(req.rncEmisor)
        << "&encf=" << urlEncode(req.eNcf)
        << "&montototal=" << urlEncode(money(req.montoTotal))
-       << "&codigoseuridad=" << urlEncode(req.codigoSeguridad);
+       << "&codigoseguridad=" << urlEncode(req.codigoSeguridad);
     return os.str();
 }
 

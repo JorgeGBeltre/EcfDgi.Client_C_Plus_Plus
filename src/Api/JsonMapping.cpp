@@ -249,8 +249,15 @@ Rfce rfceFromJson(const Json::Value& j) {
     }
     to.montoTotal = jdbl(t, "montoTotal");
     to.montoNoFacturable = optDbl(t, "montoNoFacturable");
-    to.montoPeriodo = optDbl(t, "montoPeriodo");
     to.codigoSeguridadeCF = optStr(t, "codigoSeguridadeCF");
+    if (enc.isMember("codigoSeguridadeCF") && !enc["codigoSeguridadeCF"].isNull()) {
+        e.codigoSeguridadeCF = optStr(enc, "codigoSeguridadeCF");
+    } else {
+        e.codigoSeguridadeCF = to.codigoSeguridadeCF;
+    }
+    if (!to.codigoSeguridadeCF.has_value()) {
+        to.codigoSeguridadeCF = e.codigoSeguridadeCF;
+    }
 
     return rfce;
 }
