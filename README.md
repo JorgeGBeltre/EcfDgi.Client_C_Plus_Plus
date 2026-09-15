@@ -152,7 +152,7 @@ src/
 │   ├── Common/          # Logging & validation behaviors, ValidationException, request validators
 │   ├── Customers/       # Customer CRUD handlers + DTOs
 │   ├── Documents/       # CanonicalDocumentDto, item normalization, and tax calculation
-│   ├── Ecf/             # SendEcf, SendRfce, and GetStatus handlers + DTOs
+│   ├── Ecf/             # SendEcf, SendRfce, GetStatus handlers + DTOs, CanonicalXmlBuilder (buildXmlFromCanonical)
 │   ├── Auth/            # Authentication use cases + DTOs
 │   └── Services/        # EcfValidator, PollingHelper, EcfStatusReconciler
 ├── Infrastructure/      # Concrete implementations, DB access, DGII REST client
@@ -195,8 +195,8 @@ sequenceDiagram
     Note over API: Step 2: Idempotency & EditSequence conflict check
     API->>Seq: GetNextEncf(TenantId, TipoComprobante)
     Seq-->>API: eNCF (e.g. E310000000001)
-    Note over API: Step 3: Build XML from canonical DTO
-    API->>Signer: SignXml(unsignedXml, rncEmisor)
+    Note over API: Step 3: Build XML via CanonicalXmlBuilder
+    API->>Signer: SignXml(unsignedXml, effectiveRnc)
     Signer-->>API: Signed XML with <ds:Signature>
     Note over API: Step 4: Extract Security Code (SHA-256)
     API->>XSD: Validate(signedXml, xsdPath)
@@ -239,20 +239,24 @@ Instead of forcing internal billing software to generate complex DGII XML, the A
   - If the incoming `EditSequence` differs from the stored version, the API returns **HTTP 409 Conflict** (modified invoices require a corrective credit note, not re-submission).
 - Race condition recovery: If concurrent threads race on `uq_ecf_documents_tenant_source_txn`, the loser catches the unique constraint violation, refetches the winning row, and returns it safely.
 
-### 3. XML Compilation & Element Structure
-`buildXmlFromCanonical` compiles the document into the standard DGII structure:
-- Root element `<ECF>` with child `<Encabezado>`.
-- `<IdDoc>`: Contains `<TipoeCF>`, `<eNCF>`, `<FechaVencimientoSecuencia>`, `<IndicadorMontoNeto>`, `<TipoIngresos>`, `<TipoPago>`.
-- `<Emisor>`: Contains `<RNCEmisor>`, `<RazonSocialEmisor>`, `<FechaEmision>`, `<DireccionEmisor>`, etc.
-- `<Comprador>`: Contains `<RNCComprador>`, `<RazonSocialComprador>`, and optional `<CorreoComprador>` (validated against standard email regex `^\w+([-+.]\w+)*@\w+([-.]\w+)*\.\w+([-.]\w+)*$`, trimmed, truncated to 80 characters max, and emitted for all types except Tipo 47 Pagos al Exterior).
-- `<Totales>`: Contains `<MontoGravadoTotal>`, `<MontoGravadoI1>`, `<TotalITBIS>`, `<TotalITBIS1>`, `<MontoTotal>`.
-- `<DetallesItems>`: Processed via `normalizeCanonicalLines()`:
+### 3. XML Compilation & CanonicalXmlBuilder
+The modular `CanonicalXmlBuilder` (`src/Application/Ecf/CanonicalXmlBuilder.h` & `.cpp`) compiles the canonical document into the exact DGII standard XML structure, providing reusability and 1:1 parity with the C# reference builder:
+- **Root Element**: `<ECF>` with `<Encabezado>`.
+- **`<IdDoc>`**: Emits `<TipoeCF>`, `<eNCF>`, `<FechaVencimientoSecuencia>` (omitted for Tipo 32 Consumo), `<IndicadorNotaCredito>` (emitted for Tipo 34), `<TipoIngresos>` (`01` standard, `02` for Tipo 46 exports, omitted for 41, 43, 47), and `<TipoPago>`.
+- **`<Emisor>`**: Contains `<RNCEmisor>`, `<RazonSocialEmisor>`, `<FechaEmision>` (normalized from ISO `yyyy-MM-dd` or `dd/MM/yyyy` to DGII `dd-MM-yyyy` via `normalizeFechaDgii`), and `<DireccionEmisor>`.
+- **`<Comprador>`**:
+  - Omitted completely for Tipo 43 (Gastos Menores) per DGII specifications.
+  - For Tipo 47 (Pagos al Exterior) and Tipo 46 (Exportaciones), emits `<IdentificadorExtranjero>` for foreign buyers.
+  - For Tipo 32 (Consumo), defaults to `<RazonSocialComprador>Consumidor Final</RazonSocialComprador>` if buyer details are absent.
+  - Optional `<CorreoComprador>` is validated against standard email regex `^\w+([-+.]\w+)*@\w+([-.]\w+)*\.\w+([-.]\w+)*$`, trimmed, truncated to 80 characters, and emitted for all types except Tipo 47.
+- **`<Totales>`**: Emits `<MontoGravadoTotal>`, individual tax buckets (`<MontoGravadoI1>`, `<MontoGravadoI2>`, `<MontoGravadoI3>`), `<MontoExento>` (for tax-exempt lines, Tipo 43, 44, 47), `<TotalITBIS>`, `<TotalITBIS1..3>`, `<TotalITBISRetenido>`, and `<TotalISRRetencion>`.
+- **`<DetallesItems>` (Processed via `normalizeCanonicalLines()`)**:
   - **Discount Absorption**: Absorbs negative ERP lines (e.g. QuickBooks line discounts) into the preceding item's `DescuentoMonto`.
   - **Zero-Amount Line Suppression**: Automatically discards lines with `amount == 0` or `unitPrice == 0` (e.g. ERP informational comments, "Total Bultos", "P-142501", subtotal text) to guarantee strict DGII validation compliance.
   - **Item Name & Description**: Truncates `NombreItem` to 80 characters and places any remainder up to 1000 characters into `<DescripcionItem>`.
-- `<InformacionReferencia>`: Appended for credit notes (34) and debit notes (33) referencing the original eNCF.
-- `<Retencion>`: Appended for purchase bills (41) and foreign payments (47) with tax withholding amounts.
-- **Immediate Signed XML in Responses**: All `202 Accepted` response payloads from `POST /api/documents` return `signedXml` along with `documentId`, `eNcf`, `state`, `trackId`, and `securityCode`, allowing upstream callers and ERP connectors to instantly archive the certified XML without an additional roundtrip.
+- **`<InformacionReferencia>`**: Appended for credit notes (34) and debit notes (33) referencing the original eNCF.
+- **`<Retencion>`**: Appended per item line for purchase bills (41) and foreign payments (47) with tax withholding amounts.
+- **Immediate Signed XML in Responses**: All `202 Accepted` response payloads from `POST /api/documents` return `signedXml` along with `documentId`, `eNcf`, `state`, `trackId`, and `securityCode`.
 
 ### 4. XMLDSig Digital Signature & Dynamic Multi-Tenant Resolution
 - `EcfXmlSigner` implements standard W3C XMLDSig using `xmlsec1` and OpenSSL:
@@ -260,6 +264,11 @@ Instead of forcing internal billing software to generate complex DGII XML, the A
   - Enveloped signature transform (`http://www.w3.org/2000/09/xmldsig#enveloped-signature`).
   - RSA-SHA256 signature method (`http://www.w3.org/2001/04/xmldsig-more#rsa-sha256`).
   - Embeds the public certificate inside `<ds:KeyInfo><ds:X509Data>`.
+- **Multi-Tenant RNC & Razon Social Isolation**:
+  When processing requests for distinct tenants (`!isDefaultFallback`):
+  - The incoming `dto.Header.RncEmisor` and `dto.Header.RazonSocialEmisor` are strictly preserved as `effectiveRnc` and `effectiveRazonSocial`, instead of being overwritten by the host instance options.
+  - `resolveSigner` and `resolveEcfClient` load the certificate and DGII credentials specific to the tenant RNC.
+  - This guarantees that multi-tenant billing platforms do not cross-contaminate signatures, issuer headers, or sequence allocations.
 - **Dynamic Multi-Tenant Certificate Loading**:
   Rather than binding to a single static certificate at boot, the client resolves certificates per-request:
   1. **Inline Base64 PKCS#12 (`dto.certificate.certificateBase64`)**: The caller passes the certificate directly in the payload with its password. Decoded in-memory into `std::vector<unsigned char>` with zero disk leakage.
@@ -1426,13 +1435,31 @@ Test project C:/Users/Jorge/Pictures/DGII/EcfDgi.Client_C_Plus_Plus/build
     Start 1: validator_tests
 1/3 Test #1: validator_tests ..................   Passed    0.05 sec
     Start 2: hmac_tests
-2/3 Test #2: hmac_tests .......................   Passed    0.13 sec
+2/3 Test #2: hmac_tests .......................   Passed    0.18 sec
     Start 3: xsd_tests
-3/3 Test #3: xsd_tests ........................   Passed    0.99 sec
+3/3 Test #3: xsd_tests ........................   Passed    2.38 sec
 
 100% tests passed, 0 tests failed out of 3
-Total Test time (real) = 1.26 sec
+Total Test time (real) = 2.74 sec
 ```
+
+The test suites validate 100% parity against the C# reference test suite:
+- **`validator_tests`**: Domain rule validation, RNC/Cédula Luhn algorithms, ITBIS bucket restrictions, and QuickBooks discount/zero-amount normalization.
+- **`hmac_tests`**: Machine-to-machine HMAC-SHA256 signature generation, canonical request string sorting, nonce replay resistance, and timestamp skew tolerances.
+- **`xsd_tests`**: 26 automated assertions validating generated XML directly against DGII's official XSD schemas (`Documentación Técnica (XSD)`):
+  - **Tipo 31 (Factura de Crédito Fiscal)**: Standard tax credit invoice, ISO 8601 date normalization (`yyyy-MM-dd` $\to$ `dd-MM-yyyy`), and exempt/taxed bucket splits (`MontoExento`).
+  - **Tipo 32 (Factura de Consumo)**: Standard consumer invoice with buyer, `<FechaVencimientoSecuencia>` omission, and anonymous consumer fallback (`RazonSocialComprador = Consumidor Final`).
+  - **Tipo 33 (Nota de Débito)**: Debit note with `<InformacionReferencia>` (`NCFModificado`, `CodigoModificacion`, `RazonModificacion`).
+  - **Tipo 34 (Nota de Crédito)**: Credit note with `<IndicadorNotaCredito>0</IndicadorNotaCredito>` and modified sequence references.
+  - **Tipo 41 (Compras)**: Informal vendor purchase bills with mandatory `<Retencion>` (`TotalITBISRetenido`, `TotalISRRetencion`).
+  - **Tipo 43 (Gastos Menores)**: Internal expense receipts omitting `<Comprador>` and `<TipoIngresos>`, declaring `<MontoExento>`.
+  - **Tipo 44 (Regímenes Especiales)**: Special tax regime invoices with identified buyer and tax exemption.
+  - **Tipo 45 (Gubernamental)**: Government entity invoices requiring valid buyer RNC.
+  - **Tipo 46 (Exportaciones)**: Export invoices with foreign buyer identification (`<IdentificadorExtranjero>`), `TipoIngresos = 02`, and 0% ITBIS (`<MontoGravadoI3>`, `<ITBIS3>0</ITBIS3>`).
+  - **Tipo 47 (Pagos al Exterior)**: Foreign payment invoices with foreign buyer identification and ISR withholding.
+  - **ARECF (Acuse de Recibo)**: B2B vendor reception acknowledgment XML schema validation.
+  - **RFCE (Resumen de Factura de Consumo)**: Offline consumer invoice summary schema validation (`RFCE 32 v.1.0.xsd`).
+  - **Multi-Tenant Isolation**: Rigorous assertion that tenant-specific RNC and business name are injected into the emitted XML without leaking host/default configuration.
 
 ### Health Check Endpoint
 Check API, Database, and Redis status by requesting the `/health` endpoint:

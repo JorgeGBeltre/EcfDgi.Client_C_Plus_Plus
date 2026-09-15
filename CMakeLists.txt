@@ -69,6 +69,8 @@ add_library(ecfdgii_core STATIC
     src/Application/Customers/CustomerHandlers.h
     src/Application/Ecf/EcfDtos.h
     src/Application/Ecf/CanonicalDocumentDto.h
+    src/Application/Ecf/CanonicalXmlBuilder.cpp
+    src/Application/Ecf/CanonicalXmlBuilder.h
     src/Application/Ecf/EcfHandlers.cpp
     src/Application/Ecf/EcfHandlers.h
     src/Application/Services/EcfValidator.cpp
