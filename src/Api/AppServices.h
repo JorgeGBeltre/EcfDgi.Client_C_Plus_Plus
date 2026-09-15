@@ -22,6 +22,7 @@
 #include "Domain/Interfaces/IUserRepository.h"
 #include "Domain/Interfaces/IEcfSequenceManager.h"
 #include "Domain/Interfaces/IIdempotencyStore.h"
+#include "Domain/Interfaces/ITenantSignerResolver.h"
 #include "Api/Security/NonceCache.h"
 #include "Infrastructure/Persistence/DbContext.h"
 
@@ -51,6 +52,7 @@ public:
     std::shared_ptr<domain::IEcfSequenceManager> sequenceManager() const { return sequenceManager_; }
     std::shared_ptr<domain::IIdempotencyStore> idempotencyStore() const { return idempotencyStore_; }
     std::shared_ptr<domain::IEcfXmlSigner> signer() const { return signer_; }
+    std::shared_ptr<domain::ITenantSignerResolver> tenantSignerResolver() const { return tenantSignerResolver_; }
     std::shared_ptr<domain::IEcfSchemaValidator> schemaValidator() const { return schemaValidator_; }
     const domain::EcfEmisorOptions& emisorOptions() const { return config_.emisorOptions; }
     const domain::EcfStatusPollingOptions& statusPollingOptions() const { return config_.statusPollingOptions; }
@@ -71,6 +73,7 @@ private:
     std::shared_ptr<domain::IEcfSequenceManager> sequenceManager_;
     std::shared_ptr<domain::IIdempotencyStore> idempotencyStore_;
     std::shared_ptr<domain::IEcfXmlSigner> signer_;
+    std::shared_ptr<domain::ITenantSignerResolver> tenantSignerResolver_;
     std::shared_ptr<domain::IEcfSchemaValidator> schemaValidator_;
 
     std::shared_ptr<domain::IEcfClient> ecfClient_;
