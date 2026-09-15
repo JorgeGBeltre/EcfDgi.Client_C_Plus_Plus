@@ -31,6 +31,7 @@ services:
       retries: 5
 
   api:
+    image: ${ECF_IMAGE:-ghcr.io/jorgegbeltre/ecfdgii-client:latest}
     build:
       context: .
       dockerfile: Dockerfile
