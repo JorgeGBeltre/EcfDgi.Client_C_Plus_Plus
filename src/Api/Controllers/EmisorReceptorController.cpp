@@ -19,12 +19,19 @@ namespace {
 
 std::string extractXmlContent(const HttpRequestPtr& req) {
     MultiPartParser parser;
-    if (parser.parse(req) == 0 && !parser.getFiles().empty()) {
-        const auto& files = parser.getFiles();
-        for (const auto& f : files) {
-            if (f.getItemName() == "xml" || files.size() == 1) {
-                return std::string(f.fileData(), f.fileLength());
+    if (parser.parse(req) == 0) {
+        if (!parser.getFiles().empty()) {
+            const auto& files = parser.getFiles();
+            for (const auto& f : files) {
+                if (f.getItemName() == "xml" || files.size() == 1) {
+                    return std::string(f.fileData(), f.fileLength());
+                }
             }
+        }
+        const auto& params = parser.getParameters();
+        auto it = params.find("xml");
+        if (it != params.end() && !it->second.empty()) {
+            return it->second;
         }
     }
     return std::string(req->getBody());
@@ -129,7 +136,9 @@ void EmisorReceptorController::recepcioneCF(const HttpRequestPtr& req,
 
     std::string unsignedArecf = ss.str();
     try {
-        std::string signedArecf = AppServices::instance().signer()->signXml(unsignedArecf, rncComprador);
+        auto resolver = AppServices::instance().tenantSignerResolver();
+        auto signer = resolver ? resolver->resolveSigner(rncComprador) : AppServices::instance().signer();
+        std::string signedArecf = signer->signXml(unsignedArecf, rncComprador);
         auto resp = HttpResponse::newHttpResponse();
         resp->setStatusCode(k200OK);
         resp->setContentTypeCode(CT_APPLICATION_XML);

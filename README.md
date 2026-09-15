@@ -1303,6 +1303,27 @@ public:
         const std::string& xmlContent, const std::string& fileName) = 0;
 };
 }  // namespace ecf::domain
+
+// ITenantSignerResolver.h
+namespace ecf::domain {
+class ITenantSignerResolver {
+public:
+    virtual ~ITenantSignerResolver() = default;
+    virtual std::shared_ptr<IEcfXmlSigner> resolveSigner(const std::string& rnc) = 0;
+};
+}  // namespace ecf::domain
+
+// CertificateExpiryPolicy.h
+namespace ecf::infra {
+class CertificateExpiryPolicy {
+public:
+    enum class ExpiryUrgency { Ok, Warning, Critical };
+    static constexpr int WarningDays = 30;
+    static constexpr int CriticalDays = 7;
+    static ExpiryUrgency classify(std::chrono::system_clock::time_point now,
+                                  std::chrono::system_clock::time_point notAfter);
+};
+}  // namespace ecf::infra
 ```
 
 ---

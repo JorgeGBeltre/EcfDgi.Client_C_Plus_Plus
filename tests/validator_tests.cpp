@@ -6,6 +6,9 @@
 
 #include "Application/Services/EcfValidator.h"
 #include "Domain/Entities/Rfce.h"
+#include "Infrastructure/Security/CertificateExpiryPolicy.h"
+#include "Infrastructure/Security/TenantSignerResolver.h"
+#include "Infrastructure/Security/EcfXmlSigner.h"
 
 using namespace ecf;
 
@@ -60,6 +63,38 @@ int main() {
         rfce.encabezado.totales.montoTotal = 300000.0;  // >= 250k threshold
         auto result = validator.validateRfce(rfce);
         CHECK(!result.isValid(), "amount over RFCE threshold is rejected");
+    }
+
+    // CertificateExpiryPolicy tests
+    {
+        auto now = std::chrono::system_clock::now();
+        auto okDate = now + std::chrono::hours(35 * 24);
+        auto warningDate = now + std::chrono::hours(20 * 24);
+        auto criticalDate = now + std::chrono::hours(3 * 24);
+
+        CHECK(infra::CertificateExpiryPolicy::classify(now, okDate) ==
+              infra::CertificateExpiryPolicy::ExpiryUrgency::Ok,
+              "Certificate expiry > 30 days is Ok");
+
+        CHECK(infra::CertificateExpiryPolicy::classify(now, warningDate) ==
+              infra::CertificateExpiryPolicy::ExpiryUrgency::Warning,
+              "Certificate expiry <= 30 days is Warning");
+
+        CHECK(infra::CertificateExpiryPolicy::classify(now, criticalDate) ==
+              infra::CertificateExpiryPolicy::ExpiryUrgency::Critical,
+              "Certificate expiry <= 7 days is Critical");
+    }
+
+    // TenantSignerResolver tests
+    {
+        auto defaultSigner = std::make_shared<infra::EcfXmlSigner>();
+        infra::TenantSignerResolver resolver("", defaultSigner);
+
+        CHECK(resolver.resolveSigner("") == defaultSigner,
+              "TenantSignerResolver falls back to default signer on empty RNC");
+
+        CHECK(resolver.resolveSigner("101672919") == defaultSigner,
+              "TenantSignerResolver falls back to default signer when RNC not found");
     }
 
     std::printf("\n%s (%d failure(s))\n", failures ? "TESTS FAILED" : "ALL TESTS PASSED",

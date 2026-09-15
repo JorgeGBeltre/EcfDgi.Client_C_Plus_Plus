@@ -51,6 +51,7 @@ add_library(ecfdgii_core STATIC
     src/Domain/Interfaces/IEcfTransport.h
     src/Domain/Interfaces/IEcfXmlSerializer.h
     src/Domain/Interfaces/IEcfXmlSigner.h
+    src/Domain/Interfaces/ITenantSignerResolver.h
     src/Domain/Interfaces/IEcfSchemaValidator.h
     src/Domain/Interfaces/ISecurity.h
     src/Domain/Interfaces/IUnitOfWork.h
@@ -116,6 +117,9 @@ add_library(ecfdgii_core STATIC
     src/Infrastructure/Security/EcfSecurityUtils.h
     src/Infrastructure/Security/EcfXmlSigner.cpp
     src/Infrastructure/Security/EcfXmlSigner.h
+    src/Infrastructure/Security/TenantSignerResolver.cpp
+    src/Infrastructure/Security/TenantSignerResolver.h
+    src/Infrastructure/Security/CertificateExpiryPolicy.h
     src/Infrastructure/Security/JwtSettings.h
     src/Infrastructure/Security/PasswordHasher.cpp
     src/Infrastructure/Security/PasswordHasher.h

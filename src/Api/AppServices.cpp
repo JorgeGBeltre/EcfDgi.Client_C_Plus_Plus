@@ -14,6 +14,7 @@
 #include "Infrastructure/Serialization/EcfXmlSerializer.h"
 #include "Infrastructure/Persistence/EcfSequenceManager.h"
 #include "Infrastructure/Persistence/DbIdempotencyStore.h"
+#include "Infrastructure/Security/TenantSignerResolver.h"
 
 namespace ecf::api {
 
@@ -38,6 +39,8 @@ void AppServices::configure(AppConfig config) {
     } else {
         signer_ = std::make_shared<infra::EcfXmlSigner>();
     }
+
+    tenantSignerResolver_ = std::make_shared<infra::TenantSignerResolver>(config_.connectionString, signer_);
 
     schemaValidator_ = std::make_shared<infra::EcfSchemaValidator>(config_.ecfOptions.xsdDirectoryPath);
 }
