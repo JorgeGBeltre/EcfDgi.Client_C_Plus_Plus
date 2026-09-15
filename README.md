@@ -1430,13 +1430,30 @@ volumes:
 
 ---
 
-## Continuous Integration
+## Continuous Integration & Automated Docker Deployment
 
-A GitHub Actions pipeline at `.github/workflows/ci.yml` runs on every push to `develop` in three stages:
+A GitHub Actions pipeline at `.github/workflows/ci.yml` runs on every push and pull request to `main` and `develop` in three stages:
 
-1. **test** — builds the project on Ubuntu with CMake + vcpkg (cached vcpkg tree) and runs the suite via `ctest`.
-2. **merge-to-main** — once tests pass, fast-forward merges `develop` into `main` and pushes it.
-3. **docker** — builds the Docker image from `main` (`ecfdgii-client-cpp:latest`).
+1. **build-and-test** — builds the C++20 project on Ubuntu with CMake + Ninja + vcpkg (with binary caching) and executes the comprehensive test suite (`ctest`).
+2. **automerge** — on pushes to `develop` with passing tests, fast-forward merges `develop` into `main` and pushes it.
+3. **build-docker** — sets up Docker Buildx, logs into GitHub Container Registry (GHCR), extracts tags (`latest`, branch name, short Git SHA), compiles the multi-stage Docker container with GitHub Actions layer caching (`type=gha`), and publishes the pre-built image to GHCR.
+
+### Deploying the Pre-Built Docker Image from GHCR
+
+Anyone can deploy and run the service without compiling C++ source code or installing local build tools:
+
+```bash
+# Pull the latest published image from GHCR
+docker pull ghcr.io/<github-username>/ecfdgii-client:latest
+
+# Run the container connecting to your PostgreSQL database and Redis
+docker run -d \
+  --name ecfdgii_api \
+  -p 8080:8080 \
+  -e ConnectionStrings__DefaultConnection="host=postgres_host port=5432 dbname=ecf_dgii user=postgres password=secret" \
+  -e ConnectionStrings__Redis="redis_host:6379" \
+  ghcr.io/<github-username>/ecfdgii-client:latest
+```
 
 ---
 
