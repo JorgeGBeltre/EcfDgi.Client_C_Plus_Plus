@@ -32,23 +32,45 @@ std::optional<EcfDocument> EcfDocumentRepository::getByTrackId(const std::string
     return queryOne(*db_, "track_id = $1", trackId);
 }
 
-std::optional<EcfDocument> EcfDocumentRepository::getBySourceTxnId(const std::string& tenantId,
-                                                                  const std::string& sourceTxnId) {
+std::optional<EcfDocument> EcfDocumentRepository::getBySourceTxnId(
+    const std::string& tenantId,
+    const std::string& sourceTxnId,
+    const std::optional<std::string>& ambiente) {
     pqxx::nontransaction n(db_->connection());
     if (tenantId == "default-tenant") {
-        pqxx::result r = n.exec_params(
-            std::string("SELECT ") + ecfDocumentColumns() +
-            " FROM ecf_documents WHERE (source_txn_id = $1 OR track_id = $1 OR e_ncf = $1) AND is_deleted = false LIMIT 1",
-            sourceTxnId);
-        if (r.empty()) return std::nullopt;
-        return mapEcfDocument(r[0]);
+        if (ambiente.has_value() && !ambiente->empty()) {
+            pqxx::result r = n.exec_params(
+                std::string("SELECT ") + ecfDocumentColumns() +
+                " FROM ecf_documents WHERE (source_txn_id = $1 OR track_id = $1 OR e_ncf = $1) "
+                " AND (ambiente IS NULL OR ambiente = $2) AND is_deleted = false LIMIT 1",
+                sourceTxnId, *ambiente);
+            if (r.empty()) return std::nullopt;
+            return mapEcfDocument(r[0]);
+        } else {
+            pqxx::result r = n.exec_params(
+                std::string("SELECT ") + ecfDocumentColumns() +
+                " FROM ecf_documents WHERE (source_txn_id = $1 OR track_id = $1 OR e_ncf = $1) AND is_deleted = false LIMIT 1",
+                sourceTxnId);
+            if (r.empty()) return std::nullopt;
+            return mapEcfDocument(r[0]);
+        }
     } else {
-        pqxx::result r = n.exec_params(
-            std::string("SELECT ") + ecfDocumentColumns() +
-            " FROM ecf_documents WHERE tenant_id = $1 AND (source_txn_id = $2 OR track_id = $2 OR e_ncf = $2) AND is_deleted = false LIMIT 1",
-            tenantId, sourceTxnId);
-        if (r.empty()) return std::nullopt;
-        return mapEcfDocument(r[0]);
+        if (ambiente.has_value() && !ambiente->empty()) {
+            pqxx::result r = n.exec_params(
+                std::string("SELECT ") + ecfDocumentColumns() +
+                " FROM ecf_documents WHERE tenant_id = $1 AND (source_txn_id = $2 OR track_id = $2 OR e_ncf = $2) "
+                " AND (ambiente IS NULL OR ambiente = $3) AND is_deleted = false LIMIT 1",
+                tenantId, sourceTxnId, *ambiente);
+            if (r.empty()) return std::nullopt;
+            return mapEcfDocument(r[0]);
+        } else {
+            pqxx::result r = n.exec_params(
+                std::string("SELECT ") + ecfDocumentColumns() +
+                " FROM ecf_documents WHERE tenant_id = $1 AND (source_txn_id = $2 OR track_id = $2 OR e_ncf = $2) AND is_deleted = false LIMIT 1",
+                tenantId, sourceTxnId);
+            if (r.empty()) return std::nullopt;
+            return mapEcfDocument(r[0]);
+        }
     }
 }
 
@@ -90,13 +112,13 @@ void EcfDocumentRepository::add(const EcfDocument& document) {
             "INSERT INTO ecf_documents (id, e_ncf, rnc_emisor, rnc_comprador, tenant_id, "
             "source_txn_id, edit_sequence, document_kind, ncf, track_id, state, total_amount, itbis_amount, "
             "security_code, xml_content, signed_xml_content, dgii_response_xml, receipt_date, "
-            "sent_to_dgii_at, last_status_check_at, status_check_attempts, "
+            "sent_to_dgii_at, last_status_check_at, status_check_attempts, ambiente, "
             "created_at, created_by, is_deleted) "
-            "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)",
+            "VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)",
             e.id, e.eNcf, e.rncEmisor, e.rncComprador, e.tenantId, e.sourceTxnId,
             e.editSequence, e.documentKind, e.ncf, e.trackId, e.state, e.totalAmount, e.itbisAmount,
             e.securityCode, e.xmlContent, e.signedXmlContent, e.dgiiResponseXml, e.receiptDate,
-            e.sentToDgiiAt, e.lastStatusCheckAt, e.statusCheckAttempts,
+            e.sentToDgiiAt, e.lastStatusCheckAt, e.statusCheckAttempts, e.ambiente,
             e.createdAt, by, e.isDeleted);
     });
 }
@@ -112,12 +134,12 @@ void EcfDocumentRepository::update(const EcfDocument& document) {
             "state = $11, total_amount = $12, itbis_amount = $13, security_code = $14, "
             "xml_content = $15, signed_xml_content = $16, dgii_response_xml = $17, "
             "receipt_date = $18, sent_to_dgii_at = $19, last_status_check_at = $20, status_check_attempts = $21, "
-            "updated_at = $22, updated_by = $23 WHERE id = $1",
+            "ambiente = $22, updated_at = $23, updated_by = $24 WHERE id = $1",
             e.id, e.eNcf, e.rncEmisor, e.rncComprador, e.tenantId, e.sourceTxnId,
             e.editSequence, e.documentKind, e.ncf, e.trackId, e.state, e.totalAmount, e.itbisAmount,
             e.securityCode, e.xmlContent, e.signedXmlContent, e.dgiiResponseXml, e.receiptDate,
             e.sentToDgiiAt, e.lastStatusCheckAt, e.statusCheckAttempts,
-            at, by);
+            e.ambiente, at, by);
     });
 }
 

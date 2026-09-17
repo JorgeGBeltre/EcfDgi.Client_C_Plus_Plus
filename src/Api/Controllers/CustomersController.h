@@ -9,13 +9,13 @@ public:
     METHOD_LIST_BEGIN
     ADD_METHOD_TO(CustomersController::getAll, "/api/customers", drogon::Get,
                   "ecf::api::JwtAuthFilter");
-    ADD_METHOD_TO(CustomersController::getById, "/api/customers/{1}", drogon::Get,
+    ADD_METHOD_TO(CustomersController::getById, "/api/customers/{id}", drogon::Get,
                   "ecf::api::JwtAuthFilter");
     ADD_METHOD_TO(CustomersController::create, "/api/customers", drogon::Post,
                   "ecf::api::JwtAuthFilter");
-    ADD_METHOD_TO(CustomersController::update, "/api/customers/{1}", drogon::Put,
+    ADD_METHOD_TO(CustomersController::update, "/api/customers/{id}", drogon::Put,
                   "ecf::api::JwtAuthFilter");
-    ADD_METHOD_TO(CustomersController::remove, "/api/customers/{1}", drogon::Delete,
+    ADD_METHOD_TO(CustomersController::remove, "/api/customers/{id}", drogon::Delete,
                   "ecf::api::JwtAuthFilter", "ecf::api::AdminRoleFilter");
     METHOD_LIST_END
 

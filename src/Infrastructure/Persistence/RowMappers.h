@@ -88,6 +88,7 @@ inline domain::EcfDocument mapEcfDocument(const Row& r) {
     d.sentToDgiiAt = optStr(r["sent_to_dgii_at"]);
     d.lastStatusCheckAt = optStr(r["last_status_check_at"]);
     d.statusCheckAttempts = r["status_check_attempts"].template as<int>();
+    d.ambiente = optStr(r["ambiente"]);
     return d;
 }
 
@@ -138,6 +139,7 @@ inline const char* ecfDocumentColumns() {
     return "id::text, e_ncf, rnc_emisor, rnc_comprador, tenant_id, source_txn_id, edit_sequence, document_kind, ncf, track_id, state, "
            "total_amount, itbis_amount, security_code, xml_content, signed_xml_content, dgii_response_xml, "
            "receipt_date::text, sent_to_dgii_at::text, last_status_check_at::text, status_check_attempts, "
+           "ambiente, "
            "created_at::text, created_by, updated_at::text, "
            "updated_by, deleted_at::text, deleted_by, is_deleted";
 }

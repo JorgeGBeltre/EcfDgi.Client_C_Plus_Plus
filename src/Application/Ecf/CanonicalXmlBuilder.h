@@ -23,7 +23,7 @@ std::string escapeXml(const std::string& value);
 
 std::string normalizeFechaDgii(const std::string& value);
 
-std::vector<ProcessedLineItem> normalizeCanonicalLines(const std::vector<CanonicalLineDto>& lines);
+std::vector<ProcessedLineItem> normalizeCanonicalLines(const std::vector<CanonicalLineDto>& lines, double defaultTotal = 0.0);
 
 void appendRetencion(std::ostringstream& ss, const std::optional<CanonicalRetentionDto>& retention, const std::string& tipoEcf);
 

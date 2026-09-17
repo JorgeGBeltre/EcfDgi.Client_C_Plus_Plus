@@ -250,6 +250,7 @@ HttpResponsePtr signAndSend(domain::EcfDocument& doc, AppServices::Scope& scope,
         out["trackId"] = doc.trackId.value_or("");
         out["securityCode"] = doc.securityCode.value_or("");
         out["signedXml"] = doc.signedXmlContent.value_or("");
+        out["dgiiResponse"] = doc.dgiiResponseXml.value_or("");
         return json(out, k202Accepted);
     }
 
@@ -263,6 +264,37 @@ HttpResponsePtr signAndSend(domain::EcfDocument& doc, AppServices::Scope& scope,
             doc.trackId = response.trackId;
             doc.state = "Signed";
             doc.sentToDgiiAt = sys::utcNowIso();
+
+            // Immediate status check with DGII in case it was processed synchronously
+            try {
+                auto resultado = client->consultarResultado(*doc.trackId);
+                if (!resultado.estado.empty()) {
+                    std::string estado = resultado.estado;
+                    while (!estado.empty() && std::isspace(static_cast<unsigned char>(estado.front()))) estado.erase(estado.begin());
+                    while (!estado.empty() && std::isspace(static_cast<unsigned char>(estado.back()))) estado.pop_back();
+
+                    std::string lowerEstado = estado;
+                    std::transform(lowerEstado.begin(), lowerEstado.end(), lowerEstado.begin(), ::tolower);
+
+                    if (lowerEstado == "aceptado" || lowerEstado == "aceptado condicional") {
+                        doc.state = "AcceptedByDgii";
+                        doc.dgiiResponseXml = "Aceptado por DGII: " + estado;
+                    } else if (lowerEstado == "rechazado") {
+                        doc.state = "RejectedByDgii";
+                        std::string errors = "Rechazado por DGII";
+                        if (!resultado.mensajes.empty()) {
+                            errors = "";
+                            for (size_t i = 0; i < resultado.mensajes.size(); ++i) {
+                                if (i > 0) errors += "; ";
+                                errors += "[" + resultado.mensajes[i].codigo + "] " + resultado.mensajes[i].valor;
+                            }
+                        }
+                        doc.dgiiResponseXml = errors;
+                    }
+                }
+            } catch (...) {
+                // Immediate check didn't complete; will be polled by background reconciler
+            }
         } else {
             doc.state = "RejectedByDgii";
         }
@@ -280,6 +312,7 @@ HttpResponsePtr signAndSend(domain::EcfDocument& doc, AppServices::Scope& scope,
     out["trackId"] = doc.trackId.value_or("");
     out["securityCode"] = doc.securityCode.value_or("");
     out["signedXml"] = doc.signedXmlContent.value_or("");
+    out["dgiiResponse"] = doc.dgiiResponseXml.value_or("");
     return json(out, k202Accepted);
 }
 
@@ -307,6 +340,7 @@ HttpResponsePtr reconcileUncertain(domain::EcfDocument& doc,
             out["trackId"] = doc.trackId.value_or("");
             out["securityCode"] = doc.securityCode.value_or("");
             out["signedXml"] = doc.signedXmlContent.value_or("");
+            out["dgiiResponse"] = doc.dgiiResponseXml.value_or("");
             return json(out, k202Accepted);
         }
     }
@@ -328,6 +362,7 @@ HttpResponsePtr reconcileUncertain(domain::EcfDocument& doc,
         out["trackId"] = doc.trackId.value_or("");
         out["securityCode"] = doc.securityCode.value_or("");
         out["signedXml"] = doc.signedXmlContent.value_or("");
+        out["dgiiResponse"] = doc.dgiiResponseXml.value_or("");
         return json(out, k202Accepted);
     }
 
@@ -347,6 +382,7 @@ HttpResponsePtr reconcileUncertain(domain::EcfDocument& doc,
         out["trackId"] = doc.trackId.value_or("");
         out["securityCode"] = doc.securityCode.value_or("");
         out["signedXml"] = doc.signedXmlContent.value_or("");
+        out["dgiiResponse"] = doc.dgiiResponseXml.value_or("");
         return json(out, k202Accepted);
     }
 
@@ -365,7 +401,10 @@ HttpResponsePtr handleExistingDocument(domain::EcfDocument& existingDoc,
                                        const std::string& emisorRnc,
                                        const std::string& emisorRazonSocial,
                                        std::shared_ptr<domain::IEcfXmlSigner> effectiveSigner = nullptr,
-                                       std::shared_ptr<domain::IEcfClient> effectiveClient = nullptr) {
+                                       std::shared_ptr<domain::IEcfClient> effectiveClient = nullptr,
+                                       const std::string& tenantId = "default-tenant",
+                                       domain::AmbienteEnum ambiente = domain::AmbienteEnum::Certificacion,
+                                       bool isDefaultFallback = true) {
     if (NeverTransmittedStates.count(existingDoc.state)) {
         applyCanonicalContent(existingDoc, dto, editSequence, emisorRnc, emisorRazonSocial);
         scope.docs->update(existingDoc);
@@ -375,6 +414,23 @@ HttpResponsePtr handleExistingDocument(domain::EcfDocument& existingDoc,
 
     if (existingDoc.state == "Uncertain") {
         return reconcileUncertain(existingDoc, dto, editSequence, scope, services, emisorRnc, emisorRazonSocial, effectiveSigner, effectiveClient);
+    }
+
+    if (existingDoc.state == "RejectedByDgii") {
+        // Re-issuance of rejected e-CF: allocate fresh eNCF and re-transmit
+        std::string sequenceScope = isDefaultFallback ? "default-tenant" : (tenantId + ":" + ambienteToString(ambiente));
+        std::string newEncf = services.sequenceManager()->getNextEncf(sequenceScope, dto.tipoComprobante.empty() ? "E31" : dto.tipoComprobante);
+        existingDoc.eNcf = newEncf;
+        existingDoc.trackId = std::nullopt;
+        existingDoc.securityCode = std::nullopt;
+        existingDoc.dgiiResponseXml = std::nullopt;
+        existingDoc.sentToDgiiAt = std::nullopt;
+        existingDoc.state = "AwaitingTransmission";
+
+        applyCanonicalContent(existingDoc, dto, editSequence, emisorRnc, emisorRazonSocial);
+        scope.docs->update(existingDoc);
+        scope.uow->saveChanges();
+        return signAndSend(existingDoc, scope, services, effectiveSigner, effectiveClient);
     }
 
     if (existingDoc.editSequence != editSequence) {
@@ -396,6 +452,7 @@ HttpResponsePtr handleExistingDocument(domain::EcfDocument& existingDoc,
     out["trackId"] = existingDoc.trackId.value_or("");
     out["securityCode"] = existingDoc.securityCode.value_or("");
     out["signedXml"] = existingDoc.signedXmlContent.value_or("");
+    out["dgiiResponse"] = existingDoc.dgiiResponseXml.value_or("");
     return json(out, k202Accepted);
 }
 
@@ -543,12 +600,13 @@ void DocumentsController::submit(const HttpRequestPtr& req,
 
             auto scope = services.makeScope(mapping::currentUserFrom(req));
             std::string editSequence = dto.sourceReference.editSequence;
+            std::string ambStr = ambienteToString(ambiente);
 
-            // Check if document for this TxnId has already been processed
+            // Check if document for this TxnId has already been processed in this ambiente
             try {
-                auto existing = scope.docs->getBySourceTxnId(effectiveTenantId, dto.sourceReference.txnId);
+                auto existing = scope.docs->getBySourceTxnId(effectiveTenantId, dto.sourceReference.txnId, ambStr);
                 if (existing.has_value()) {
-                    auto res = handleExistingDocument(*existing, dto, editSequence, scope, services, effectiveRnc, effectiveRazonSocial, effectiveSigner, effectiveClient);
+                    auto res = handleExistingDocument(*existing, dto, editSequence, scope, services, effectiveRnc, effectiveRazonSocial, effectiveSigner, effectiveClient, effectiveTenantId, ambiente, isDefaultFallback);
                     cb(res);
                     return;
                 }
@@ -571,6 +629,7 @@ void DocumentsController::submit(const HttpRequestPtr& req,
             doc.tenantId = effectiveTenantId;
             doc.sourceTxnId = dto.sourceReference.txnId;
             doc.eNcf = eNcf;
+            doc.ambiente = ambStr;
             applyCanonicalContent(doc, dto, editSequence, effectiveRnc, effectiveRazonSocial);
 
             try {
@@ -580,9 +639,9 @@ void DocumentsController::submit(const HttpRequestPtr& req,
                 std::string what = ex.what();
                 if (what.find(TenantSourceTxnUniqueConstraint) != std::string::npos || what.find("23505") != std::string::npos) {
                     // Concurrent insert race condition: winner exists
-                    auto winner = scope.docs->getBySourceTxnId(effectiveTenantId, dto.sourceReference.txnId);
+                    auto winner = scope.docs->getBySourceTxnId(effectiveTenantId, dto.sourceReference.txnId, ambStr);
                     if (winner.has_value()) {
-                        auto res = handleExistingDocument(*winner, dto, editSequence, scope, services, effectiveRnc, effectiveRazonSocial, effectiveSigner, effectiveClient);
+                        auto res = handleExistingDocument(*winner, dto, editSequence, scope, services, effectiveRnc, effectiveRazonSocial, effectiveSigner, effectiveClient, effectiveTenantId, ambiente, isDefaultFallback);
                         cb(res);
                         return;
                     }
@@ -622,6 +681,47 @@ void DocumentsController::getBySourceTxnId(const HttpRequestPtr& req,
             return;
         }
 
+        // Si el comprobante sigue en Signed con TrackId, verificar dinámicamente con DGII
+        if (doc->state == "Signed" && doc->trackId.has_value() && !doc->trackId->empty()) {
+            try {
+                auto effectiveSigner = resolveSigner(doc->tenantId, doc->rncEmisor, std::nullopt, false, services);
+                auto defaultAmbiente = services.ecfClientOptions().toAmbiente(services.ecfClientOptions().environment);
+                auto amb = resolveAmbienteEnum(doc->ambiente.value_or(""), defaultAmbiente);
+                auto client = resolveEcfClient(doc->rncEmisor, effectiveSigner, amb, false, services);
+                auto resultado = client->consultarResultado(*doc->trackId);
+                if (!resultado.estado.empty()) {
+                    std::string estado = resultado.estado;
+                    while (!estado.empty() && std::isspace(static_cast<unsigned char>(estado.front()))) estado.erase(estado.begin());
+                    while (!estado.empty() && std::isspace(static_cast<unsigned char>(estado.back()))) estado.pop_back();
+
+                    std::string lowerEstado = estado;
+                    std::transform(lowerEstado.begin(), lowerEstado.end(), lowerEstado.begin(), ::tolower);
+
+                    if (lowerEstado == "aceptado" || lowerEstado == "aceptado condicional") {
+                        doc->state = "AcceptedByDgii";
+                        doc->dgiiResponseXml = "Aceptado por DGII: " + estado;
+                        scope.docs->update(*doc);
+                        scope.uow->saveChanges();
+                    } else if (lowerEstado == "rechazado") {
+                        doc->state = "RejectedByDgii";
+                        std::string errors = "Rechazado por DGII";
+                        if (!resultado.mensajes.empty()) {
+                            errors = "";
+                            for (size_t i = 0; i < resultado.mensajes.size(); ++i) {
+                                if (i > 0) errors += "; ";
+                                errors += "[" + resultado.mensajes[i].codigo + "] " + resultado.mensajes[i].valor;
+                            }
+                        }
+                        doc->dgiiResponseXml = errors;
+                        scope.docs->update(*doc);
+                        scope.uow->saveChanges();
+                    }
+                }
+            } catch (const std::exception& ex) {
+                // Log and continue, return current DB state
+            }
+        }
+
         Json::Value out;
         out["documentId"] = doc->id;
         if (doc->ncf.has_value()) out["ncf"] = *doc->ncf;
@@ -631,6 +731,7 @@ void DocumentsController::getBySourceTxnId(const HttpRequestPtr& req,
         out["securityCode"] = doc->securityCode.value_or("");
         out["receiptDate"] = doc->receiptDate.value_or("");
         out["signedXml"] = doc->signedXmlContent.value_or("");
+        out["dgiiResponse"] = doc->dgiiResponseXml.value_or("");
 
         callback(json(out, k200OK));
     } catch (const std::exception& ex) {
@@ -752,6 +853,7 @@ void DocumentsController::getById(const HttpRequestPtr& req,
         out["securityCode"] = doc->securityCode.value_or("");
         out["receiptDate"] = doc->receiptDate.value_or("");
         out["signedXml"] = doc->signedXmlContent.value_or("");
+        out["dgiiResponse"] = doc->dgiiResponseXml.value_or("");
 
         callback(json(out, k200OK));
     } catch (const std::exception& ex) {
