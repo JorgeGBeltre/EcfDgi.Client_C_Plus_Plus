@@ -20,6 +20,7 @@ struct CanonicalHeaderDto {
     std::optional<std::string> correoComprador;
     // ISO 8601 (yyyy-MM-dd) or DGII format (dd-MM-yyyy)
     std::string fechaEmision;
+    std::optional<std::string> fechaVencimientoSecuencia;
 };
 
 struct CanonicalLineDto {
@@ -79,6 +80,7 @@ struct CanonicalDocumentDto {
     CanonicalTotalsDto totals;
     CanonicalReferencesDto references;
     std::optional<CanonicalRetentionDto> retention;
+    std::optional<std::string> fechaVencimientoSecuencia;
 };
 
 } // namespace ecf::app

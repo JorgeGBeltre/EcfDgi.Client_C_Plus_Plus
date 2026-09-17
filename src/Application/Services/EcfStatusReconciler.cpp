@@ -60,40 +60,72 @@ int EcfStatusReconciler::reconcile() {
             }
         }
 
-        try {
-            auto response = ecfClient_->consultarEstado(
-                doc.rncEmisor, doc.eNcf, doc.rncComprador, doc.securityCode);
-
-            doc.lastStatusCheckAt = nowIso;
-            doc.statusCheckAttempts += 1;
-
-            std::string estado = response.estado;
-            while (!estado.empty() && std::isspace(static_cast<unsigned char>(estado.front()))) estado.erase(estado.begin());
-            while (!estado.empty() && std::isspace(static_cast<unsigned char>(estado.back()))) estado.pop_back();
-
-            std::string lowerEstado = estado;
-            std::transform(lowerEstado.begin(), lowerEstado.end(), lowerEstado.begin(), ::tolower);
-
-            if (lowerEstado == "aceptado" || lowerEstado == "aceptado condicional") {
-                doc.state = "AcceptedByDgii";
-                spdlog::info("e-CF {}: DGII confirmó '{}'.", doc.eNcf, estado);
-            } else if (lowerEstado == "rechazado") {
-                doc.state = "RejectedByDgii";
-                spdlog::critical(
-                    "ALERTA: e-CF {} (RNC {}) fue aceptado en recepción y luego "
-                    "RECHAZADO por DGII tras verificación posterior. Requiere atención — el "
-                    "comprobante no tiene validez fiscal.",
-                    doc.eNcf, doc.rncEmisor);
-            }
-            docsRepo_->update(doc);
-        } catch (const std::exception& ex) {
-            doc.lastStatusCheckAt = nowIso;
-            doc.statusCheckAttempts += 1;
+        std::string estado;
+        if (doc.trackId.has_value() && !doc.trackId->empty()) {
             try {
-                docsRepo_->update(doc);
-            } catch (...) {}
-            spdlog::warn("Fallo consultando estado DGII para e-CF {}: {}; se reintentará.", doc.eNcf, ex.what());
+                auto resultado = ecfClient_->consultarResultado(*doc.trackId);
+                if (!resultado.estado.empty()) {
+                    estado = resultado.estado;
+                    while (!estado.empty() && std::isspace(static_cast<unsigned char>(estado.front()))) estado.erase(estado.begin());
+                    while (!estado.empty() && std::isspace(static_cast<unsigned char>(estado.back()))) estado.pop_back();
+
+                    if (!resultado.mensajes.empty()) {
+                        std::string msg = "[" + resultado.estado + "] ";
+                        for (size_t i = 0; i < resultado.mensajes.size(); ++i) {
+                            if (i > 0) msg += "; ";
+                            msg += "[" + resultado.mensajes[i].codigo + "] " + resultado.mensajes[i].valor;
+                        }
+                        doc.dgiiResponseXml = msg;
+                    } else {
+                        doc.dgiiResponseXml = "Estado DGII: " + estado;
+                    }
+                }
+            } catch (...) {
+                // Fallback to consultarEstado below
+            }
         }
+
+        if (estado.empty() || estado == "No encontrado" || estado == "no encontrado") {
+            try {
+                auto response = ecfClient_->consultarEstado(
+                    doc.rncEmisor, doc.eNcf, doc.rncComprador, doc.securityCode);
+                if (!response.estado.empty()) {
+                    estado = response.estado;
+                    while (!estado.empty() && std::isspace(static_cast<unsigned char>(estado.front()))) estado.erase(estado.begin());
+                    while (!estado.empty() && std::isspace(static_cast<unsigned char>(estado.back()))) estado.pop_back();
+                    doc.dgiiResponseXml = "Estado DGII: " + estado;
+                }
+            } catch (const std::exception& ex) {
+                doc.lastStatusCheckAt = nowIso;
+                doc.statusCheckAttempts += 1;
+                try {
+                    docsRepo_->update(doc);
+                } catch (...) {}
+                spdlog::warn("Fallo consultando estado DGII para e-CF {}: {}; se reintentará.", doc.eNcf, ex.what());
+                continue;
+            }
+        }
+
+        doc.lastStatusCheckAt = nowIso;
+        doc.statusCheckAttempts += 1;
+
+        std::string lowerEstado = estado;
+        std::transform(lowerEstado.begin(), lowerEstado.end(), lowerEstado.begin(), ::tolower);
+
+        if (lowerEstado == "aceptado" || lowerEstado == "aceptado condicional") {
+            doc.state = "AcceptedByDgii";
+            spdlog::info("e-CF {}: DGII confirmó '{}'.", doc.eNcf, estado);
+        } else if (lowerEstado == "rechazado") {
+            doc.state = "RejectedByDgii";
+            spdlog::critical(
+                "ALERTA: e-CF {} (RNC {}) fue aceptado en recepción y luego "
+                "RECHAZADO por DGII tras verificación posterior. Requiere atención — el "
+                "comprobante no tiene validez fiscal.",
+                doc.eNcf, doc.rncEmisor);
+        }
+        try {
+            docsRepo_->update(doc);
+        } catch (...) {}
     }
 
     if (processed > 0) {

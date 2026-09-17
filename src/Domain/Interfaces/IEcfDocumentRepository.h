@@ -15,8 +15,10 @@ public:
     virtual std::optional<EcfDocument> getById(const std::string& id) = 0;
     virtual std::optional<EcfDocument> getByENcf(const std::string& eNcf) = 0;
     virtual std::optional<EcfDocument> getByTrackId(const std::string& trackId) = 0;
-    virtual std::optional<EcfDocument> getBySourceTxnId(const std::string& tenantId,
-                                                        const std::string& sourceTxnId) = 0;
+    virtual std::optional<EcfDocument> getBySourceTxnId(
+        const std::string& tenantId,
+        const std::string& sourceTxnId,
+        const std::optional<std::string>& ambiente = std::nullopt) = 0;
     virtual std::vector<EcfDocument> getDueForStatusCheck(const std::string& minAgeCutoffIso,
                                                          const std::string& pollDueCutoffIso,
                                                          int limit = 100) = 0;

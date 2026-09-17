@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS ecf_documents (
     sent_to_dgii_at    timestamptz,
     last_status_check_at timestamptz,
     status_check_attempts integer    NOT NULL DEFAULT 0,
+    ambiente           varchar(50),
     created_at         timestamptz   NOT NULL,
     created_by         varchar(100),
     updated_at         timestamptz,
@@ -78,7 +79,7 @@ CREATE TABLE IF NOT EXISTS ecf_documents (
 CREATE UNIQUE INDEX IF NOT EXISTS uq_ecf_documents_rnc_emisor_encf
     ON ecf_documents (rnc_emisor, e_ncf);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_ecf_documents_tenant_source_txn
-    ON ecf_documents (tenant_id, source_txn_id);
+    ON ecf_documents (tenant_id, source_txn_id, ambiente);
 CREATE INDEX IF NOT EXISTS ix_ecf_documents_track_id ON ecf_documents (track_id);
 CREATE INDEX IF NOT EXISTS ix_ecf_documents_state    ON ecf_documents (state);
 CREATE INDEX IF NOT EXISTS ix_ecf_documents_state_last_status_check_at

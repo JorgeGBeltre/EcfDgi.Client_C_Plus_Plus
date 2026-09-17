@@ -118,7 +118,7 @@ std::string normalizeFechaDgii(const std::string& value) {
     return out;
 }
 
-std::vector<ProcessedLineItem> normalizeCanonicalLines(const std::vector<CanonicalLineDto>& lines) {
+std::vector<ProcessedLineItem> normalizeCanonicalLines(const std::vector<CanonicalLineDto>& lines, double defaultTotal) {
     std::vector<ProcessedLineItem> result;
 
     for (const auto& line : lines) {
@@ -168,9 +168,9 @@ std::vector<ProcessedLineItem> normalizeCanonicalLines(const std::vector<Canonic
         pi.lineNumber = 1;
         pi.name = "Item General";
         pi.quantity = 1.0;
-        pi.unitPrice = 0.0;
+        pi.unitPrice = defaultTotal;
         pi.discountAmount = 0.0;
-        pi.montoItem = 0.0;
+        pi.montoItem = defaultTotal;
         result.push_back(pi);
     }
 
@@ -222,17 +222,29 @@ std::string buildXmlFromCanonical(const CanonicalDocumentDto& dto,
     if (tipoEcf == "34") {
         ss << "      <IndicadorNotaCredito>0</IndicadorNotaCredito>\n";
     } else if (tipoEcf != "32") {
-        auto now = std::chrono::system_clock::now() + std::chrono::hours(24 * 365);
-        std::time_t tt = std::chrono::system_clock::to_time_t(now);
-        std::tm tm{};
+        std::string fechaVenc;
+        if (dto.fechaVencimientoSecuencia.has_value() && !dto.fechaVencimientoSecuencia->empty()) {
+            fechaVenc = normalizeFechaDgii(*dto.fechaVencimientoSecuencia);
+        } else if (dto.header.fechaVencimientoSecuencia.has_value() && !dto.header.fechaVencimientoSecuencia->empty()) {
+            fechaVenc = normalizeFechaDgii(*dto.header.fechaVencimientoSecuencia);
+        } else {
+            auto now = std::chrono::system_clock::now();
+            std::time_t tt = std::chrono::system_clock::to_time_t(now);
+            std::tm tm{};
 #if defined(_WIN32)
-        localtime_s(&tm, &tt);
+            localtime_s(&tm, &tt);
 #else
-        localtime_r(&tt, &tm);
+            localtime_r(&tt, &tm);
 #endif
-        char buf[32];
-        std::strftime(buf, sizeof(buf), "%d-%m-%Y", &tm);
-        ss << "      <FechaVencimientoSecuencia>" << buf << "</FechaVencimientoSecuencia>\n";
+            int currentYear = tm.tm_year + 1900;
+            int year = std::max(2027, currentYear + 1);
+            fechaVenc = "31-12-" + std::to_string(year);
+        }
+        ss << "      <FechaVencimientoSecuencia>" << fechaVenc << "</FechaVencimientoSecuencia>\n";
+    }
+
+    if (tipoEcf == "31" || tipoEcf == "32" || tipoEcf == "33" || tipoEcf == "34" || tipoEcf == "41" || tipoEcf == "45") {
+        ss << "      <IndicadorMontoGravado>0</IndicadorMontoGravado>\n";
     }
 
     if (tipoEcf != "41" && tipoEcf != "43" && tipoEcf != "47") {
@@ -292,13 +304,15 @@ std::string buildXmlFromCanonical(const CanonicalDocumentDto& dto,
         std::string safeComprador = rawComprador.length() > 150 ? rawComprador.substr(0, 150) : rawComprador;
         ss << "      <RazonSocialComprador>" << escapeXml(safeComprador) << "</RazonSocialComprador>\n";
         if (tipoEcf != "47" && dto.header.correoComprador.has_value() && !dto.header.correoComprador->empty()) {
-            std::string trimmedEmail = *dto.header.correoComprador;
-            while (!trimmedEmail.empty() && std::isspace(static_cast<unsigned char>(trimmedEmail.front()))) trimmedEmail.erase(trimmedEmail.begin());
-            while (!trimmedEmail.empty() && std::isspace(static_cast<unsigned char>(trimmedEmail.back()))) trimmedEmail.pop_back();
-            if (trimmedEmail.length() > 80) trimmedEmail = trimmedEmail.substr(0, 80);
+            std::string rawEmail = *dto.header.correoComprador;
+            size_t delimPos = rawEmail.find_first_of(";,");
+            std::string primaryEmail = (delimPos != std::string::npos) ? rawEmail.substr(0, delimPos) : rawEmail;
+            while (!primaryEmail.empty() && std::isspace(static_cast<unsigned char>(primaryEmail.front()))) primaryEmail.erase(primaryEmail.begin());
+            while (!primaryEmail.empty() && std::isspace(static_cast<unsigned char>(primaryEmail.back()))) primaryEmail.pop_back();
+            if (primaryEmail.length() > 80) primaryEmail = primaryEmail.substr(0, 80);
             static const std::regex emailRegex(R"(^\w+([-+.]\w+)*@\w+([-.]\w+)*\.\w+([-.]\w+)*$)");
-            if (std::regex_match(trimmedEmail, emailRegex)) {
-                ss << "      <CorreoComprador>" << escapeXml(trimmedEmail) << "</CorreoComprador>\n";
+            if (std::regex_match(primaryEmail, emailRegex)) {
+                ss << "      <CorreoComprador>" << escapeXml(primaryEmail) << "</CorreoComprador>\n";
             }
         }
         ss << "    </Comprador>\n";
@@ -417,7 +431,7 @@ std::string buildXmlFromCanonical(const CanonicalDocumentDto& dto,
     }
 
     ss << "  <DetallesItems>\n";
-    auto processedItems = normalizeCanonicalLines(dto.lines);
+    auto processedItems = normalizeCanonicalLines(dto.lines, std::max(0.0, dto.totals.montoTotal));
     for (const auto& item : processedItems) {
         ss << "    <Item>\n"
            << "      <NumeroLinea>" << item.lineNumber << "</NumeroLinea>\n"

@@ -30,6 +30,9 @@ struct EcfDocument : AuditableEntity {
     std::optional<std::string> sentToDgiiAt;
     std::optional<std::string> lastStatusCheckAt;
     int statusCheckAttempts = 0;
+
+    // Multi-environment support (PreCertificacion, Certificacion, Produccion)
+    std::optional<std::string> ambiente;
 };
 
 }  // namespace ecf::domain

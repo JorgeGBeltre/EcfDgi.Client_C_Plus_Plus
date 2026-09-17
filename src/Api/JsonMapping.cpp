@@ -134,6 +134,7 @@ Json::Value toJson(const app::CanonicalDocumentDto& d) {
     h["razonSocialComprador"] = d.header.razonSocialComprador;
     if (d.header.correoComprador.has_value()) h["correoComprador"] = *d.header.correoComprador;
     h["fechaEmision"] = d.header.fechaEmision;
+    if (d.header.fechaVencimientoSecuencia.has_value()) h["fechaVencimientoSecuencia"] = *d.header.fechaVencimientoSecuencia;
     j["header"] = h;
 
     Json::Value lines(Json::arrayValue);
@@ -184,6 +185,10 @@ Json::Value toJson(const app::CanonicalDocumentDto& d) {
             ret["montoIsrRetenido"] = *d.retention->montoIsrRetenido;
         }
         j["retention"] = ret;
+    }
+
+    if (d.fechaVencimientoSecuencia.has_value()) {
+        j["fechaVencimientoSecuencia"] = *d.fechaVencimientoSecuencia;
     }
 
     return j;
@@ -293,7 +298,10 @@ app::CanonicalDocumentDto canonicalDocumentFromJson(const Json::Value& j) {
         d.header.razonSocialComprador = jstr(h, "razonSocialComprador");
         d.header.correoComprador = optStr(h, "correoComprador");
         d.header.fechaEmision = jstr(h, "fechaEmision");
+        d.header.fechaVencimientoSecuencia = optStr(h, "fechaVencimientoSecuencia");
     }
+
+    d.fechaVencimientoSecuencia = optStr(j, "fechaVencimientoSecuencia");
 
     if (j.isMember("lines") && j["lines"].isArray()) {
         for (const auto& l : j["lines"]) {
