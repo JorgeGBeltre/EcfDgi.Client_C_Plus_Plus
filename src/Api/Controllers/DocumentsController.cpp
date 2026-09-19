@@ -147,6 +147,18 @@ std::shared_ptr<domain::IEcfXmlSigner> resolveSigner(
         }
     }
 
+    // Cargar certificado dinámico real desde PostgreSQL (Tenants)
+    if (services.tenantSignerResolver() && !rncEmisor.empty()) {
+        try {
+            auto tenantSigner = services.tenantSignerResolver()->resolveSigner(rncEmisor);
+            if (tenantSigner && tenantSigner != services.signer()) {
+                return tenantSigner;
+            }
+        } catch (...) {
+            // fallback
+        }
+    }
+
     // Default certificate directory search
     std::string defaultCertDir = "/app/certificates";
     std::string tenantCertFile = defaultCertDir + "/" + tenantId + ".pfx";
@@ -206,7 +218,6 @@ HttpResponsePtr signAndSend(domain::EcfDocument& doc, AppServices::Scope& scope,
     try {
         signedXml = signer->signXml(doc.xmlContent, doc.rncEmisor);
         std::string secCode = EcfSecurityUtils::calcularCodigoSeguridad(signedXml);
-        for (auto& c : secCode) c = static_cast<char>(std::toupper(c));
 
         doc.signedXmlContent = signedXml;
         doc.securityCode = secCode;
@@ -265,8 +276,9 @@ HttpResponsePtr signAndSend(domain::EcfDocument& doc, AppServices::Scope& scope,
             doc.state = "Signed";
             doc.sentToDgiiAt = sys::utcNowIso();
 
-            // Immediate status check with DGII in case it was processed synchronously
+            // Immediate status check with DGII in case it was processed synchronously (DGII takes ~1.5s)
             try {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1500));
                 auto resultado = client->consultarResultado(*doc.trackId);
                 if (!resultado.estado.empty()) {
                     std::string estado = resultado.estado;

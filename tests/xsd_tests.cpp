@@ -95,9 +95,11 @@ int main() {
         CHECK(signedXml.find("Signature") != std::string::npos, "Signed XML contains Signature");
         CHECK(signedXml.find("SignatureValue") != std::string::npos, "Signed XML contains SignatureValue");
 
-        // Test 8: Security Code extraction and hashing
+        // Test 8: Security Code extraction (first 6 chars of Base64 SignatureValue per DGII standard)
+        std::string sigVal = signer.extractSignatureValue(signedXml);
         std::string secCode = ecf::infra::EcfSecurityUtils::calcularCodigoSeguridad(signedXml);
-        CHECK(secCode.length() == 6, "Security code length is 6 hex characters");
+        CHECK(secCode.length() == 6, "Security code length is 6 characters");
+        CHECK(secCode == sigVal.substr(0, 6), "Security code matches exactly first 6 chars of SignatureValue");
     }
 
     // Test 9: Schema Validator caching

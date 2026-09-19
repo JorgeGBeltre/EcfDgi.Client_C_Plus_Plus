@@ -46,16 +46,26 @@ std::string money(double v) {
 }  // namespace
 
 std::string extractSignatureValue(const std::string& signedXml) {
+    if (signedXml.find('<') == std::string::npos) {
+        size_t a = signedXml.find_first_not_of(" \t\r\n");
+        size_t b = signedXml.find_last_not_of(" \t\r\n");
+        if (a != std::string::npos) {
+            return signedXml.substr(a, b - a + 1);
+        }
+        throw EcfException("El SignatureValue está vacío.");
+    }
+
     xmlDocPtr doc = xmlReadMemory(signedXml.c_str(),
                                   static_cast<int>(signedXml.size()),
-                                  "signed.xml", nullptr, 0);
+                                  "signed.xml", nullptr,
+                                  XML_PARSE_NOERROR | XML_PARSE_NOWARNING | XML_PARSE_NONET);
     if (!doc) throw EcfException("El XML firmado es inválido.");
 
     xmlXPathContextPtr ctx = xmlXPathNewContext(doc);
     xmlXPathRegisterNs(ctx, reinterpret_cast<const xmlChar*>("ds"),
                        reinterpret_cast<const xmlChar*>("http://www.w3.org/2000/09/xmldsig#"));
     xmlXPathObjectPtr obj = xmlXPathEvalExpression(
-        reinterpret_cast<const xmlChar*>("//ds:SignatureValue"), ctx);
+        reinterpret_cast<const xmlChar*>("//ds:SignatureValue | //*[local-name()='SignatureValue']"), ctx);
 
     std::string value;
     if (obj && obj->nodesetval && obj->nodesetval->nodeNr > 0) {
@@ -79,20 +89,48 @@ std::string extractSignatureValue(const std::string& signedXml) {
 
 std::string calcularCodigoSeguridad(const std::string& signedXml) {
     const std::string signatureValue = extractSignatureValue(signedXml);
-
-    std::array<unsigned char, SHA256_DIGEST_LENGTH> hash{};
-    SHA256(reinterpret_cast<const unsigned char*>(signatureValue.data()),
-           signatureValue.size(), hash.data());
-
-    static const char hex[] = "0123456789abcdef";
-    std::string full;
-    full.reserve(hash.size() * 2);
-    for (unsigned char c : hash) {
-        full += hex[c >> 4];
-        full += hex[c & 0x0F];
+    if (signatureValue.empty() || signatureValue.length() < 6) {
+        throw EcfException("El SignatureValue es inválido o tiene menos de 6 caracteres.");
     }
-    return full.substr(0, 6);
+    return signatureValue.substr(0, 6);
 }
+
+std::optional<std::string> extractFechaHoraFirma(const std::string& signedXml) {
+    if (signedXml.find('<') == std::string::npos) return std::nullopt;
+
+    xmlDocPtr doc = xmlReadMemory(signedXml.c_str(),
+                                  static_cast<int>(signedXml.size()),
+                                  "signed.xml", nullptr,
+                                  XML_PARSE_NOERROR | XML_PARSE_NOWARNING | XML_PARSE_NONET);
+    if (!doc) return std::nullopt;
+
+    xmlXPathContextPtr ctx = xmlXPathNewContext(doc);
+    if (!ctx) {
+        xmlFreeDoc(doc);
+        return std::nullopt;
+    }
+
+    xmlXPathObjectPtr obj = xmlXPathEvalExpression(
+        reinterpret_cast<const xmlChar*>("//*[local-name()='FechaHoraFirma']"), ctx);
+
+    std::string value;
+    if (obj && obj->nodesetval && obj->nodesetval->nodeNr > 0) {
+        xmlChar* content = xmlNodeGetContent(obj->nodesetval->nodeTab[0]);
+        if (content) {
+            value = reinterpret_cast<const char*>(content);
+            xmlFree(content);
+        }
+    }
+    if (obj) xmlXPathFreeObject(obj);
+    xmlXPathFreeContext(ctx);
+    xmlFreeDoc(doc);
+
+    size_t a = value.find_first_not_of(" \t\r\n");
+    size_t b = value.find_last_not_of(" \t\r\n");
+    if (a == std::string::npos) return std::nullopt;
+    return value.substr(a, b - a + 1);
+}
+
 
 std::string buildTimbreUrl(const std::string& baseUrl,
                            const domain::TimbreEcfRequest& req) {

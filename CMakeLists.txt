@@ -34,6 +34,7 @@ add_library(ecfdgii_core STATIC
     src/Domain/Common/AuditableEntity.h
     src/Domain/Entities/Customer.h
     src/Domain/Entities/EcfClientOptions.h
+    src/Domain/Enums/AmbienteEnum.h
     src/Domain/Entities/EcfDocument.h
     src/Domain/Entities/ResponseModels.h
     src/Domain/Entities/Rfce.h
