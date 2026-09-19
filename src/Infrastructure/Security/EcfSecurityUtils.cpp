@@ -46,16 +46,26 @@ std::string money(double v) {
 }  // namespace
 
 std::string extractSignatureValue(const std::string& signedXml) {
+    if (signedXml.find('<') == std::string::npos) {
+        size_t a = signedXml.find_first_not_of(" \t\r\n");
+        size_t b = signedXml.find_last_not_of(" \t\r\n");
+        if (a != std::string::npos) {
+            return signedXml.substr(a, b - a + 1);
+        }
+        throw EcfException("El SignatureValue está vacío.");
+    }
+
     xmlDocPtr doc = xmlReadMemory(signedXml.c_str(),
                                   static_cast<int>(signedXml.size()),
-                                  "signed.xml", nullptr, 0);
+                                  "signed.xml", nullptr,
+                                  XML_PARSE_NOERROR | XML_PARSE_NOWARNING | XML_PARSE_NONET);
     if (!doc) throw EcfException("El XML firmado es inválido.");
 
     xmlXPathContextPtr ctx = xmlXPathNewContext(doc);
     xmlXPathRegisterNs(ctx, reinterpret_cast<const xmlChar*>("ds"),
                        reinterpret_cast<const xmlChar*>("http://www.w3.org/2000/09/xmldsig#"));
     xmlXPathObjectPtr obj = xmlXPathEvalExpression(
-        reinterpret_cast<const xmlChar*>("//ds:SignatureValue"), ctx);
+        reinterpret_cast<const xmlChar*>("//ds:SignatureValue | //*[local-name()='SignatureValue']"), ctx);
 
     std::string value;
     if (obj && obj->nodesetval && obj->nodesetval->nodeNr > 0) {
@@ -86,9 +96,12 @@ std::string calcularCodigoSeguridad(const std::string& signedXml) {
 }
 
 std::optional<std::string> extractFechaHoraFirma(const std::string& signedXml) {
+    if (signedXml.find('<') == std::string::npos) return std::nullopt;
+
     xmlDocPtr doc = xmlReadMemory(signedXml.c_str(),
                                   static_cast<int>(signedXml.size()),
-                                  "signed.xml", nullptr, XML_PARSE_NOBLANKS | XML_PARSE_NONET);
+                                  "signed.xml", nullptr,
+                                  XML_PARSE_NOERROR | XML_PARSE_NOWARNING | XML_PARSE_NONET);
     if (!doc) return std::nullopt;
 
     xmlXPathContextPtr ctx = xmlXPathNewContext(doc);
@@ -98,7 +111,7 @@ std::optional<std::string> extractFechaHoraFirma(const std::string& signedXml) {
     }
 
     xmlXPathObjectPtr obj = xmlXPathEvalExpression(
-        reinterpret_cast<const xmlChar*>("//FechaHoraFirma"), ctx);
+        reinterpret_cast<const xmlChar*>("//*[local-name()='FechaHoraFirma']"), ctx);
 
     std::string value;
     if (obj && obj->nodesetval && obj->nodesetval->nodeNr > 0) {

@@ -6,7 +6,7 @@
 #include "Application/Ecf/CanonicalXmlBuilder.h"
 #include "Application/Ecf/CanonicalDocumentDto.h"
 #include "Domain/Entities/EcfDocument.h"
-#include "Domain/Enums/AmbienteEnum.h"
+#include "Domain/Entities/EcfClientOptions.h"
 #include "Infrastructure/Security/EcfSecurityUtils.h"
 #include "Infrastructure/Dgii/EcfEnvironmentConfig.h"
 
@@ -140,15 +140,15 @@ int main() {
         CHECK(codeFromXml == "AbCdEf", "calcularCodigoSeguridad extracts from XML SignatureValue correctly");
     }
 
-    // Test 9: extractFechaHoraFirma extracts timestamp from XML or returns empty string
+    // Test 9: extractFechaHoraFirma extracts timestamp from XML or returns empty optional
     {
         std::string xml = "<Invoice><FechaHoraFirma>19-09-2026 15:30:00</FechaHoraFirma></Invoice>";
-        std::string dt = infra::EcfSecurityUtils::extractFechaHoraFirma(xml);
-        CHECK(dt == "19-09-2026 15:30:00", "extractFechaHoraFirma correctly parses <FechaHoraFirma>");
+        auto dt = infra::EcfSecurityUtils::extractFechaHoraFirma(xml);
+        CHECK(dt.has_value() && *dt == "19-09-2026 15:30:00", "extractFechaHoraFirma correctly parses <FechaHoraFirma>");
 
         std::string xmlWithout = "<Invoice><Detalle/></Invoice>";
-        std::string dtEmpty = infra::EcfSecurityUtils::extractFechaHoraFirma(xmlWithout);
-        CHECK(dtEmpty.empty(), "extractFechaHoraFirma returns empty string when tag is absent");
+        auto dtEmpty = infra::EcfSecurityUtils::extractFechaHoraFirma(xmlWithout);
+        CHECK(!dtEmpty.has_value(), "extractFechaHoraFirma returns empty optional when tag is absent");
     }
 
     // Test 10: DGII Timbre URL uses ecf.dgii.gov.do host across environments
