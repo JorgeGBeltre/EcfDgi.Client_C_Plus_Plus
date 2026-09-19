@@ -78,7 +78,8 @@ int main() {
                 scope.docs,
                 scope.uow,
                 services.ecfClient(),
-                services.statusPollingOptions()
+                services.statusPollingOptions(),
+                services.tenantSignerResolver()
             );
             int processed = reconciler.reconcile();
             if (processed > 0) {
@@ -96,7 +97,8 @@ int main() {
                     scope.docs,
                     scope.uow,
                     services.ecfClient(),
-                    services.statusPollingOptions()
+                    services.statusPollingOptions(),
+                    services.tenantSignerResolver()
                 );
                 int processed = reconciler.reconcile();
                 if (processed > 0) {

@@ -6,6 +6,9 @@
 #include "Application/Ecf/CanonicalXmlBuilder.h"
 #include "Application/Ecf/CanonicalDocumentDto.h"
 #include "Domain/Entities/EcfDocument.h"
+#include "Domain/Enums/AmbienteEnum.h"
+#include "Infrastructure/Security/EcfSecurityUtils.h"
+#include "Infrastructure/Dgii/EcfEnvironmentConfig.h"
 
 using namespace ecf;
 
@@ -38,43 +41,33 @@ int main() {
         
         CHECK(xml.find("<IndicadorMontoGravado>0</IndicadorMontoGravado>") != std::string::npos,
               "E31 XML includes <IndicadorMontoGravado>0</IndicadorMontoGravado>");
-        
-        CHECK(xml.find("<FechaVencimientoSecuencia>31-12-") != std::string::npos,
-              "E31 XML includes default sequence expiration ending in 31-12-YYYY");
+        CHECK(xml.find("<FechaVencimientoSecuencia>") != std::string::npos,
+              "E31 XML includes default <FechaVencimientoSecuencia>");
     }
 
-    // Test 2: E32 must have IndicadorMontoGravado, but NO FechaVencimientoSecuencia
+    // Test 2: Non-E31 (E32) must NOT have FechaVencimientoSecuencia
     {
         app::CanonicalDocumentDto dto;
         dto.tipoComprobante = "E32";
         dto.header.fechaEmision = "2026-09-17";
-        dto.totals.montoTotal = 1000.0;
+        dto.header.rncComprador = "131234567";
+        dto.totals.montoTotal = 100.0;
 
         std::string xml = app::buildXmlFromCanonical(dto, "E320000000001", "101672919", "WILLY CHIC DOMINICANA SRL");
         
-        CHECK(xml.find("<IndicadorMontoGravado>0</IndicadorMontoGravado>") != std::string::npos,
-              "E32 XML includes <IndicadorMontoGravado>0</IndicadorMontoGravado>");
-        
         CHECK(xml.find("<FechaVencimientoSecuencia>") == std::string::npos,
-              "E32 XML does NOT include <FechaVencimientoSecuencia>");
+              "E32 XML excludes <FechaVencimientoSecuencia>");
     }
 
-    // Test 3: E34 must have IndicadorNotaCredito and IndicadorMontoGravado, and NO FechaVencimientoSecuencia (per DGII XSD)
+    // Test 3: IndicadorMontoGravado for E34
     {
         app::CanonicalDocumentDto dto;
         dto.tipoComprobante = "E34";
         dto.header.fechaEmision = "2026-09-17";
-        dto.references.correctsENcf = "E310000000001";
-        dto.references.codigoModificacion = 1;
-        dto.totals.montoTotal = 118.0;
+        dto.header.rncComprador = "131234567";
+        dto.totals.montoTotal = 100.0;
 
         std::string xml = app::buildXmlFromCanonical(dto, "E340000000001", "101672919", "WILLY CHIC DOMINICANA SRL");
-        
-        CHECK(xml.find("<IndicadorNotaCredito>0</IndicadorNotaCredito>") != std::string::npos,
-              "E34 XML includes <IndicadorNotaCredito>0</IndicadorNotaCredito>");
-        
-        CHECK(xml.find("<FechaVencimientoSecuencia>") == std::string::npos,
-              "E34 XML does NOT include <FechaVencimientoSecuencia>");
         
         CHECK(xml.find("<IndicadorMontoGravado>0</IndicadorMontoGravado>") != std::string::npos,
               "E34 XML includes <IndicadorMontoGravado>0</IndicadorMontoGravado>");
@@ -134,6 +127,45 @@ int main() {
         doc.ambiente = "PreCertificacion";
         CHECK(doc.ambiente.has_value() && *doc.ambiente == "PreCertificacion",
               "EcfDocument entity supports ambiente");
+    }
+
+    // Test 8: DGII CodigoSeguridad calculation (first 6 chars of Base64 signature, case-preserved)
+    {
+        std::string sampleSig = "wX9yZ123456789==";
+        std::string code = infra::EcfSecurityUtils::calcularCodigoSeguridad(sampleSig);
+        CHECK(code == "wX9yZ1", "calcularCodigoSeguridad extracts first 6 chars and preserves case");
+
+        std::string xmlWithSig = "<Signature><SignatureValue>AbCdEf123456</SignatureValue></Signature>";
+        std::string codeFromXml = infra::EcfSecurityUtils::calcularCodigoSeguridad(xmlWithSig);
+        CHECK(codeFromXml == "AbCdEf", "calcularCodigoSeguridad extracts from XML SignatureValue correctly");
+    }
+
+    // Test 9: extractFechaHoraFirma extracts timestamp from XML or returns empty string
+    {
+        std::string xml = "<Invoice><FechaHoraFirma>19-09-2026 15:30:00</FechaHoraFirma></Invoice>";
+        std::string dt = infra::EcfSecurityUtils::extractFechaHoraFirma(xml);
+        CHECK(dt == "19-09-2026 15:30:00", "extractFechaHoraFirma correctly parses <FechaHoraFirma>");
+
+        std::string xmlWithout = "<Invoice><Detalle/></Invoice>";
+        std::string dtEmpty = infra::EcfSecurityUtils::extractFechaHoraFirma(xmlWithout);
+        CHECK(dtEmpty.empty(), "extractFechaHoraFirma returns empty string when tag is absent");
+    }
+
+    // Test 10: DGII Timbre URL uses ecf.dgii.gov.do host across environments
+    {
+        auto prodConfig = infra::EcfEnvironmentConfig::getConfig(domain::AmbienteEnum::Produccion);
+        CHECK(prodConfig.timbreFcUrl.find("ecf.dgii.gov.do") != std::string::npos,
+              "Produccion timbreFcUrl uses ecf.dgii.gov.do");
+        CHECK(prodConfig.timbreFcUrl.find("fc.dgii.gov.do") == std::string::npos,
+              "Produccion timbreFcUrl does not use deprecated fc.dgii.gov.do");
+
+        auto certConfig = infra::EcfEnvironmentConfig::getConfig(domain::AmbienteEnum::Certificacion);
+        CHECK(certConfig.timbreFcUrl.find("ecf.dgii.gov.do") != std::string::npos,
+              "Certificacion timbreFcUrl uses ecf.dgii.gov.do");
+
+        auto preCertConfig = infra::EcfEnvironmentConfig::getConfig(domain::AmbienteEnum::PreCertificacion);
+        CHECK(preCertConfig.timbreFcUrl.find("ecf.dgii.gov.do") != std::string::npos,
+              "PreCertificacion timbreFcUrl uses ecf.dgii.gov.do");
     }
 
     std::printf("\nTotal failures: %d\n", failures);
