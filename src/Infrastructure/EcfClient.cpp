@@ -107,6 +107,17 @@ RfceRecepcionResponse EcfClient::sendRfce(Rfce& rfce) {
     return response;
 }
 
+RfceRecepcionResponse EcfClient::sendRfce(const std::string& xmlContent,
+                                          const std::string& fileName) {
+    if (options_.validateSchemasLocal && schemaValidator_ != nullptr) {
+        auto result = schemaValidator_->validate(xmlContent);
+        if (!result.isValid) {
+            throw EcfValidationException(result.errors);
+        }
+    }
+    return transport_->sendRfce(xmlContent, fileName);
+}
+
 ConsultaResultadoResponse EcfClient::consultarResultado(const std::string& trackId) {
     return transport_->consultarResultado(trackId);
 }

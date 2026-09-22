@@ -168,6 +168,99 @@ int main() {
               "PreCertificacion timbreFcUrl uses ecf.dgii.gov.do");
     }
 
+    // Test 11: buildRfceXml generates valid RFCE with ITBIS gravado and CodigoSeguridadeCF
+    {
+        domain::EcfDocument doc;
+        doc.eNcf = "E320000000015";
+        doc.rncEmisor = "101672919";
+        doc.rncComprador = "40223456789";
+        doc.totalAmount = 118.0;
+        doc.itbisAmount = 18.0;
+        doc.securityCode = "xYz123";
+
+        app::CanonicalDocumentDto dto;
+        dto.header.fechaEmision = "2026-09-22";
+        dto.header.razonSocialComprador = "Juan Perez";
+
+        std::string rfceXml = app::buildRfceXml(doc, &dto, "WILLY CHIC DOMINICANA SRL");
+
+        CHECK(rfceXml.rfind("<?xml version=\"1.0\" encoding=\"utf-8\"?>", 0) == 0,
+              "buildRfceXml starts with XML declaration");
+        CHECK(rfceXml.find("<RFCE>") != std::string::npos, "RFCE root tag present");
+        CHECK(rfceXml.find("<TipoeCF>32</TipoeCF>") != std::string::npos, "TipoeCF is 32");
+        CHECK(rfceXml.find("<eNCF>E320000000015</eNCF>") != std::string::npos, "eNCF matches doc");
+        CHECK(rfceXml.find("<RNCEmisor>101672919</RNCEmisor>") != std::string::npos, "RNCEmisor matches");
+        CHECK(rfceXml.find("<RazonSocialEmisor>WILLY CHIC DOMINICANA SRL</RazonSocialEmisor>") != std::string::npos, "Emisor name present");
+        CHECK(rfceXml.find("<FechaEmision>22-09-2026</FechaEmision>") != std::string::npos, "Normalized FechaEmision present");
+        CHECK(rfceXml.find("<RNCComprador>40223456789</RNCComprador>") != std::string::npos, "RNCComprador present");
+        CHECK(rfceXml.find("<RazonSocialComprador>Juan Perez</RazonSocialComprador>") != std::string::npos, "Comprador name present");
+        CHECK(rfceXml.find("<MontoGravadoTotal>100.00</MontoGravadoTotal>") != std::string::npos, "MontoGravadoTotal = 100.00");
+        CHECK(rfceXml.find("<MontoGravadoI1>100.00</MontoGravadoI1>") != std::string::npos, "MontoGravadoI1 = 100.00");
+        CHECK(rfceXml.find("<TotalITBIS>18.00</TotalITBIS>") != std::string::npos, "TotalITBIS = 18.00");
+        CHECK(rfceXml.find("<TotalITBIS1>18.00</TotalITBIS1>") != std::string::npos, "TotalITBIS1 = 18.00");
+        CHECK(rfceXml.find("<MontoTotal>118.00</MontoTotal>") != std::string::npos, "MontoTotal = 118.00");
+        CHECK(rfceXml.find("<CodigoSeguridadeCF>xYz123</CodigoSeguridadeCF>") != std::string::npos, "CodigoSeguridadeCF matches securityCode");
+        CHECK(rfceXml.find("</RFCE>") != std::string::npos, "RFCE closing tag present");
+    }
+
+    // Test 12: buildRfceXml with exento (no ITBIS) produces MontoExento
+    {
+        domain::EcfDocument doc;
+        doc.eNcf = "E320000000020";
+        doc.rncEmisor = "101672919";
+        doc.totalAmount = 500.0;
+        doc.itbisAmount = 0.0;
+        doc.securityCode = "SeCuRe";
+
+        std::string rfceXml = app::buildRfceXml(doc, nullptr, "WILLY CHIC DOMINICANA SRL");
+
+        CHECK(rfceXml.find("<MontoExento>500.00</MontoExento>") != std::string::npos, "MontoExento = 500.00");
+        CHECK(rfceXml.find("<TotalITBIS>") == std::string::npos, "TotalITBIS absent when exento");
+        CHECK(rfceXml.find("<MontoGravadoTotal>") == std::string::npos, "MontoGravadoTotal absent when exento");
+        CHECK(rfceXml.find("<RazonSocialComprador>CONSUMIDOR FINAL</RazonSocialComprador>") != std::string::npos,
+              "Defaults to CONSUMIDOR FINAL when dto is null");
+    }
+
+    // Test 13: RFCE vs ECF decision rule
+    {
+        auto isRfceDoc = [](const std::string& encf, double total) {
+            return (encf.rfind("E32", 0) == 0 || encf.rfind("e32", 0) == 0) && total < 250000.0;
+        };
+
+        CHECK(isRfceDoc("E320000000001", 100.0) == true, "E32 below 250k is RFCE");
+        CHECK(isRfceDoc("E320000000002", 249999.99) == true, "E32 at 249,999.99 is RFCE");
+        CHECK(isRfceDoc("E320000000003", 250000.0) == false, "E32 at 250,000.0 is regular ECF");
+        CHECK(isRfceDoc("E320000000004", 300000.0) == false, "E32 above 250k is regular ECF");
+        CHECK(isRfceDoc("E310000000001", 50.0) == false, "E31 is never RFCE");
+        CHECK(isRfceDoc("E340000000001", 50.0) == false, "E34 is never RFCE");
+    }
+
+    // Test 14: Environment alias resolution
+    {
+        auto resolveAlt = [](const std::string& tenantId) -> std::string {
+            auto endsWithNoCase = [](const std::string& str, const std::string& suffix) {
+                if (str.size() < suffix.size()) return false;
+                return std::equal(suffix.rbegin(), suffix.rend(), str.rbegin(),
+                                  [](char a, char b) { return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b)); });
+            };
+            const std::string sPre = ":PreCertificacion";
+            const std::string sTest = ":TestEcf";
+            const std::string sCert = ":Certificacion";
+            const std::string sCertEcf = ":CertEcf";
+            if (endsWithNoCase(tenantId, sPre)) return tenantId.substr(0, tenantId.size() - sPre.size()) + sTest;
+            if (endsWithNoCase(tenantId, sTest)) return tenantId.substr(0, tenantId.size() - sTest.size()) + sPre;
+            if (endsWithNoCase(tenantId, sCert)) return tenantId.substr(0, tenantId.size() - sCert.size()) + sCertEcf;
+            if (endsWithNoCase(tenantId, sCertEcf)) return tenantId.substr(0, tenantId.size() - sCertEcf.size()) + sCert;
+            return "";
+        };
+
+        CHECK(resolveAlt("t1:PreCertificacion") == "t1:TestEcf", ":PreCertificacion maps to :TestEcf");
+        CHECK(resolveAlt("t1:TestEcf") == "t1:PreCertificacion", ":TestEcf maps to :PreCertificacion");
+        CHECK(resolveAlt("t1:Certificacion") == "t1:CertEcf", ":Certificacion maps to :CertEcf");
+        CHECK(resolveAlt("t1:CertEcf") == "t1:Certificacion", ":CertEcf maps to :CertEcf");
+        CHECK(resolveAlt("t1:Produccion") == "", "Produccion has no alternate alias");
+    }
+
     std::printf("\nTotal failures: %d\n", failures);
     return failures > 0 ? 1 : 0;
 }

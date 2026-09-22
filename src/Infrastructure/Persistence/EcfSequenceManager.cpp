@@ -1,4 +1,6 @@
 #include "Infrastructure/Persistence/EcfSequenceManager.h"
+#include <algorithm>
+#include <cctype>
 #include <pqxx/pqxx>
 #include <stdexcept>
 #include "Shared/Common/Sys.h"
@@ -19,6 +21,44 @@ std::string EcfSequenceManager::getNextEncf(const std::string& tenantId, const s
 
     domain::EcfSequence seq;
     if (r.empty()) {
+        // Fallback check between PreCertificacion and TestEcf, or Certificacion and CertEcf
+        auto endsWithNoCase = [](const std::string& str, const std::string& suffix) {
+            if (str.size() < suffix.size()) return false;
+            return std::equal(suffix.rbegin(), suffix.rend(), str.rbegin(),
+                              [](char a, char b) { return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b)); });
+        };
+
+        std::string altTenantId;
+        const std::string sPre = ":PreCertificacion";
+        const std::string sTest = ":TestEcf";
+        const std::string sCert = ":Certificacion";
+        const std::string sCertEcf = ":CertEcf";
+
+        if (endsWithNoCase(tenantId, sPre)) {
+            altTenantId = tenantId.substr(0, tenantId.size() - sPre.size()) + sTest;
+        } else if (endsWithNoCase(tenantId, sTest)) {
+            altTenantId = tenantId.substr(0, tenantId.size() - sTest.size()) + sPre;
+        } else if (endsWithNoCase(tenantId, sCert)) {
+            altTenantId = tenantId.substr(0, tenantId.size() - sCert.size()) + sCertEcf;
+        } else if (endsWithNoCase(tenantId, sCertEcf)) {
+            altTenantId = tenantId.substr(0, tenantId.size() - sCertEcf.size()) + sCert;
+        }
+
+        if (!altTenantId.empty()) {
+            pqxx::result r_alt = w.exec_params(
+                "SELECT " + std::string(ecfSequenceColumns()) + 
+                " FROM ecf_sequences WHERE tenant_id = $1 AND tipo_comprobante = $2 AND is_active = true FOR UPDATE",
+                altTenantId, tipoComprobante
+            );
+            if (!r_alt.empty()) {
+                seq = mapEcfSequence(r_alt[0]);
+                seq.tenantId = tenantId;
+                w.exec_params("UPDATE ecf_sequences SET tenant_id = $1 WHERE id = $2", seq.tenantId, seq.id);
+            }
+        }
+    }
+
+    if (seq.id == 0 && r.empty()) {
         // Provision a new sequence
         std::string prefix = tipoComprobante;
         if (!prefix.empty() && prefix[0] != 'E' && prefix[0] != 'e') {
@@ -51,7 +91,7 @@ std::string EcfSequenceManager::getNextEncf(const std::string& tenantId, const s
             throw std::runtime_error("Fallo al crear la secuencia eNCF para: " + tipoComprobante);
         }
         seq = mapEcfSequence(r_new[0]);
-    } else {
+    } else if (seq.id == 0 && !r.empty()) {
         seq = mapEcfSequence(r[0]);
     }
 

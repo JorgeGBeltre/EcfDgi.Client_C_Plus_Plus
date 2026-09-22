@@ -33,6 +33,8 @@ public:
     domain::EcfRecepcionResponse sendEcf(const std::string& xmlContent,
                                          const std::string& fileName) override;
     domain::RfceRecepcionResponse sendRfce(domain::Rfce& rfce) override;
+    domain::RfceRecepcionResponse sendRfce(const std::string& xmlContent,
+                                           const std::string& fileName) override;
     domain::ConsultaResultadoResponse consultarResultado(const std::string& trackId) override;
     domain::ConsultaEstadoResponse consultarEstado(
         const std::string& rncEmisor, const std::string& eNcf,

@@ -22,6 +22,11 @@ RfceRecepcionResponse CachedEcfClient::sendRfce(Rfce& rfce) {
     return innerClient_->sendRfce(rfce);
 }
 
+RfceRecepcionResponse CachedEcfClient::sendRfce(const std::string& xmlContent,
+                                                const std::string& fileName) {
+    return innerClient_->sendRfce(xmlContent, fileName);
+}
+
 ConsultaResultadoResponse CachedEcfClient::consultarResultado(const std::string& trackId) {
     return innerClient_->consultarResultado(trackId);
 }
