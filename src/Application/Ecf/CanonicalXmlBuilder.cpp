@@ -502,4 +502,68 @@ std::string buildXmlFromCanonical(const CanonicalDocumentDto& dto,
     return ss.str();
 }
 
+std::string buildRfceXml(const domain::EcfDocument& doc,
+                         const CanonicalDocumentDto* dto,
+                         const std::string& emisorRazonSocial) {
+    std::ostringstream ss;
+    ss << std::fixed << std::setprecision(2);
+    ss << "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+       << "<RFCE>\n"
+       << "  <Encabezado>\n"
+       << "    <Version>1.0</Version>\n"
+       << "    <IdDoc>\n"
+       << "      <TipoeCF>32</TipoeCF>\n"
+       << "      <eNCF>" << doc.eNcf << "</eNCF>\n"
+       << "      <TipoIngresos>01</TipoIngresos>\n"
+       << "      <TipoPago>1</TipoPago>\n"
+       << "    </IdDoc>\n"
+       << "    <Emisor>\n"
+       << "      <RNCEmisor>" << doc.rncEmisor << "</RNCEmisor>\n";
+
+    std::string safeEmisorName = emisorRazonSocial.length() > 150 ? emisorRazonSocial.substr(0, 150) : emisorRazonSocial;
+    ss << "      <RazonSocialEmisor>" << escapeXml(safeEmisorName) << "</RazonSocialEmisor>\n";
+
+    std::string rawFechaEmision = (dto && !dto->header.fechaEmision.empty()) ? dto->header.fechaEmision : "";
+    std::string fechaEmision = normalizeFechaDgii(rawFechaEmision);
+    ss << "      <FechaEmision>" << fechaEmision << "</FechaEmision>\n"
+       << "    </Emisor>\n"
+       << "    <Comprador>\n";
+
+    if (doc.rncComprador.has_value() && !doc.rncComprador->empty()) {
+        std::string cleanRnc = cleanDigits(*doc.rncComprador);
+        if (cleanRnc.length() == 9 || cleanRnc.length() == 11) {
+            ss << "      <RNCComprador>" << cleanRnc << "</RNCComprador>\n";
+        }
+    }
+
+    std::string compradorName = (dto && !dto->header.razonSocialComprador.empty())
+        ? dto->header.razonSocialComprador
+        : "CONSUMIDOR FINAL";
+    std::string safeCompradorName = compradorName.length() > 150 ? compradorName.substr(0, 150) : compradorName;
+    ss << "      <RazonSocialComprador>" << escapeXml(safeCompradorName) << "</RazonSocialComprador>\n"
+       << "    </Comprador>\n"
+       << "    <Totales>\n";
+
+    if (doc.itbisAmount > 0.0) {
+        double montoGravado = std::max(0.0, doc.totalAmount - doc.itbisAmount);
+        ss << "      <MontoGravadoTotal>" << montoGravado << "</MontoGravadoTotal>\n"
+           << "      <MontoGravadoI1>" << montoGravado << "</MontoGravadoI1>\n"
+           << "      <TotalITBIS>" << doc.itbisAmount << "</TotalITBIS>\n"
+           << "      <TotalITBIS1>" << doc.itbisAmount << "</TotalITBIS1>\n";
+    } else {
+        ss << "      <MontoExento>" << doc.totalAmount << "</MontoExento>\n";
+    }
+    ss << "      <MontoTotal>" << doc.totalAmount << "</MontoTotal>\n"
+       << "    </Totales>\n"
+       << "    <CodigoSeguridadeCF>" << doc.securityCode.value_or("") << "</CodigoSeguridadeCF>\n"
+       << "  </Encabezado>\n"
+       << "</RFCE>";
+
+    std::string result = ss.str();
+    while (!result.empty() && std::isspace(static_cast<unsigned char>(result.back()))) {
+        result.pop_back();
+    }
+    return result;
+}
+
 } // namespace ecf::app

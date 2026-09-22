@@ -6,6 +6,7 @@
 #include <sstream>
 
 #include "Application/Ecf/CanonicalDocumentDto.h"
+#include "Domain/Entities/EcfDocument.h"
 
 namespace ecf::app {
 
@@ -31,5 +32,9 @@ std::string buildXmlFromCanonical(const CanonicalDocumentDto& dto,
                                   const std::string& eNcf,
                                   const std::string& emisorRnc,
                                   const std::string& emisorRazonSocial);
+
+std::string buildRfceXml(const domain::EcfDocument& doc,
+                         const CanonicalDocumentDto* dto,
+                         const std::string& emisorRazonSocial);
 
 } // namespace ecf::app

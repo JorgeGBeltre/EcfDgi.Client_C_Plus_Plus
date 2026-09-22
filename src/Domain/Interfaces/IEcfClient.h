@@ -16,6 +16,8 @@ public:
     virtual EcfRecepcionResponse sendEcf(const std::string& xmlContent,
                                          const std::string& fileName) = 0;
     virtual RfceRecepcionResponse sendRfce(Rfce& rfce) = 0;
+    virtual RfceRecepcionResponse sendRfce(const std::string& xmlContent,
+                                           const std::string& fileName) = 0;
     virtual ConsultaResultadoResponse consultarResultado(const std::string& trackId) = 0;
     virtual ConsultaEstadoResponse consultarEstado(
         const std::string& rncEmisor, const std::string& eNcf,

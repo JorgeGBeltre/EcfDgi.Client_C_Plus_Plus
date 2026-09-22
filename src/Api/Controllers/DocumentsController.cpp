@@ -210,7 +210,10 @@ std::shared_ptr<domain::IEcfClient> resolveEcfClient(
 
 HttpResponsePtr signAndSend(domain::EcfDocument& doc, AppServices::Scope& scope, AppServices& services,
                             std::shared_ptr<domain::IEcfXmlSigner> effectiveSigner = nullptr,
-                            std::shared_ptr<domain::IEcfClient> effectiveClient = nullptr) {
+                            std::shared_ptr<domain::IEcfClient> effectiveClient = nullptr,
+                            const app::CanonicalDocumentDto* dto = nullptr,
+                            bool isDefaultFallback = true,
+                            const std::string& emisorRazonSocial = "") {
     auto signer = effectiveSigner ? effectiveSigner : services.signer();
     auto client = effectiveClient ? effectiveClient : services.ecfClient();
 
@@ -269,46 +272,88 @@ HttpResponsePtr signAndSend(domain::EcfDocument& doc, AppServices::Scope& scope,
     scope.uow->saveChanges();
 
     try {
-        std::string fileName = doc.rncEmisor + doc.eNcf + ".xml";
-        auto response = client->sendEcf(doc.signedXmlContent.value(), fileName);
-        if (!response.trackId.empty()) {
-            doc.trackId = response.trackId;
-            doc.state = "Signed";
-            doc.sentToDgiiAt = sys::utcNowIso();
+        bool isRfce = (doc.eNcf.rfind("E32", 0) == 0 || doc.eNcf.rfind("e32", 0) == 0) && doc.totalAmount < 250000.0;
+        if (isRfce) {
+            std::string defaultRazon = !emisorRazonSocial.empty() ? emisorRazonSocial : services.emisorOptions().razonSocial;
+            if (defaultRazon.empty()) defaultRazon = "WILLY CHIC DOMINICANA SRL";
 
-            // Immediate status check with DGII in case it was processed synchronously (DGII takes ~1.5s)
-            try {
-                std::this_thread::sleep_for(std::chrono::milliseconds(1500));
-                auto resultado = client->consultarResultado(*doc.trackId);
-                if (!resultado.estado.empty()) {
-                    std::string estado = resultado.estado;
-                    while (!estado.empty() && std::isspace(static_cast<unsigned char>(estado.front()))) estado.erase(estado.begin());
-                    while (!estado.empty() && std::isspace(static_cast<unsigned char>(estado.back()))) estado.pop_back();
+            std::string emisorRazon = (!isDefaultFallback && dto && !dto->header.razonSocialEmisor.empty())
+                ? dto->header.razonSocialEmisor
+                : defaultRazon;
 
-                    std::string lowerEstado = estado;
-                    std::transform(lowerEstado.begin(), lowerEstado.end(), lowerEstado.begin(), ::tolower);
+            std::string rfceXml = app::buildRfceXml(doc, dto, emisorRazon);
+            std::string signedRfce = signer->signXml(rfceXml, doc.rncEmisor);
+            std::string rfceFileName = doc.rncEmisor + doc.eNcf + ".xml";
 
-                    if (lowerEstado == "aceptado" || lowerEstado == "aceptado condicional") {
-                        doc.state = "AcceptedByDgii";
-                        doc.dgiiResponseXml = "Aceptado por DGII: " + estado;
-                    } else if (lowerEstado == "rechazado") {
-                        doc.state = "RejectedByDgii";
-                        std::string errors = "Rechazado por DGII";
-                        if (!resultado.mensajes.empty()) {
-                            errors = "";
-                            for (size_t i = 0; i < resultado.mensajes.size(); ++i) {
-                                if (i > 0) errors += "; ";
-                                errors += "[" + resultado.mensajes[i].codigo + "] " + resultado.mensajes[i].valor;
-                            }
-                        }
-                        doc.dgiiResponseXml = errors;
+            auto rfceResp = client->sendRfce(signedRfce, rfceFileName);
+
+            std::string estadoTrim = rfceResp.estado;
+            while (!estadoTrim.empty() && std::isspace(static_cast<unsigned char>(estadoTrim.front()))) estadoTrim.erase(estadoTrim.begin());
+            while (!estadoTrim.empty() && std::isspace(static_cast<unsigned char>(estadoTrim.back()))) estadoTrim.pop_back();
+
+            std::string lowerEstado = estadoTrim;
+            std::transform(lowerEstado.begin(), lowerEstado.end(), lowerEstado.begin(), ::tolower);
+
+            if (rfceResp.codigo == 1 || lowerEstado == "aceptado" || lowerEstado == "aceptado condicional") {
+                doc.trackId = doc.securityCode;
+                doc.state = "AcceptedByDgii";
+                doc.sentToDgiiAt = sys::utcNowIso();
+                doc.dgiiResponseXml = "Aceptado por DGII (RecepcionFC): " + (rfceResp.estado.empty() ? "Aceptado" : rfceResp.estado);
+            } else {
+                doc.state = "RejectedByDgii";
+                std::string errors;
+                if (!rfceResp.mensajes.empty()) {
+                    for (size_t i = 0; i < rfceResp.mensajes.size(); ++i) {
+                        if (i > 0) errors += "; ";
+                        errors += "[" + rfceResp.mensajes[i].codigo + "] " + rfceResp.mensajes[i].valor;
                     }
+                } else {
+                    errors = !rfceResp.estado.empty() ? rfceResp.estado : "Rechazado por RecepcionFC";
                 }
-            } catch (...) {
-                // Immediate check didn't complete; will be polled by background reconciler
+                doc.dgiiResponseXml = errors;
             }
         } else {
-            doc.state = "RejectedByDgii";
+            std::string fileName = doc.rncEmisor + doc.eNcf + ".xml";
+            auto response = client->sendEcf(doc.signedXmlContent.value(), fileName);
+            if (!response.trackId.empty()) {
+                doc.trackId = response.trackId;
+                doc.state = "Signed";
+                doc.sentToDgiiAt = sys::utcNowIso();
+
+                // Immediate status check with DGII in case it was processed synchronously (DGII takes ~1.5s)
+                try {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+                    auto resultado = client->consultarResultado(*doc.trackId);
+                    if (!resultado.estado.empty()) {
+                        std::string estado = resultado.estado;
+                        while (!estado.empty() && std::isspace(static_cast<unsigned char>(estado.front()))) estado.erase(estado.begin());
+                        while (!estado.empty() && std::isspace(static_cast<unsigned char>(estado.back()))) estado.pop_back();
+
+                        std::string lowerEstado = estado;
+                        std::transform(lowerEstado.begin(), lowerEstado.end(), lowerEstado.begin(), ::tolower);
+
+                        if (lowerEstado == "aceptado" || lowerEstado == "aceptado condicional") {
+                            doc.state = "AcceptedByDgii";
+                            doc.dgiiResponseXml = "Aceptado por DGII: " + estado;
+                        } else if (lowerEstado == "rechazado") {
+                            doc.state = "RejectedByDgii";
+                            std::string errors = "Rechazado por DGII";
+                            if (!resultado.mensajes.empty()) {
+                                errors = "";
+                                for (size_t i = 0; i < resultado.mensajes.size(); ++i) {
+                                    if (i > 0) errors += "; ";
+                                    errors += "[" + resultado.mensajes[i].codigo + "] " + resultado.mensajes[i].valor;
+                                }
+                            }
+                            doc.dgiiResponseXml = errors;
+                        }
+                    }
+                } catch (...) {
+                    // Immediate check didn't complete; will be polled by background reconciler
+                }
+            } else {
+                doc.state = "RejectedByDgii";
+            }
         }
     } catch (...) {
         doc.state = "Uncertain";
@@ -336,7 +381,8 @@ HttpResponsePtr reconcileUncertain(domain::EcfDocument& doc,
                                    const std::string& emisorRnc,
                                    const std::string& emisorRazonSocial,
                                    std::shared_ptr<domain::IEcfXmlSigner> effectiveSigner = nullptr,
-                                   std::shared_ptr<domain::IEcfClient> effectiveClient = nullptr) {
+                                   std::shared_ptr<domain::IEcfClient> effectiveClient = nullptr,
+                                   bool isDefaultFallback = true) {
     auto client = effectiveClient ? effectiveClient : services.ecfClient();
 
     // Check minimum age: updatedAt or createdAt
@@ -402,7 +448,7 @@ HttpResponsePtr reconcileUncertain(domain::EcfDocument& doc,
     applyCanonicalContent(doc, dto, editSequence, emisorRnc, emisorRazonSocial);
     scope.docs->update(doc);
     scope.uow->saveChanges();
-    return signAndSend(doc, scope, services, effectiveSigner, effectiveClient);
+    return signAndSend(doc, scope, services, effectiveSigner, effectiveClient, &dto, isDefaultFallback, emisorRazonSocial);
 }
 
 HttpResponsePtr handleExistingDocument(domain::EcfDocument& existingDoc,
@@ -421,11 +467,11 @@ HttpResponsePtr handleExistingDocument(domain::EcfDocument& existingDoc,
         applyCanonicalContent(existingDoc, dto, editSequence, emisorRnc, emisorRazonSocial);
         scope.docs->update(existingDoc);
         scope.uow->saveChanges();
-        return signAndSend(existingDoc, scope, services, effectiveSigner, effectiveClient);
+        return signAndSend(existingDoc, scope, services, effectiveSigner, effectiveClient, &dto, isDefaultFallback, emisorRazonSocial);
     }
 
     if (existingDoc.state == "Uncertain") {
-        return reconcileUncertain(existingDoc, dto, editSequence, scope, services, emisorRnc, emisorRazonSocial, effectiveSigner, effectiveClient);
+        return reconcileUncertain(existingDoc, dto, editSequence, scope, services, emisorRnc, emisorRazonSocial, effectiveSigner, effectiveClient, isDefaultFallback);
     }
 
     if (existingDoc.state == "RejectedByDgii") {
@@ -442,7 +488,7 @@ HttpResponsePtr handleExistingDocument(domain::EcfDocument& existingDoc,
         applyCanonicalContent(existingDoc, dto, editSequence, emisorRnc, emisorRazonSocial);
         scope.docs->update(existingDoc);
         scope.uow->saveChanges();
-        return signAndSend(existingDoc, scope, services, effectiveSigner, effectiveClient);
+        return signAndSend(existingDoc, scope, services, effectiveSigner, effectiveClient, &dto, isDefaultFallback, emisorRazonSocial);
     }
 
     if (existingDoc.editSequence != editSequence) {
@@ -662,7 +708,7 @@ void DocumentsController::submit(const HttpRequestPtr& req,
                 return;
             }
 
-            auto res = signAndSend(doc, scope, services, effectiveSigner, effectiveClient);
+            auto res = signAndSend(doc, scope, services, effectiveSigner, effectiveClient, &dto, isDefaultFallback, effectiveRazonSocial);
             cb(res);
         }
     );
