@@ -261,6 +261,50 @@ int main() {
         CHECK(resolveAlt("t1:Produccion") == "", "Produccion has no alternate alias");
     }
 
+    // Test 15: Item discount emits DescuentoMonto and TablaSubDescuento block
+    {
+        app::CanonicalDocumentDto dto;
+        dto.tipoComprobante = "E31";
+        dto.header.rncEmisor = "101672919";
+        dto.header.razonSocialEmisor = "WILLY CHIC DOMINICANA SRL";
+        dto.header.rncComprador = "130000000";
+        dto.header.razonSocialComprador = "Cliente de Prueba";
+        dto.totals.montoSubtotal = 100.0;
+        dto.totals.montoItbis = 18.0;
+        dto.totals.montoTotal = 118.0;
+
+        app::CanonicalLineDto line1;
+        line1.lineNumber = 1;
+        line1.itemName = "Item Normal";
+        line1.quantity = 2.0;
+        line1.unitPrice = 100.0;
+        line1.amount = 200.0;
+        dto.lines.push_back(line1);
+
+        app::CanonicalLineDto line2;
+        line2.lineNumber = 2;
+        line2.itemName = "Descuento 50%";
+        line2.quantity = 1.0;
+        line2.unitPrice = -100.0;
+        line2.amount = -100.0;
+        dto.lines.push_back(line2);
+
+        std::string xml = app::buildXmlFromCanonical(dto, "E310000000001", "101672919", "WILLY CHIC DOMINICANA SRL");
+
+        CHECK(xml.find("<DescuentoMonto>100.00</DescuentoMonto>") != std::string::npos,
+              "DescuentoMonto tag emitted with 100.00");
+        CHECK(xml.find("<TablaSubDescuento>") != std::string::npos,
+              "TablaSubDescuento block emitted");
+        CHECK(xml.find("<TipoSubDescuento>$</TipoSubDescuento>") != std::string::npos,
+              "TipoSubDescuento is $");
+        CHECK(xml.find("<MontoSubDescuento>100.00</MontoSubDescuento>") != std::string::npos,
+              "MontoSubDescuento tag emitted with 100.00");
+        CHECK(xml.find("<PrecioUnitarioItem>-") == std::string::npos,
+              "Negative price item not emitted");
+        CHECK(xml.find("<MontoItem>-") == std::string::npos,
+              "Negative amount item not emitted");
+    }
+
     std::printf("\nTotal failures: %d\n", failures);
     return failures > 0 ? 1 : 0;
 }

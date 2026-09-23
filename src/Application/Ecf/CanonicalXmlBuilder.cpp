@@ -445,7 +445,13 @@ std::string buildXmlFromCanonical(const CanonicalDocumentDto& dto,
         ss << "      <CantidadItem>" << item.quantity << "</CantidadItem>\n"
            << "      <PrecioUnitarioItem>" << item.unitPrice << "</PrecioUnitarioItem>\n";
         if (tipoEcf != "43" && tipoEcf != "47" && item.discountAmount > 0.0) {
-            ss << "      <DescuentoMonto>" << item.discountAmount << "</DescuentoMonto>\n";
+            ss << "      <DescuentoMonto>" << item.discountAmount << "</DescuentoMonto>\n"
+               << "      <TablaSubDescuento>\n"
+               << "        <SubDescuento>\n"
+               << "          <TipoSubDescuento>$</TipoSubDescuento>\n"
+               << "          <MontoSubDescuento>" << item.discountAmount << "</MontoSubDescuento>\n"
+               << "        </SubDescuento>\n"
+               << "      </TablaSubDescuento>\n";
         }
         ss << "      <MontoItem>" << item.montoItem << "</MontoItem>\n"
            << "    </Item>\n";
