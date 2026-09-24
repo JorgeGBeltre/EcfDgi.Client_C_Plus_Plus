@@ -151,21 +151,25 @@ int main() {
         CHECK(!dtEmpty.has_value(), "extractFechaHoraFirma returns empty optional when tag is absent");
     }
 
-    // Test 10: DGII Timbre URL uses ecf.dgii.gov.do host across environments
+    // Test 10: DGII Timbre URL for Facturas de Consumo uses fc.dgii.gov.do across environments
     {
         auto prodConfig = infra::EcfEnvironmentConfig::getConfig(domain::AmbienteEnum::Produccion);
-        CHECK(prodConfig.timbreFcUrl.find("ecf.dgii.gov.do") != std::string::npos,
-              "Produccion timbreFcUrl uses ecf.dgii.gov.do");
-        CHECK(prodConfig.timbreFcUrl.find("fc.dgii.gov.do") == std::string::npos,
-              "Produccion timbreFcUrl does not use deprecated fc.dgii.gov.do");
+        CHECK(prodConfig.timbreFcUrl.find("fc.dgii.gov.do") != std::string::npos,
+              "Produccion timbreFcUrl uses fc.dgii.gov.do");
+        CHECK(prodConfig.timbreFcUrl == "https://fc.dgii.gov.do/ecf/consultatimbrefc",
+              "Produccion timbreFcUrl matches exact DGII URL");
 
         auto certConfig = infra::EcfEnvironmentConfig::getConfig(domain::AmbienteEnum::Certificacion);
-        CHECK(certConfig.timbreFcUrl.find("ecf.dgii.gov.do") != std::string::npos,
-              "Certificacion timbreFcUrl uses ecf.dgii.gov.do");
+        CHECK(certConfig.timbreFcUrl.find("fc.dgii.gov.do") != std::string::npos,
+              "Certificacion timbreFcUrl uses fc.dgii.gov.do");
+        CHECK(certConfig.timbreFcUrl == "https://fc.dgii.gov.do/certecf/consultatimbrefc",
+              "Certificacion timbreFcUrl matches exact DGII URL");
 
         auto preCertConfig = infra::EcfEnvironmentConfig::getConfig(domain::AmbienteEnum::PreCertificacion);
-        CHECK(preCertConfig.timbreFcUrl.find("ecf.dgii.gov.do") != std::string::npos,
-              "PreCertificacion timbreFcUrl uses ecf.dgii.gov.do");
+        CHECK(preCertConfig.timbreFcUrl.find("fc.dgii.gov.do") != std::string::npos,
+              "PreCertificacion timbreFcUrl uses fc.dgii.gov.do");
+        CHECK(preCertConfig.timbreFcUrl == "https://fc.dgii.gov.do/testecf/consultatimbrefc",
+              "PreCertificacion timbreFcUrl matches exact DGII URL");
     }
 
     // Test 11: buildRfceXml generates valid RFCE with ITBIS gravado and CodigoSeguridadeCF
@@ -303,6 +307,48 @@ int main() {
               "Negative price item not emitted");
         CHECK(xml.find("<MontoItem>-") == std::string::npos,
               "Negative amount item not emitted");
+    }
+
+    // Test 16: Tipo 46 without buyer RNC emits IdentificadorExtranjero EXTRANJERO fallback
+    {
+        app::CanonicalDocumentDto dto;
+        dto.tipoComprobante = "E46";
+        dto.header.fechaEmision = "2026-09-24";
+        dto.header.rncComprador = "";
+        dto.header.razonSocialComprador = "Foreign Client Corp";
+        dto.totals.montoTotal = 500.0;
+        dto.totals.montoSubtotal = 500.0;
+
+        std::string xml = app::buildXmlFromCanonical(dto, "E460000000028", "101889063", "Willy Chic");
+        CHECK(xml.find("<IdentificadorExtranjero>EXTRANJERO</IdentificadorExtranjero>") != std::string::npos,
+              "E46 without buyer RNC emits <IdentificadorExtranjero>EXTRANJERO</IdentificadorExtranjero>");
+        CHECK(xml.find("<RNCComprador>") == std::string::npos,
+              "E46 without buyer RNC does NOT emit <RNCComprador>");
+    }
+
+    // Test 17: Dynamic sequence expiry date in test/cert environment defaults to 31-12-2028
+    {
+        app::CanonicalDocumentDto dtoPreCert;
+        dtoPreCert.tipoComprobante = "E31";
+        dtoPreCert.environment = "PreCertificacion";
+        dtoPreCert.header.fechaEmision = "2026-09-24";
+        dtoPreCert.header.rncComprador = "131234567";
+        dtoPreCert.totals.montoTotal = 100.0;
+
+        std::string xmlPreCert = app::buildXmlFromCanonical(dtoPreCert, "E310000000001", "101672919", "WILLY CHIC DOMINICANA SRL");
+        CHECK(xmlPreCert.find("<FechaVencimientoSecuencia>31-12-2028</FechaVencimientoSecuencia>") != std::string::npos,
+              "PreCertificacion environment defaults sequence expiry to 31-12-2028");
+
+        app::CanonicalDocumentDto dtoCert;
+        dtoCert.tipoComprobante = "E31";
+        dtoCert.environment = "Certificacion";
+        dtoCert.header.fechaEmision = "2026-09-24";
+        dtoCert.header.rncComprador = "131234567";
+        dtoCert.totals.montoTotal = 100.0;
+
+        std::string xmlCert = app::buildXmlFromCanonical(dtoCert, "E310000000001", "101672919", "WILLY CHIC DOMINICANA SRL");
+        CHECK(xmlCert.find("<FechaVencimientoSecuencia>31-12-2028</FechaVencimientoSecuencia>") != std::string::npos,
+              "Certificacion environment defaults sequence expiry to 31-12-2028");
     }
 
     std::printf("\nTotal failures: %d\n", failures);

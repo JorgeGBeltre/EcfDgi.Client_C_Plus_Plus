@@ -596,6 +596,33 @@ int main() {
         signAndCheck(xml, "131888999", "e-CF 31 v.1.0.xsd", "Multi-tenant isolated XML is valid against e-CF 31 XSD");
     }
 
+    // Test 27: Tipo 46 without buyer RNC passes XSD validation with EXTRANJERO fallback
+    {
+        ecf::app::CanonicalDocumentDto dto;
+        dto.tipoComprobante = "E46";
+        dto.header.rncEmisor = "101889063";
+        dto.header.razonSocialEmisor = "Willy Chic";
+        dto.header.rncComprador = ""; // No Dominican RNC
+        dto.header.razonSocialComprador = "Foreign Client Corp";
+        dto.totals.montoSubtotal = 500.0;
+        dto.totals.montoItbis = 0.0;
+        dto.totals.montoTotal = 500.0;
+        ecf::app::CanonicalLineDto l1;
+        l1.lineNumber = 1;
+        l1.itemName = "Export Item";
+        l1.quantity = 1.0;
+        l1.unitPrice = 500.0;
+        l1.amount = 500.0;
+        dto.lines.push_back(l1);
+
+        std::string xml = ecf::app::buildXmlFromCanonical(dto, "E460000000028", "101889063", "Willy Chic");
+        CHECK(xml.find("<IdentificadorExtranjero>EXTRANJERO</IdentificadorExtranjero>") != std::string::npos,
+              "Tipo 46 without buyer RNC generates IdentificadorExtranjero EXTRANJERO");
+        CHECK(xml.find("<RNCComprador>") == std::string::npos,
+              "Tipo 46 without buyer RNC does not generate RNCComprador");
+        signAndCheck(xml, "101889063", "e-CF 46 v.1.0.xsd", "Tipo 46 with EXTRANJERO fallback passes XSD");
+    }
+
     if (failures == 0) {
         std::printf("All XSD, multi-tenant, and security tests passed successfully!\n");
     } else {
