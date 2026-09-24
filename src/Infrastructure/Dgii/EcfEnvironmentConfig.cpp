@@ -22,7 +22,7 @@ EcfEnvironmentConfig EcfEnvironmentConfig::getConfig(AmbienteEnum ambiente) {
             c.anulacionRangosUrl = "https://ecf.dgii.gov.do/testecf/anulacionrangos";
             c.directorioUrl = "https://ecf.dgii.gov.do/testecf/consultadirectorio";
             c.timbreUrl = "https://ecf.dgii.gov.do/testecf/consultatimbre";
-            c.timbreFcUrl = "https://ecf.dgii.gov.do/testecf/consultatimbrefc";
+            c.timbreFcUrl = "https://fc.dgii.gov.do/testecf/consultatimbrefc";
             return c;
         case AmbienteEnum::Certificacion:
             c.autenticacionUrl = "https://ecf.dgii.gov.do/certecf/autenticacion";
@@ -36,7 +36,7 @@ EcfEnvironmentConfig EcfEnvironmentConfig::getConfig(AmbienteEnum ambiente) {
             c.anulacionRangosUrl = "https://ecf.dgii.gov.do/certecf/anulacionrangos";
             c.directorioUrl = "https://ecf.dgii.gov.do/certecf/consultadirectorio";
             c.timbreUrl = "https://ecf.dgii.gov.do/certecf/consultatimbre";
-            c.timbreFcUrl = "https://ecf.dgii.gov.do/certecf/consultatimbrefc";
+            c.timbreFcUrl = "https://fc.dgii.gov.do/certecf/consultatimbrefc";
             return c;
         case AmbienteEnum::Produccion:
             c.autenticacionUrl = "https://ecf.dgii.gov.do/ecf/autenticacion";
@@ -50,7 +50,7 @@ EcfEnvironmentConfig EcfEnvironmentConfig::getConfig(AmbienteEnum ambiente) {
             c.anulacionRangosUrl = "https://ecf.dgii.gov.do/ecf/anulacionrangos";
             c.directorioUrl = "https://ecf.dgii.gov.do/ecf/consultadirectorio";
             c.timbreUrl = "https://ecf.dgii.gov.do/ecf/consultatimbre";
-            c.timbreFcUrl = "https://ecf.dgii.gov.do/ecf/consultatimbrefc";
+            c.timbreFcUrl = "https://fc.dgii.gov.do/ecf/consultatimbrefc";
             return c;
     }
     throw std::invalid_argument("Ambiente no soportado");

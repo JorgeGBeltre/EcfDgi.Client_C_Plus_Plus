@@ -228,16 +228,31 @@ std::string buildXmlFromCanonical(const CanonicalDocumentDto& dto,
         } else if (dto.header.fechaVencimientoSecuencia.has_value() && !dto.header.fechaVencimientoSecuencia->empty()) {
             fechaVenc = normalizeFechaDgii(*dto.header.fechaVencimientoSecuencia);
         } else {
-            auto now = std::chrono::system_clock::now();
-            std::time_t tt = std::chrono::system_clock::to_time_t(now);
-            std::tm tm{};
+            // Si el ambiente es pruebas (PreCertificación/Certificación), la vigencia en DGII es fija a 31-12-2028.
+            // En producción, es dinámicamente según normativa DGII (31 de diciembre del año posterior).
+            bool isTestOrCert = false;
+            if (dto.environment.has_value()) {
+                std::string env = *dto.environment;
+                std::transform(env.begin(), env.end(), env.begin(), ::tolower);
+                if (env == "precertificacion" || env == "certificacion" || env == "test" || env == "cert") {
+                    isTestOrCert = true;
+                }
+            }
+            int year = 0;
+            if (isTestOrCert) {
+                year = 2028;
+            } else {
+                auto now = std::chrono::system_clock::now();
+                std::time_t tt = std::chrono::system_clock::to_time_t(now);
+                std::tm tm{};
 #if defined(_WIN32)
-            localtime_s(&tm, &tt);
+                localtime_s(&tm, &tt);
 #else
-            localtime_r(&tt, &tm);
+                localtime_r(&tt, &tm);
 #endif
-            int currentYear = tm.tm_year + 1900;
-            int year = std::max(2027, currentYear + 1);
+                int currentYear = tm.tm_year + 1900;
+                year = std::max(2027, currentYear + 1);
+            }
             fechaVenc = "31-12-" + std::to_string(year);
         }
         ss << "      <FechaVencimientoSecuencia>" << fechaVenc << "</FechaVencimientoSecuencia>\n";
@@ -284,6 +299,9 @@ std::string buildXmlFromCanonical(const CanonicalDocumentDto& dto,
                         ss << "      <IdentificadorExtranjero>" << escapeXml(foreignId) << "</IdentificadorExtranjero>\n";
                     }
                 }
+            } else {
+                // Fallback obligatorio DGII para E46 cuando el cliente extranjero no posee RNC Dominicano
+                ss << "      <IdentificadorExtranjero>EXTRANJERO</IdentificadorExtranjero>\n";
             }
         } else {
             if (!dto.header.rncComprador.empty()) {
