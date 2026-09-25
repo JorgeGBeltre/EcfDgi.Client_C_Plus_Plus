@@ -6,6 +6,7 @@
 
 #include <cstdio>
 #include <ctime>
+#include <nlohmann/json.hpp>
 
 #include "Domain/Exceptions/EcfException.h"
 
@@ -159,19 +160,39 @@ void EcfTokenManager::renewToken() {
         throw EcfException("Fallo la validación de la semilla (HTTP " +
                            std::to_string(validateResp.status_code) + ").");
 
-    // 4. Extract token + expiry.
-    xmlDocPtr doc = xmlReadMemory(validateResp.text.c_str(),
-                                  static_cast<int>(validateResp.text.size()),
-                                  "auth.xml", nullptr, 0);
-    if (!doc) throw EcfException("Respuesta de autenticación inválida.");
-    xmlNode* root = xmlDocGetRootElement(doc);
-    std::string token = childText(root, "token");
-    std::string expira = childText(root, "expira");
-    xmlFreeDoc(doc);
+    // 4. Extract token + expiry (supports both XML and JSON formats from DGII / mock endpoints).
+    std::string token;
+    std::string expira;
+
+    std::string trimmed = validateResp.text;
+    while (!trimmed.empty() && std::isspace(static_cast<unsigned char>(trimmed.front()))) trimmed.erase(trimmed.begin());
+
+    if (!trimmed.empty() && trimmed.front() == '<') {
+        xmlDocPtr doc = xmlReadMemory(validateResp.text.c_str(),
+                                      static_cast<int>(validateResp.text.size()),
+                                      "auth.xml", nullptr, 0);
+        if (!doc) throw EcfException("Respuesta de autenticación inválida: XML malformado.");
+        xmlNode* root = xmlDocGetRootElement(doc);
+        token = childText(root, "token");
+        expira = childText(root, "expira");
+        xmlFreeDoc(doc);
+    } else {
+        try {
+            auto j = nlohmann::json::parse(validateResp.text);
+            if (j.contains("token") && j["token"].is_string()) {
+                token = j["token"].get<std::string>();
+            }
+            if (j.contains("expira") && j["expira"].is_string()) {
+                expira = j["expira"].get<std::string>();
+            }
+        } catch (const std::exception& ex) {
+            throw EcfException(std::string("Respuesta de autenticación inválida (JSON/XML): ") + ex.what());
+        }
+    }
 
     if (token.empty())
         throw EcfException(
-            "Respuesta de autenticación inválida: falta token o fecha de expiración.");
+            "Respuesta de autenticación inválida de DGII: falta token o fecha de expiración.");
 
     cachedToken_ = token;
     if (!parseExpiry(expira, tokenExpiry_)) {
