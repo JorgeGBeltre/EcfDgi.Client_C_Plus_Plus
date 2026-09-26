@@ -239,10 +239,35 @@ AprobacionComercialResponse DgiiDirectTransport::sendAprobacionComercial(
         return cpr::Post(cpr::Url{config_.aprobacionComercialUrl + "/api/aprobacioncomercial"},
                          cpr::Bearer{token}, xmlPart(xmlContent, fileName));
     });
+
+    bool isWhitespace = true;
+    for (char ch : resp.text) {
+        if (!std::isspace(static_cast<unsigned char>(ch))) {
+            isWhitespace = false;
+            break;
+        }
+    }
+    if (isWhitespace) {
+        AprobacionComercialResponse r;
+        r.estado = "Aceptado";
+        r.codigo = "1";
+        return r;
+    }
+
     json j = parseJson(resp.text);
+    if (j.is_discarded() || !j.is_object()) {
+        AprobacionComercialResponse r;
+        r.estado = resp.text;
+        r.codigo = (resp.status_code >= 200 && resp.status_code < 300) ? "1" : "2";
+        return r;
+    }
+
     AprobacionComercialResponse r;
     r.codigo = jstr(j, "codigo");
     r.estado = jstr(j, "estado");
+    if (r.estado.empty()) {
+        r.estado = resp.text;
+    }
     const json* m = find(j, "mensaje");
     if (m && m->is_array())
         for (const auto& s : *m) r.mensaje.push_back(s.is_string() ? s.get<std::string>() : s.dump());
