@@ -49,15 +49,23 @@ FROM ubuntu:24.04 AS final
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates libpq5 \
+    ca-certificates libpq5 curl \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
+# Copy runtime shared libraries built by vcpkg and update dynamic linker cache
+COPY --from=build /src/build/vcpkg_installed/x64-linux/lib/ /usr/local/lib/
+RUN ldconfig
+
 COPY --from=build /src/build/ecfdgii_api /app/ecfdgii_api
 COPY --from=build /src/config/appsettings.json /app/appsettings.json
 COPY --from=build /src/db/schema.sql /app/db/schema.sql
+COPY --from=build ["/src/Documentación Técnica (XSD)", "/app/Documentación Técnica (XSD)"]
 
 EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD curl -f http://127.0.0.1:8080/health || exit 1
 
 ENTRYPOINT ["/app/ecfdgii_api"]

@@ -40,6 +40,17 @@ void RedisCacheService::parseConnectionString(const std::string& connectionStrin
     }
 
     std::string s = connectionString;
+
+    // Check for password in connection string: e.g. "host:6379,password=secret,abortConnect=false"
+    auto passPos = s.find("password=");
+    if (passPos != std::string::npos) {
+        auto passEnd = s.find_first_of(",;", passPos);
+        password_ = s.substr(passPos + 9, passEnd == std::string::npos ? std::string::npos : passEnd - (passPos + 9));
+    }
+    if (const char* envPass = std::getenv("REDIS_PASSWORD")) {
+        password_ = envPass;
+    }
+
     size_t colon = s.find(':');
     if (colon != std::string::npos) {
         host_ = s.substr(0, colon);
@@ -49,7 +60,8 @@ void RedisCacheService::parseConnectionString(const std::string& connectionStrin
             port_ = 6379;
         }
     } else {
-        host_ = s;
+        size_t comma = s.find(',');
+        host_ = (comma != std::string::npos) ? s.substr(0, comma) : s;
         port_ = 6379;
     }
 
@@ -99,6 +111,13 @@ std::string RedisCacheService::sendRedisCommand(const std::string& cmd) {
         return "";
     }
     freeaddrinfo(res);
+
+    if (!password_.empty()) {
+        std::string authCmd = "*2\r\n$4\r\nAUTH\r\n$" + std::to_string(password_.length()) + "\r\n" + password_ + "\r\n";
+        send(sock, authCmd.c_str(), (int)authCmd.length(), 0);
+        char authBuf[256];
+        recv(sock, authBuf, sizeof(authBuf) - 1, 0);
+    }
 
     send(sock, cmd.c_str(), (int)cmd.length(), 0);
 

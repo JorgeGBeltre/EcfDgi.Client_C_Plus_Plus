@@ -33,6 +33,7 @@ private:
 
     std::string host_;
     int port_{6379};
+    std::string password_;
     bool useRedis_{false};
 
     // Memory fallback store

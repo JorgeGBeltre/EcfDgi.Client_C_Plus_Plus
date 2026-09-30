@@ -46,7 +46,14 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    networks:
+      - ecf-network
 
 volumes:
   postgres_data:
   redis_data:
+
+networks:
+  ecf-network:
+    name: ecf-network
+

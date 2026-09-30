@@ -24,6 +24,36 @@ EcfEnvironment parseEnv(const std::string& s) {
     return EcfEnvironment::Test;
 }
 
+static std::string normalizePostgresConnectionString(const std::string& input) {
+    if (input.empty() || input.find(';') == std::string::npos) {
+        return input;
+    }
+    std::string out;
+    std::stringstream ss(input);
+    std::string item;
+    while (std::getline(ss, item, ';')) {
+        auto eq = item.find('=');
+        if (eq == std::string::npos) continue;
+        std::string key = item.substr(0, eq);
+        std::string val = item.substr(eq + 1);
+        while (!key.empty() && std::isspace(static_cast<unsigned char>(key.front()))) key.erase(key.begin());
+        while (!key.empty() && std::isspace(static_cast<unsigned char>(key.back()))) key.pop_back();
+        std::string lowerKey = key;
+        for (char& c : lowerKey) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+        if (lowerKey == "host" || lowerKey == "server") key = "host";
+        else if (lowerKey == "port") key = "port";
+        else if (lowerKey == "database" || lowerKey == "initial catalog") key = "dbname";
+        else if (lowerKey == "username" || lowerKey == "user id" || lowerKey == "user") key = "user";
+        else if (lowerKey == "password") key = "password";
+        else continue;
+
+        if (!out.empty()) out += " ";
+        out += key + "=" + val;
+    }
+    return out.empty() ? input : out;
+}
+
 }  // namespace
 
 AppConfig AppConfig::load(const std::string& path) {
@@ -50,6 +80,11 @@ AppConfig AppConfig::load(const std::string& path) {
     // Allow the connection strings to be overridden via environment variables.
     if (const char* env = std::getenv("ConnectionStrings__DefaultConnection"))
         cfg.connectionString = env;
+    else if (const char* envDb = std::getenv("DATABASE_URL"))
+        cfg.connectionString = envDb;
+
+    cfg.connectionString = normalizePostgresConnectionString(cfg.connectionString);
+
     if (const char* redisEnv = std::getenv("ConnectionStrings__Redis"))
         cfg.redisConnectionString = redisEnv;
     else if (const char* redisUrlEnv = std::getenv("REDIS_URL"))
@@ -62,6 +97,8 @@ AppConfig AppConfig::load(const std::string& path) {
         cfg.jwt.issuer = getStr(s, "Issuer");
         cfg.jwt.audience = getStr(s, "Audience");
     }
+    if (const char* envJwt = std::getenv("JwtSettings__Secret")) cfg.jwt.secret = envJwt;
+    else if (const char* envJwt2 = std::getenv("JWT_SECRET")) cfg.jwt.secret = envJwt2;
 
     if (j.contains("EcfClientOptions")) {
         const auto& s = j["EcfClientOptions"];
@@ -80,6 +117,12 @@ AppConfig AppConfig::load(const std::string& path) {
         if (s.contains("XsdDirectoryPath"))
             o.xsdDirectoryPath = getStr(s, "XsdDirectoryPath");
     }
+
+    if (const char* envEcfEnv = std::getenv("ECF_ENVIRONMENT")) cfg.ecfOptions.environment = parseEnv(envEcfEnv);
+    else if (const char* envEcfEnv2 = std::getenv("EcfClientOptions__Environment")) cfg.ecfOptions.environment = parseEnv(envEcfEnv2);
+
+    if (const char* envBaseUrl = std::getenv("ECF_BASE_URL")) cfg.ecfOptions.baseUrl = envBaseUrl;
+    else if (const char* envBaseUrl2 = std::getenv("EcfClientOptions__BaseUrl")) cfg.ecfOptions.baseUrl = envBaseUrl2;
 
     if (j.contains("EcfEmisor")) {
         const auto& s = j["EcfEmisor"];
@@ -101,9 +144,16 @@ AppConfig AppConfig::load(const std::string& path) {
     }
 
     // Support env overrides
-    if (const char* envRnc = std::getenv("ECF_EMISOR_RNC")) cfg.emisorOptions.rnc = envRnc;
+    if (const char* envRnc = std::getenv("ECF_EMISOR_RNC")) {
+        cfg.emisorOptions.rnc = envRnc;
+        cfg.ecfOptions.rncEmisor = envRnc;
+    } else if (const char* envRnc2 = std::getenv("EcfClientOptions__RncEmisor")) {
+        cfg.emisorOptions.rnc = envRnc2;
+        cfg.ecfOptions.rncEmisor = envRnc2;
+    }
     if (const char* envRazon = std::getenv("ECF_EMISOR_RAZON_SOCIAL")) cfg.emisorOptions.razonSocial = envRazon;
     if (const char* envXsd = std::getenv("ECF_XSD_DIR")) cfg.ecfOptions.xsdDirectoryPath = envXsd;
+    if (const char* envSchema = std::getenv("SCHEMA_PATH")) cfg.schemaPath = envSchema;
 
     // Parse Worker configurations
     cfg.workerKeyId = getStr(j, "WorkerKeyId", cfg.workerKeyId);
