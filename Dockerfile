@@ -54,10 +54,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Copy runtime shared libraries built by vcpkg and update dynamic linker cache
-COPY --from=build /src/build/vcpkg_installed/x64-linux/lib/ /usr/local/lib/
-RUN ldconfig
-
 COPY --from=build /src/build/ecfdgii_api /app/ecfdgii_api
 COPY --from=build /src/config/appsettings.json /app/appsettings.json
 COPY --from=build /src/db/schema.sql /app/db/schema.sql
