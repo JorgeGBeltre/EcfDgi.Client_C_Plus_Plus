@@ -154,7 +154,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Extraer variables desde Secret ENV
-        if: "${{ secrets.ENV != '' }}"
         env:
           RAW_ENV_SECRET: ${{ secrets.ENV }}
         run: |
@@ -162,41 +161,50 @@ jobs:
           import os, base64
 
           raw = os.environ.get("RAW_ENV_SECRET", "")
-          if not raw.strip():
-              print("Secret ENV vacío.")
-              exit(0)
-
           parsed = {}
           current_key = None
           current_val = []
           in_block = False
 
-          for line in raw.splitlines():
-              stripped = line.strip()
-              if not stripped:
-                  continue
-              if not in_block and stripped.startswith("#"):
-                  continue
-              if in_block:
-                  current_val.append(line)
-                  if "-----END " in line:
-                      in_block = False
-                  continue
-              if "=" in line and not line.startswith(" ") and not line.startswith("\t"):
-                  if current_key:
-                      parsed[current_key] = "\n".join(current_val)
-                  parts = line.split("=", 1)
-                  current_key = parts[0].strip()
-                  val = parts[1].strip()
-                  current_val = [val]
-                  if "-----BEGIN " in val:
-                      in_block = True
-              else:
-                  if current_key:
+          if raw.strip():
+              for line in raw.splitlines():
+                  stripped = line.strip()
+                  if not stripped:
+                      continue
+                  if not in_block and stripped.startswith("#"):
+                      continue
+                  if in_block:
                       current_val.append(line)
+                      if "-----END " in line:
+                          in_block = False
+                      continue
+                  if "=" in line and not line.startswith(" ") and not line.startswith("\t"):
+                      if current_key:
+                          parsed[current_key] = "\n".join(current_val)
+                      parts = line.split("=", 1)
+                      current_key = parts[0].strip()
+                      val = parts[1].strip()
+                      current_val = [val]
+                      if "-----BEGIN " in val:
+                          in_block = True
+                  else:
+                      if current_key:
+                          current_val.append(line)
 
-          if current_key:
-              parsed[current_key] = "\n".join(current_val)
+              if current_key:
+                  parsed[current_key] = "\n".join(current_val)
+
+          # Fallbacks de conexión al VPS según Check.md
+          if "HOSTINGER_SERVER" not in parsed:
+              parsed["HOSTINGER_SERVER"] = "2.25.106.54"
+          if "HOSTINGER_USERNAME" not in parsed:
+              parsed["HOSTINGER_USERNAME"] = "root"
+          if "HOSTINGER_SSH_PORT" not in parsed:
+              parsed["HOSTINGER_SSH_PORT"] = "22"
+          if "HOSTINGER_PASSWORD" not in parsed and "HOSTINGER_SSH_KEY" not in parsed:
+              parsed["HOSTINGER_PASSWORD"] = "Bj5S.z6yB-QBW#Fd"
+          if "POSTGRES_DB" not in parsed:
+              parsed["POSTGRES_DB"] = "saas_ecf_db"
 
           def clean(v, default=""):
               if v is None:
@@ -206,14 +214,14 @@ jobs:
                   v = v[1:-1]
               return v
 
-          db_name = clean(parsed.get('POSTGRES_DB'), 'ecf_db')
+          db_name = clean(parsed.get('POSTGRES_DB'), 'saas_ecf_db')
           db_user = clean(parsed.get('POSTGRES_USER'), 'ecf_user')
           db_pass = clean(parsed.get('POSTGRES_PASSWORD'), 'Ad@GxicRH@zFHTE$4Sj')
-          redis_pass = clean(parsed.get('REDIS_PASSWORD'), 'R3d!s$ecUr3P@ssw0rd2026')
+          redis_pass = clean(parsed.get('REDIS_PASSWORD'), 'R3d!s_SecUr3_P@ssw0rd2026')
           jwt_secret = clean(parsed.get('JWT_SECRET'), '6QG04PHsCO43eY9AOtGiI6c96nAUAQ9yIoIE6a0Ri2LQSpgxIQNdGvYVXWkvlEpAwR7ITkuD3j4-U0-9w8ipnQ')
 
           dgii_env = f"""ConnectionStrings__DefaultConnection=Host=ecf-postgres-db;Port=5432;Database={db_name};Username={db_user};Password={db_pass}
-          ConnectionStrings__Redis=ecf-redis-db:6379,password={redis_pass}
+          ConnectionStrings__Redis=saas-ecf-redis-db:6379,password={redis_pass}
           REDIS_PASSWORD={redis_pass}
           WorkerSecretKey={jwt_secret}
           WORKER_SECRET_KEY={jwt_secret}
@@ -237,10 +245,11 @@ jobs:
       - name: Deploy C++ Engine via SSH
         uses: appleboy/ssh-action@v1.2.0
         with:
-          host: ${{ env.HOSTINGER_SERVER || secrets.HOSTINGER_SERVER }}
-          username: ${{ env.HOSTINGER_USERNAME || secrets.HOSTINGER_USERNAME }}
-          key: ${{ env.HOSTINGER_SSH_KEY || secrets.HOSTINGER_SSH_KEY }}
-          port: ${{ env.HOSTINGER_SSH_PORT || secrets.HOSTINGER_SSH_PORT || 22 }}
+          host: ${{ env.HOSTINGER_SERVER }}
+          username: ${{ env.HOSTINGER_USERNAME }}
+          key: ${{ env.HOSTINGER_SSH_KEY }}
+          password: ${{ env.HOSTINGER_PASSWORD }}
+          port: ${{ env.HOSTINGER_SSH_PORT || 22 }}
           script: |
             set -e
             CONTAINER_NAME="saas-ecf-dgii-api"
@@ -253,6 +262,22 @@ jobs:
             echo "Asegurando red Docker netbird..."
             if ! docker network inspect netbird >/dev/null 2>&1; then
               docker network create netbird
+            fi
+
+            echo "Asegurando base de datos saas_ecf_db en PostgreSQL..."
+            docker exec ecf-postgres-db psql -U ecf_user -d postgres -tc "SELECT 1 FROM pg_database WHERE datname = 'saas_ecf_db'" | grep -q 1 || \
+            docker exec ecf-postgres-db psql -U ecf_user -d postgres -c "CREATE DATABASE saas_ecf_db OWNER ecf_user;"
+
+            echo "Asegurando contenedor dedicado saas-ecf-redis-db..."
+            if ! docker ps -q -f "name=^/saas-ecf-redis-db$" | grep -q .; then
+              docker stop saas-ecf-redis-db 2>/dev/null || true
+              docker rm saas-ecf-redis-db 2>/dev/null || true
+              docker run -d \
+                --name saas-ecf-redis-db \
+                --network netbird \
+                -p 6380:6379 \
+                --restart unless-stopped \
+                redis:7-alpine redis-server --requirepass "${REDIS_PASSWORD:-R3d!s_SecUr3_P@ssw0rd2026}"
             fi
 
             echo "Autenticando en GHCR..."
