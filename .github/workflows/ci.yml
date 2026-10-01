@@ -143,3 +143,60 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # ============================================================================
+  # 4. Despliegue Automático en VPS vía SSH
+  # ============================================================================
+  deploy-vps:
+    name: Deploy C++ Engine to VPS
+    needs: build-docker
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy C++ Engine via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.HOSTINGER_SERVER }}
+          username: ${{ secrets.HOSTINGER_USERNAME }}
+          key: ${{ secrets.HOSTINGER_SSH_KEY }}
+          port: ${{ secrets.HOSTINGER_SSH_PORT || 22 }}
+          script: |
+            set -e
+            CONTAINER_NAME="ecf_dgii_api"
+            IMAGE_NAME="ghcr.io/${{ github.repository_owner }}/ecfdgii-client:latest"
+
+            echo "Autenticando en GHCR..."
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+            echo "Descargando imagen C++..."
+            docker pull "$IMAGE_NAME"
+
+            echo "Deteniendo contenedor previo..."
+            docker stop "$CONTAINER_NAME" 2>/dev/null || true
+            docker rm "$CONTAINER_NAME" 2>/dev/null || true
+
+            echo "Iniciando contenedor C++ en red netbird con Traefik..."
+            docker run -d \
+              --name "$CONTAINER_NAME" \
+              --network netbird \
+              -p 8085:8080 \
+              --label "traefik.enable=true" \
+              --label 'traefik.http.routers.ecf-dgii.rule=Host(`dgii.app.vesismart.com`) || Host(`dgii.app.willychicrd.com`)' \
+              --label "traefik.http.routers.ecf-dgii.entrypoints=websecure" \
+              --label "traefik.http.routers.ecf-dgii.tls.certresolver=letsencrypt" \
+              --label "traefik.http.services.ecf-dgii.loadbalancer.server.port=8080" \
+              -e ConnectionStrings__DefaultConnection="host=ecf-postgres-db port=5432 dbname=ecf_db user=ecf_user password=Ad@GxicRH@zFHTE\$4Sj" \
+              -e ConnectionStrings__Redis="ecf-redis-db:6379,password=R3d!s_SecUr3_P@ssw0rd2026" \
+              -e REDIS_PASSWORD="R3d!s_SecUr3_P@ssw0rd2026" \
+              -e WorkerSecretKey="6QG04PHsCO43eY9AOtGiI6c96nAUAQ9yIoIE6a0Ri2LQSpgxIQNdGvYVXWkvlEpAwR7ITkuD3j4-U0-9w8ipnQ" \
+              -e WORKER_SECRET_KEY="6QG04PHsCO43eY9AOtGiI6c96nAUAQ9yIoIE6a0Ri2LQSpgxIQNdGvYVXWkvlEpAwR7ITkuD3j4-U0-9w8ipnQ" \
+              -e JwtSettings__Secret="6QG04PHsCO43eY9AOtGiI6c96nAUAQ9yIoIE6a0Ri2LQSpgxIQNdGvYVXWkvlEpAwR7ITkuD3j4-U0-9w8ipnQ" \
+              -e JWT_SECRET="6QG04PHsCO43eY9AOtGiI6c96nAUAQ9yIoIE6a0Ri2LQSpgxIQNdGvYVXWkvlEpAwR7ITkuD3j4-U0-9w8ipnQ" \
+              -v /var/www/ecf-dgii-client/certificates:/app/certificates \
+              --restart unless-stopped \
+              "$IMAGE_NAME"
+
+            echo "Validando inicio..."
+            sleep 3
+            docker ps -f "name=$CONTAINER_NAME"
+

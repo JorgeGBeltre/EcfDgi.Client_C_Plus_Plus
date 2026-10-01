@@ -17,7 +17,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # vcpkg
 RUN git clone https://github.com/microsoft/vcpkg "$VCPKG_ROOT" \
- && "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics
+ && "$VCPKG_ROOT/bootstrap-vcpkg.sh" -disableMetrics \
+ && mkdir -p /vcpkg-bincache /opt/vcpkg/downloads
 
 WORKDIR /src
 
@@ -36,7 +37,9 @@ RUN --mount=type=cache,id=ecfdgii-vcpkg-bincache,target=/vcpkg-bincache \
 COPY . .
 
 # Configure and build the target executable
-RUN cmake --preset default \
+RUN --mount=type=cache,id=ecfdgii-vcpkg-bincache,target=/vcpkg-bincache \
+    --mount=type=cache,id=ecfdgii-vcpkg-downloads,target=/opt/vcpkg/downloads \
+    cmake --preset default \
  && cmake --build build --target ecfdgii_api --parallel \
  && strip build/ecfdgii_api || true
 
