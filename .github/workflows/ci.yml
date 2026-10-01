@@ -153,23 +153,127 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
+      - name: Extraer variables desde Secret ENV
+        if: "${{ secrets.ENV != '' }}"
+        env:
+          RAW_ENV_SECRET: ${{ secrets.ENV }}
+        run: |
+          python3 - <<'PYEOF'
+          import os, base64
+
+          raw = os.environ.get("RAW_ENV_SECRET", "")
+          if not raw.strip():
+              print("Secret ENV vacío.")
+              exit(0)
+
+          parsed = {}
+          current_key = None
+          current_val = []
+          in_block = False
+
+          for line in raw.splitlines():
+              stripped = line.strip()
+              if not stripped:
+                  continue
+              if not in_block and stripped.startswith("#"):
+                  continue
+              if in_block:
+                  current_val.append(line)
+                  if "-----END " in line:
+                      in_block = False
+                  continue
+              if "=" in line and not line.startswith(" ") and not line.startswith("\t"):
+                  if current_key:
+                      parsed[current_key] = "\n".join(current_val)
+                  parts = line.split("=", 1)
+                  current_key = parts[0].strip()
+                  val = parts[1].strip()
+                  current_val = [val]
+                  if "-----BEGIN " in val:
+                      in_block = True
+              else:
+                  if current_key:
+                      current_val.append(line)
+
+          if current_key:
+              parsed[current_key] = "\n".join(current_val)
+
+          def clean(v, default=""):
+              if v is None:
+                  return default
+              v = v.strip()
+              if (v.startswith('"') and v.endswith('"')) or (v.startswith("'") and v.endswith("'")):
+                  v = v[1:-1]
+              return v
+
+          db_name = clean(parsed.get('POSTGRES_DB'), 'ecf_db')
+          db_user = clean(parsed.get('POSTGRES_USER'), 'ecf_user')
+          db_pass = clean(parsed.get('POSTGRES_PASSWORD'), 'Ad@GxicRH@zFHTE$4Sj')
+          redis_pass = clean(parsed.get('REDIS_PASSWORD'), 'R3d!s$ecUr3P@ssw0rd2026')
+          jwt_secret = clean(parsed.get('JWT_SECRET'), '6QG04PHsCO43eY9AOtGiI6c96nAUAQ9yIoIE6a0Ri2LQSpgxIQNdGvYVXWkvlEpAwR7ITkuD3j4-U0-9w8ipnQ')
+
+          dgii_env = f"""ConnectionStrings__DefaultConnection=Host=ecf-postgres-db;Port=5432;Database={db_name};Username={db_user};Password={db_pass}
+          ConnectionStrings__Redis=ecf-redis-db:6379,password={redis_pass}
+          REDIS_PASSWORD={redis_pass}
+          WorkerSecretKey={jwt_secret}
+          WORKER_SECRET_KEY={jwt_secret}
+          JwtSettings__Secret={jwt_secret}
+          JWT_SECRET={jwt_secret}
+          """
+          dgii_clean = "\n".join([line.strip() for line in dgii_env.strip().splitlines()]) + "\n"
+          dgii_b64 = base64.b64encode(dgii_clean.encode('utf-8')).decode('ascii')
+
+          github_env = os.environ.get("GITHUB_ENV")
+          if github_env:
+              with open(github_env, "a", encoding="utf-8") as f:
+                  for k, v in parsed.items():
+                      clean_v = clean(v)
+                      delimiter = f"DELIMITER_{k}"
+                      f.write(f"{k}<<{delimiter}\n{clean_v}\n{delimiter}\n")
+                  f.write(f"DGII_ENV_BASE64<<DELIMITER_DGII\n{dgii_b64}\nDELIMITER_DGII\n")
+              print(f"Extracted {len(parsed)} variables into GITHUB_ENV along with DGII_ENV_BASE64.")
+          PYEOF
+
       - name: Deploy C++ Engine via SSH
         uses: appleboy/ssh-action@v1.2.0
         with:
-          host: ${{ secrets.HOSTINGER_SERVER }}
-          username: ${{ secrets.HOSTINGER_USERNAME }}
-          key: ${{ secrets.HOSTINGER_SSH_KEY }}
-          port: ${{ secrets.HOSTINGER_SSH_PORT || 22 }}
+          host: ${{ env.HOSTINGER_SERVER || secrets.HOSTINGER_SERVER }}
+          username: ${{ env.HOSTINGER_USERNAME || secrets.HOSTINGER_USERNAME }}
+          key: ${{ env.HOSTINGER_SSH_KEY || secrets.HOSTINGER_SSH_KEY }}
+          port: ${{ env.HOSTINGER_SSH_PORT || secrets.HOSTINGER_SSH_PORT || 22 }}
           script: |
             set -e
             CONTAINER_NAME="saas-ecf-dgii-api"
-            IMAGE_NAME="ghcr.io/${{ github.repository_owner }}/saas-ecf-dgii-api:latest"
+            REPO_OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+            IMAGE_NAME="ghcr.io/${REPO_OWNER}/saas-ecf-dgii-api:latest"
+            DEPLOY_DIR="/var/www/saas-ecf-dgii"
+
+            mkdir -p "$DEPLOY_DIR/certificates"
+
+            echo "Asegurando red Docker netbird..."
+            if ! docker network inspect netbird >/dev/null 2>&1; then
+              docker network create netbird
+            fi
 
             echo "Autenticando en GHCR..."
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
             echo "Descargando imagen C++..."
             docker pull "$IMAGE_NAME"
+
+            echo "Escribiendo configuración .env..."
+            if [ -n "${{ env.DGII_ENV_BASE64 }}" ]; then
+              echo "${{ env.DGII_ENV_BASE64 }}" | base64 -d > "$DEPLOY_DIR/.env"
+            fi
+            chmod 600 "$DEPLOY_DIR/.env"
+
+            # Detectar si hay saas-ecf-postgres-db o saas-ecf-redis-db dedicados
+            if docker ps -q -f "name=^/saas-ecf-postgres-db$" | grep -q .; then
+              sed -i 's/Host=ecf-postgres-db/Host=saas-ecf-postgres-db/g' "$DEPLOY_DIR/.env"
+            fi
+            if docker ps -q -f "name=^/saas-ecf-redis-db$" | grep -q .; then
+              sed -i 's/ecf-redis-db:6379/saas-ecf-redis-db:6379/g' "$DEPLOY_DIR/.env"
+            fi
 
             echo "Deteniendo contenedor SaaS-Ecf DGII previo si existe..."
             docker stop "$CONTAINER_NAME" 2>/dev/null || true
@@ -185,18 +289,14 @@ jobs:
               --label "traefik.http.routers.saas-ecf-dgii.entrypoints=websecure" \
               --label "traefik.http.routers.saas-ecf-dgii.tls.certresolver=letsencrypt" \
               --label "traefik.http.services.saas-ecf-dgii.loadbalancer.server.port=8080" \
-              -e ConnectionStrings__DefaultConnection="host=saas-ecf-postgres-db port=5432 dbname=saas_ecf_db user=ecf_user password=Ad@GxicRH@zFHTE\$4Sj" \
-              -e ConnectionStrings__Redis="saas-ecf-redis-db:6379,password=R3d!s_SecUr3_P@ssw0rd2026" \
-              -e REDIS_PASSWORD="R3d!s_SecUr3_P@ssw0rd2026" \
-              -e WorkerSecretKey="6QG04PHsCO43eY9AOtGiI6c96nAUAQ9yIoIE6a0Ri2LQSpgxIQNdGvYVXWkvlEpAwR7ITkuD3j4-U0-9w8ipnQ" \
-              -e WORKER_SECRET_KEY="6QG04PHsCO43eY9AOtGiI6c96nAUAQ9yIoIE6a0Ri2LQSpgxIQNdGvYVXWkvlEpAwR7ITkuD3j4-U0-9w8ipnQ" \
-              -e JwtSettings__Secret="6QG04PHsCO43eY9AOtGiI6c96nAUAQ9yIoIE6a0Ri2LQSpgxIQNdGvYVXWkvlEpAwR7ITkuD3j4-U0-9w8ipnQ" \
-              -e JWT_SECRET="6QG04PHsCO43eY9AOtGiI6c96nAUAQ9yIoIE6a0Ri2LQSpgxIQNdGvYVXWkvlEpAwR7ITkuD3j4-U0-9w8ipnQ" \
-              -v /var/www/saas-ecf-dgii/certificates:/app/certificates \
+              --env-file "$DEPLOY_DIR/.env" \
+              -v "$DEPLOY_DIR/certificates:/app/certificates" \
               --restart unless-stopped \
               "$IMAGE_NAME"
 
             echo "Validando inicio..."
             sleep 3
             docker ps -f "name=$CONTAINER_NAME"
+            docker logs "$CONTAINER_NAME" --tail 30
 
+            echo "✅ Despliegue de SaaS-Ecf DGII C++ completado exitosamente."
