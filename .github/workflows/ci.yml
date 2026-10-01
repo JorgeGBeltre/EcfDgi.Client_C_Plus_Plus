@@ -127,7 +127,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/ecfdgii-client
+          images: ghcr.io/${{ github.repository_owner }}/saas-ecf-dgii-api
           tags: |
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
             type=ref,event=branch
@@ -162,8 +162,8 @@ jobs:
           port: ${{ secrets.HOSTINGER_SSH_PORT || 22 }}
           script: |
             set -e
-            CONTAINER_NAME="ecf_dgii_api"
-            IMAGE_NAME="ghcr.io/${{ github.repository_owner }}/ecfdgii-client:latest"
+            CONTAINER_NAME="saas-ecf-dgii-api"
+            IMAGE_NAME="ghcr.io/${{ github.repository_owner }}/saas-ecf-dgii-api:latest"
 
             echo "Autenticando en GHCR..."
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
@@ -171,7 +171,7 @@ jobs:
             echo "Descargando imagen C++..."
             docker pull "$IMAGE_NAME"
 
-            echo "Deteniendo contenedor previo..."
+            echo "Deteniendo contenedor SaaS-Ecf DGII previo si existe..."
             docker stop "$CONTAINER_NAME" 2>/dev/null || true
             docker rm "$CONTAINER_NAME" 2>/dev/null || true
 
@@ -179,20 +179,20 @@ jobs:
             docker run -d \
               --name "$CONTAINER_NAME" \
               --network netbird \
-              -p 8085:8080 \
+              -p 8086:8080 \
               --label "traefik.enable=true" \
-              --label 'traefik.http.routers.ecf-dgii.rule=Host(`dgii.app.vesismart.com`) || Host(`dgii.app.willychicrd.com`)' \
-              --label "traefik.http.routers.ecf-dgii.entrypoints=websecure" \
-              --label "traefik.http.routers.ecf-dgii.tls.certresolver=letsencrypt" \
-              --label "traefik.http.services.ecf-dgii.loadbalancer.server.port=8080" \
-              -e ConnectionStrings__DefaultConnection="host=ecf-postgres-db port=5432 dbname=ecf_db user=ecf_user password=Ad@GxicRH@zFHTE\$4Sj" \
-              -e ConnectionStrings__Redis="ecf-redis-db:6379,password=R3d!s_SecUr3_P@ssw0rd2026" \
+              --label 'traefik.http.routers.saas-ecf-dgii.rule=Host(`dgii.app.vesismart.com`)' \
+              --label "traefik.http.routers.saas-ecf-dgii.entrypoints=websecure" \
+              --label "traefik.http.routers.saas-ecf-dgii.tls.certresolver=letsencrypt" \
+              --label "traefik.http.services.saas-ecf-dgii.loadbalancer.server.port=8080" \
+              -e ConnectionStrings__DefaultConnection="host=saas-ecf-postgres-db port=5432 dbname=saas_ecf_db user=ecf_user password=Ad@GxicRH@zFHTE\$4Sj" \
+              -e ConnectionStrings__Redis="saas-ecf-redis-db:6379,password=R3d!s_SecUr3_P@ssw0rd2026" \
               -e REDIS_PASSWORD="R3d!s_SecUr3_P@ssw0rd2026" \
               -e WorkerSecretKey="6QG04PHsCO43eY9AOtGiI6c96nAUAQ9yIoIE6a0Ri2LQSpgxIQNdGvYVXWkvlEpAwR7ITkuD3j4-U0-9w8ipnQ" \
               -e WORKER_SECRET_KEY="6QG04PHsCO43eY9AOtGiI6c96nAUAQ9yIoIE6a0Ri2LQSpgxIQNdGvYVXWkvlEpAwR7ITkuD3j4-U0-9w8ipnQ" \
               -e JwtSettings__Secret="6QG04PHsCO43eY9AOtGiI6c96nAUAQ9yIoIE6a0Ri2LQSpgxIQNdGvYVXWkvlEpAwR7ITkuD3j4-U0-9w8ipnQ" \
               -e JWT_SECRET="6QG04PHsCO43eY9AOtGiI6c96nAUAQ9yIoIE6a0Ri2LQSpgxIQNdGvYVXWkvlEpAwR7ITkuD3j4-U0-9w8ipnQ" \
-              -v /var/www/ecf-dgii-client/certificates:/app/certificates \
+              -v /var/www/saas-ecf-dgii/certificates:/app/certificates \
               --restart unless-stopped \
               "$IMAGE_NAME"
 
