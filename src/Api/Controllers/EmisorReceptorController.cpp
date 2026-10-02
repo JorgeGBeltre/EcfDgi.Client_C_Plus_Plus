@@ -73,6 +73,38 @@ std::string formatIsoUtc(std::chrono::system_clock::time_point tp) {
     return std::string(buf);
 }
 
+std::string escapeXml(const std::string& input) {
+    std::string out;
+    out.reserve(input.size());
+    for (char c : input) {
+        switch (c) {
+            case '&': out.append("&amp;"); break;
+            case '<': out.append("&lt;"); break;
+            case '>': out.append("&gt;"); break;
+            case '"': out.append("&quot;"); break;
+            case '\'': out.append("&apos;"); break;
+            default: out.push_back(c); break;
+        }
+    }
+    return out;
+}
+
+bool isValidRncOrCedula(const std::string& s) {
+    if (s.size() < 9 || s.size() > 11) return false;
+    for (char c : s) {
+        if (!std::isdigit(static_cast<unsigned char>(c))) return false;
+    }
+    return true;
+}
+
+bool isValidEncf(const std::string& s) {
+    if (s.size() != 11 || (s[0] != 'E' && s[0] != 'e')) return false;
+    for (size_t i = 1; i < s.size(); ++i) {
+        if (!std::isdigit(static_cast<unsigned char>(s[i]))) return false;
+    }
+    return true;
+}
+
 }  // namespace
 
 void EmisorReceptorController::recepcioneCF(const HttpRequestPtr& req,
@@ -102,10 +134,28 @@ void EmisorReceptorController::recepcioneCF(const HttpRequestPtr& req,
     xmlXPathFreeContext(xpathCtx);
     xmlFreeDoc(doc);
 
-    if (rncEmisor.empty() || encf.empty()) {
+    if (rncEmisor.empty() || encf.empty() || rncComprador.empty()) {
         auto resp = HttpResponse::newHttpResponse();
         resp->setStatusCode(k400BadRequest);
-        resp->setBody("El XML de e-CF provisto no contiene las etiquetas obligatorias RNCEmisor o eNCF.");
+        resp->setBody("El XML de e-CF provisto no contiene las etiquetas obligatorias RNCEmisor, RNCComprador o eNCF.");
+        callback(resp);
+        return;
+    }
+
+    if (!isValidRncOrCedula(rncEmisor) || !isValidRncOrCedula(rncComprador) || !isValidEncf(encf)) {
+        auto resp = HttpResponse::newHttpResponse();
+        resp->setStatusCode(k400BadRequest);
+        resp->setBody("Valores fiscales con formato inválido en XML (RNCEmisor, RNCComprador o eNCF).");
+        callback(resp);
+        return;
+    }
+
+    auto resolver = AppServices::instance().tenantSignerResolver();
+    auto signer = resolver ? resolver->resolveSigner(rncComprador) : nullptr;
+    if (!signer) {
+        auto resp = HttpResponse::newHttpResponse();
+        resp->setStatusCode(k404NotFound);
+        resp->setBody("El RNCComprador especificado no corresponde a ninguna empresa receptora registrada o activa en esta plataforma.");
         callback(resp);
         return;
     }
@@ -126,9 +176,9 @@ void EmisorReceptorController::recepcioneCF(const HttpRequestPtr& req,
        << "<ARECF>\n"
        << "  <DetalleAcusedeRecibo>\n"
        << "    <Version>1.0</Version>\n"
-       << "    <RNCEmisor>" << rncEmisor << "</RNCEmisor>\n"
-       << "    <RNCComprador>" << rncComprador << "</RNCComprador>\n"
-       << "    <eNCF>" << encf << "</eNCF>\n"
+       << "    <RNCEmisor>" << escapeXml(rncEmisor) << "</RNCEmisor>\n"
+       << "    <RNCComprador>" << escapeXml(rncComprador) << "</RNCComprador>\n"
+       << "    <eNCF>" << escapeXml(encf) << "</eNCF>\n"
        << "    <Estado>0</Estado>\n"
        << "    <FechaHoraAcuseRecibo>" << fechaHora << "</FechaHoraAcuseRecibo>\n"
        << "  </DetalleAcusedeRecibo>\n"
@@ -136,8 +186,6 @@ void EmisorReceptorController::recepcioneCF(const HttpRequestPtr& req,
 
     std::string unsignedArecf = ss.str();
     try {
-        auto resolver = AppServices::instance().tenantSignerResolver();
-        auto signer = resolver ? resolver->resolveSigner(rncComprador) : AppServices::instance().signer();
         std::string signedArecf = signer->signXml(unsignedArecf, rncComprador);
         auto resp = HttpResponse::newHttpResponse();
         resp->setStatusCode(k200OK);
@@ -217,7 +265,22 @@ void EmisorReceptorController::validarSemilla(const HttpRequestPtr& req,
         callback(resp);
         return;
     }
+
+    xmlXPathContextPtr xpathCtx = xmlXPathNewContext(doc);
+    xmlXPathRegisterNs(xpathCtx, reinterpret_cast<const xmlChar*>("ds"), reinterpret_cast<const xmlChar*>("http://www.w3.org/2000/09/xmldsig#"));
+    std::string sigValue = xpathValue(xpathCtx, "//ds:SignatureValue");
+    std::string certValue = xpathValue(xpathCtx, "//ds:X509Certificate");
+    std::string valor = xpathValue(xpathCtx, "//*[local-name()='valor']");
+    xmlXPathFreeContext(xpathCtx);
     xmlFreeDoc(doc);
+
+    if (sigValue.empty() || certValue.empty() || valor.empty()) {
+        auto resp = HttpResponse::newHttpResponse();
+        resp->setStatusCode(k400BadRequest);
+        resp->setBody("La semilla provista no contiene una firma digital válida (ds:SignatureValue) o certificado X.509.");
+        callback(resp);
+        return;
+    }
 
     std::string token = stripHyphens(sys::newUuid());
     auto now = std::chrono::system_clock::now();

@@ -12,7 +12,7 @@ std::string EcfXsdFileNameResolver::resolve(const std::string& xmlContent) {
     if (xmlContent.empty()) return "";
 
     xmlDocPtr doc = xmlReadMemory(xmlContent.c_str(), static_cast<int>(xmlContent.size()),
-                                  "doc.xml", nullptr, XML_PARSE_NOERROR | XML_PARSE_NOWARNING);
+                                  "doc.xml", nullptr, XML_PARSE_NOERROR | XML_PARSE_NOWARNING | XML_PARSE_NONET);
     if (!doc) return "";
 
     xmlNodePtr root = xmlDocGetRootElement(doc);

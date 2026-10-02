@@ -111,7 +111,7 @@ struct XmlDocGuard {
     xmlDocPtr doc;
     explicit XmlDocGuard(const std::string& xml)
         : doc(xmlReadMemory(xml.c_str(), static_cast<int>(xml.size()), "resp.xml",
-                            nullptr, XML_PARSE_NOERROR | XML_PARSE_NOWARNING)) {}
+                            nullptr, XML_PARSE_NOERROR | XML_PARSE_NOWARNING | XML_PARSE_NONET)) {}
     ~XmlDocGuard() { if (doc) xmlFreeDoc(doc); }
 };
 

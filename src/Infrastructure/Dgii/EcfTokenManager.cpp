@@ -170,7 +170,7 @@ void EcfTokenManager::renewToken() {
     if (!trimmed.empty() && trimmed.front() == '<') {
         xmlDocPtr doc = xmlReadMemory(validateResp.text.c_str(),
                                       static_cast<int>(validateResp.text.size()),
-                                      "auth.xml", nullptr, 0);
+                                      "auth.xml", nullptr, XML_PARSE_NONET);
         if (!doc) throw EcfException("Respuesta de autenticación inválida: XML malformado.");
         xmlNode* root = xmlDocGetRootElement(doc);
         token = childText(root, "token");

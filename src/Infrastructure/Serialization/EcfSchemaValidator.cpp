@@ -133,7 +133,7 @@ domain::SchemaValidationResult EcfSchemaValidator::validate(const std::string& x
     }
 
     xmlDocPtr doc = xmlReadMemory(xmlContent.c_str(), static_cast<int>(xmlContent.size()),
-                                  "doc.xml", nullptr, 0);
+                                  "doc.xml", nullptr, XML_PARSE_NONET);
     if (!doc) {
         result.addError("XML document is structurally malformed.");
         return result;

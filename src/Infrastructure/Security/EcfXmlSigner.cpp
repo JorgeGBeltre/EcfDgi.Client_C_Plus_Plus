@@ -287,7 +287,7 @@ std::string EcfXmlSigner::signXml(const std::string& xmlContent,
 
     xmlDocPtr doc = xmlReadMemory(xmlContent.c_str(),
                                   static_cast<int>(xmlContent.size()),
-                                  "doc.xml", nullptr, 0);
+                                  "doc.xml", nullptr, XML_PARSE_NONET);
     if (!doc || !xmlDocGetRootElement(doc)) {
         if (doc) xmlFreeDoc(doc);
         throw EcfSigningException("Documento XML a firmar inválido.");
@@ -358,7 +358,7 @@ std::string EcfXmlSigner::signXml(const std::string& xmlContent,
 std::string EcfXmlSigner::extractSignatureValue(const std::string& signedXml) {
     xmlDocPtr doc = xmlReadMemory(signedXml.c_str(),
                                   static_cast<int>(signedXml.size()),
-                                  "signed.xml", nullptr, 0);
+                                  "signed.xml", nullptr, XML_PARSE_NONET);
     if (!doc) throw EcfException("El XML firmado es inválido.");
 
     xmlXPathContextPtr ctx = xmlXPathNewContext(doc);
