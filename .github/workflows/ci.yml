@@ -194,18 +194,6 @@ jobs:
               if current_key:
                   parsed[current_key] = "\n".join(current_val)
 
-          # Fallbacks de conexión al VPS según Check.md
-          if "HOSTINGER_SERVER" not in parsed:
-              parsed["HOSTINGER_SERVER"] = "2.25.106.54"
-          if "HOSTINGER_USERNAME" not in parsed:
-              parsed["HOSTINGER_USERNAME"] = "root"
-          if "HOSTINGER_SSH_PORT" not in parsed:
-              parsed["HOSTINGER_SSH_PORT"] = "22"
-          if "HOSTINGER_PASSWORD" not in parsed and "HOSTINGER_SSH_KEY" not in parsed:
-              parsed["HOSTINGER_PASSWORD"] = "Bj5S.z6yB-QBW#Fd"
-          if "POSTGRES_DB" not in parsed:
-              parsed["POSTGRES_DB"] = "saas_ecf_db"
-
           def clean(v, default=""):
               if v is None:
                   return default
@@ -216,9 +204,9 @@ jobs:
 
           db_name = clean(parsed.get('POSTGRES_DB'), 'saas_ecf_db')
           db_user = clean(parsed.get('POSTGRES_USER'), 'ecf_user')
-          db_pass = clean(parsed.get('POSTGRES_PASSWORD'), 'Ad@GxicRH@zFHTE$4Sj')
-          redis_pass = clean(parsed.get('REDIS_PASSWORD'), 'R3d!s_SecUr3_P@ssw0rd2026')
-          jwt_secret = clean(parsed.get('JWT_SECRET'), '6QG04PHsCO43eY9AOtGiI6c96nAUAQ9yIoIE6a0Ri2LQSpgxIQNdGvYVXWkvlEpAwR7ITkuD3j4-U0-9w8ipnQ')
+          db_pass = clean(parsed.get('POSTGRES_PASSWORD'))
+          redis_pass = clean(parsed.get('REDIS_PASSWORD'))
+          jwt_secret = clean(parsed.get('JWT_SECRET'))
 
           dgii_env = f"""ConnectionStrings__DefaultConnection=Host=ecf-postgres-db;Port=5432;Database={db_name};Username={db_user};Password={db_pass}
           ConnectionStrings__Redis=saas-ecf-redis-db:6379,password={redis_pass}
@@ -245,11 +233,11 @@ jobs:
       - name: Deploy C++ Engine via SSH
         uses: appleboy/ssh-action@v1.2.0
         with:
-          host: ${{ env.HOSTINGER_SERVER }}
-          username: ${{ env.HOSTINGER_USERNAME }}
-          key: ${{ env.HOSTINGER_SSH_KEY }}
-          password: ${{ env.HOSTINGER_PASSWORD }}
-          port: ${{ env.HOSTINGER_SSH_PORT || 22 }}
+          host: ${{ env.HOSTINGER_SERVER || secrets.HOSTINGER_SERVER }}
+          username: ${{ env.HOSTINGER_USERNAME || secrets.HOSTINGER_USERNAME || 'root' }}
+          key: ${{ env.HOSTINGER_SSH_KEY || secrets.HOSTINGER_SSH_KEY }}
+          password: ${{ env.HOSTINGER_PASSWORD || secrets.HOSTINGER_PASSWORD }}
+          port: ${{ env.HOSTINGER_SSH_PORT || secrets.HOSTINGER_SSH_PORT || 22 }}
           script: |
             set -e
             CONTAINER_NAME="saas-ecf-dgii-api"
