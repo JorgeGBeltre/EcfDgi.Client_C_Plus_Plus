@@ -6,6 +6,7 @@
 #include <sstream>
 #include <libxml/parser.h>
 #include <libxml/xpath.h>
+#include <libxml/xpathInternals.h>
 #include <drogon/MultiPart.h>
 
 #include "Api/AppServices.h"
