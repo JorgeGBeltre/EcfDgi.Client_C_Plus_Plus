@@ -44,25 +44,7 @@ void DbInitializer::initialize(const std::string& connectionString,
         w.commit();
     }
 
-    // 2. Seed the default admin user (admin / AdminPassword123!).
-    //    Uses a fixed id/email/date so the seed is stable across runs;
-    //    the password hash is Argon2id (crypto_pwhash).
-    {
-        pqxx::work w(conn);
-        pqxx::result r =
-            w.exec_params("SELECT 1 FROM users WHERE username = $1", std::string("admin"));
-        if (r.empty()) {
-            const std::string hash = hasher.hashPassword("AdminPassword123!");
-            w.exec_params(
-                "INSERT INTO users (id, username, email, password_hash, role, "
-                "created_at, created_by, is_deleted) "
-                "VALUES ($1, $2, $3, $4, $5, $6, $7, false)",
-                std::string("9f3c7e09-e85d-452f-9877-c93d90fcb32d"), std::string("admin"),
-                std::string("admin@ecfdgii.client.com"), hash, std::string("Admin"),
-                std::string("2026-06-26T00:00:00Z"), std::string("System"));
-        }
-        w.commit();
-    }
+    // 2. Default admin user seed removed for security (CRIT-08). Users are managed via SaaS-Ecf-Back.
 
     // 3. Seed the default "Consumidor Final" customer with a fixed
     //    id/RNC/date so the seed is stable across runs.

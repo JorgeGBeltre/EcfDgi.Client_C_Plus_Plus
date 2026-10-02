@@ -25,30 +25,6 @@ Json::Value errorBody(const shared::Result& r) {
 }
 }  // namespace
 
-void AuthController::registerUser(const HttpRequestPtr& req,
-                                  std::function<void(const HttpResponsePtr&)>&& callback) {
-    auto body = req->getJsonObject();
-    if (!body) { callback(json(Json::Value("Invalid JSON body."), k400BadRequest)); return; }
-
-    app::RegisterUserCommand cmd;
-    cmd.username = (*body).get("username", "").asString();
-    cmd.email = (*body).get("email", "").asString();
-    cmd.password = (*body).get("password", "").asString();
-    cmd.role = (*body).get("role", "").asString();
-
-    app::LoggingScope _log("RegisterUserCommand");
-    app::validateOrThrow(cmd);  // throws ValidationException -> 400
-
-    auto& services = AppServices::instance();
-    auto scope = services.makeScope(mapping::currentUserFrom(req));
-    app::RegisterUserCommandHandler handler(scope.users, services.passwordHasher(),
-                                            services.tokenService(), scope.uow);
-    auto result = handler.handle(cmd);
-
-    if (result.isFailure()) { callback(json(errorBody(result), k400BadRequest)); return; }
-    callback(json(mapping::toJson(*result.value()), k200OK));
-}
-
 void AuthController::login(const HttpRequestPtr& req,
                            std::function<void(const HttpResponsePtr&)>&& callback) {
     auto body = req->getJsonObject();

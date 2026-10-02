@@ -64,33 +64,18 @@ int main() {
         spdlog::warn("Database initialization skipped/failed: {}", ex.what());
     }
 
-    // Start background status reconciliation thread
-    std::thread pollerThread([&services]() {
-        spdlog::info("Started EcfStatusReconciler background poller thread.");
-        int intervalSeconds = services.statusPollingOptions().pollingIntervalMinutes * 60;
-        if (intervalSeconds <= 0) intervalSeconds = 900; // 15 minutes
+    // Start background status reconciliation thread (disabled by default; delegated to C# EcfStatusPollingBackgroundWorker)
+    const char* enablePollerEnv = std::getenv("ENABLE_BACKGROUND_POLLER");
+    bool enablePoller = (enablePollerEnv != nullptr && (std::string(enablePollerEnv) == "true" || std::string(enablePollerEnv) == "1"));
 
-        // Run one pass immediately on startup (same as C# EcfStatusPollingBackgroundService),
-        // then on the timer's cadence thereafter.
-        try {
-            auto scope = services.makeScope(nullptr);
-            ecf::app::EcfStatusReconciler reconciler(
-                scope.docs,
-                scope.uow,
-                services.ecfClient(),
-                services.statusPollingOptions(),
-                services.tenantSignerResolver()
-            );
-            int processed = reconciler.reconcile();
-            if (processed > 0) {
-                spdlog::info("EcfStatusReconciler initial startup pass completed: {} documents processed.", processed);
-            }
-        } catch (const std::exception& ex) {
-            spdlog::warn("EcfStatusReconciler initial startup pass encountered exception: {}", ex.what());
-        }
+    if (enablePoller) {
+        std::thread pollerThread([&services]() {
+            spdlog::info("Started EcfStatusReconciler background poller thread.");
+            int intervalSeconds = services.statusPollingOptions().pollingIntervalMinutes * 60;
+            if (intervalSeconds <= 0) intervalSeconds = 900; // 15 minutes
 
-        while (true) {
-            std::this_thread::sleep_for(std::chrono::seconds(intervalSeconds));
+            // Run one pass immediately on startup (same as C# EcfStatusPollingBackgroundService),
+            // then on the timer's cadence thereafter.
             try {
                 auto scope = services.makeScope(nullptr);
                 ecf::app::EcfStatusReconciler reconciler(
@@ -102,14 +87,36 @@ int main() {
                 );
                 int processed = reconciler.reconcile();
                 if (processed > 0) {
-                    spdlog::info("EcfStatusReconciler pass completed: {} documents processed.", processed);
+                    spdlog::info("EcfStatusReconciler initial startup pass completed: {} documents processed.", processed);
                 }
             } catch (const std::exception& ex) {
-                spdlog::warn("EcfStatusReconciler pass encountered exception: {}", ex.what());
+                spdlog::warn("EcfStatusReconciler initial startup pass encountered exception: {}", ex.what());
             }
-        }
-    });
-    pollerThread.detach();
+
+            while (true) {
+                std::this_thread::sleep_for(std::chrono::seconds(intervalSeconds));
+                try {
+                    auto scope = services.makeScope(nullptr);
+                    ecf::app::EcfStatusReconciler reconciler(
+                        scope.docs,
+                        scope.uow,
+                        services.ecfClient(),
+                        services.statusPollingOptions(),
+                        services.tenantSignerResolver()
+                    );
+                    int processed = reconciler.reconcile();
+                    if (processed > 0) {
+                        spdlog::info("EcfStatusReconciler pass completed: {} documents processed.", processed);
+                    }
+                } catch (const std::exception& ex) {
+                    spdlog::warn("EcfStatusReconciler pass encountered exception: {}", ex.what());
+                }
+            }
+        });
+        pollerThread.detach();
+    } else {
+        spdlog::info("Background status reconciler poller is disabled in C++ engine (delegated to C# background worker).");
+    }
 
     // Global exception handler -> RFC 9457 ProblemDetails: a validation error
     // yields 400 with the field errors; any other error yields 500.

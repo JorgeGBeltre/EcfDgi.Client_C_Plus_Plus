@@ -320,9 +320,8 @@ HttpResponsePtr signAndSend(domain::EcfDocument& doc, AppServices::Scope& scope,
                 doc.state = "Signed";
                 doc.sentToDgiiAt = sys::utcNowIso();
 
-                // Immediate status check with DGII in case it was processed synchronously (DGII takes ~1.5s)
+                // Status check with DGII in case it was processed synchronously
                 try {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
                     auto resultado = client->consultarResultado(*doc.trackId);
                     if (!resultado.estado.empty()) {
                         std::string estado = resultado.estado;
@@ -802,12 +801,18 @@ void DocumentsController::getBySourceTxnId(const HttpRequestPtr& req,
 void DocumentsController::getXmlBySourceTxnId(const HttpRequestPtr& req,
                                               std::function<void(const HttpResponsePtr&)>&& callback,
                                               std::string txnId) {
+    std::string role;
+    if (req->attributes()->find("role")) role = req->attributes()->get<std::string>("role");
+    std::string clientType;
+    if (req->attributes()->find("clientType")) clientType = req->attributes()->get<std::string>("clientType");
+    bool isWorkerOrSuperAdmin = (clientType == "worker" || role == "Worker" || role == "SuperAdmin");
+
     std::string tenantId = "default-tenant";
     if (req->attributes()->find("tenantId")) {
-        std::string t = req->attributes()->get<std::string>("tenantId");
-        if (!t.empty() && t != "default-tenant") tenantId = t;
+        tenantId = req->attributes()->get<std::string>("tenantId");
     }
-    if (tenantId == "default-tenant") {
+    // Only Worker or SuperAdmin can override tenantId via header
+    if (isWorkerOrSuperAdmin) {
         std::string hTenant = req->getHeader("X-Tenant-Id");
         if (!hTenant.empty()) tenantId = hTenant;
     }
@@ -841,12 +846,18 @@ void DocumentsController::getXmlBySourceTxnId(const HttpRequestPtr& req,
 void DocumentsController::getXmlById(const HttpRequestPtr& req,
                                     std::function<void(const HttpResponsePtr&)>&& callback,
                                     std::string id) {
+    std::string role;
+    if (req->attributes()->find("role")) role = req->attributes()->get<std::string>("role");
+    std::string clientType;
+    if (req->attributes()->find("clientType")) clientType = req->attributes()->get<std::string>("clientType");
+    bool isWorkerOrSuperAdmin = (clientType == "worker" || role == "Worker" || role == "SuperAdmin");
+
     std::string tenantId = "default-tenant";
     if (req->attributes()->find("tenantId")) {
-        std::string t = req->attributes()->get<std::string>("tenantId");
-        if (!t.empty() && t != "default-tenant") tenantId = t;
+        tenantId = req->attributes()->get<std::string>("tenantId");
     }
-    if (tenantId == "default-tenant") {
+    // Only Worker or SuperAdmin can override tenantId via header
+    if (isWorkerOrSuperAdmin) {
         std::string hTenant = req->getHeader("X-Tenant-Id");
         if (!hTenant.empty()) tenantId = hTenant;
     }
@@ -856,7 +867,7 @@ void DocumentsController::getXmlById(const HttpRequestPtr& req,
         auto scope = services.makeScope(mapping::currentUserFrom(req));
 
         auto doc = scope.docs->getById(id);
-        if (!doc.has_value() || (tenantId != "default-tenant" && doc->tenantId != tenantId) || !doc->signedXmlContent.has_value() || doc->signedXmlContent->empty()) {
+        if (!doc.has_value() || (!isWorkerOrSuperAdmin && doc->tenantId != tenantId) || !doc->signedXmlContent.has_value() || doc->signedXmlContent->empty()) {
             Json::Value errBody;
             errBody["error"] = "Document '" + id + "' not found or has no XML.";
             callback(json(errBody, k404NotFound));
