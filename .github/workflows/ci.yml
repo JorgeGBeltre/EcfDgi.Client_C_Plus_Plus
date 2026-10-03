@@ -209,6 +209,7 @@ jobs:
           jwt_secret = clean(parsed.get('JWT_SECRET'))
           worker_key_id = clean(parsed.get('WORKER_KEY_ID') or parsed.get('WorkerKeyId'), 'saas-ecf-backend-worker')
           worker_secret = clean(parsed.get('WORKER_SECRET_KEY') or parsed.get('WorkerSecretKey')) or jwt_secret
+          cert_enc_key = clean(parsed.get('CERT_ENCRYPTION_KEY') or parsed.get('Security__CertificateEncryptionKey')) or jwt_secret
 
           dgii_env = f"""ConnectionStrings__DefaultConnection=Host=ecf-postgres-db;Port=5432;Database={db_name};Username={db_user};Password={db_pass}
           ConnectionStrings__Redis=saas-ecf-redis-db:6379,password={redis_pass}
@@ -219,6 +220,7 @@ jobs:
           WORKER_SECRET_KEY={worker_secret}
           JwtSettings__Secret={jwt_secret}
           JWT_SECRET={jwt_secret}
+          CERT_ENCRYPTION_KEY={cert_enc_key}
           """
           dgii_clean = "\n".join([line.strip() for line in dgii_env.strip().splitlines()]) + "\n"
           dgii_b64 = base64.b64encode(dgii_clean.encode('utf-8')).decode('ascii')

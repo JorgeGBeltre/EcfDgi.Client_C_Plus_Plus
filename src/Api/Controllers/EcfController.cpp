@@ -165,6 +165,11 @@ void EcfController::status(const HttpRequestPtr& req,
     q.rncEmisor = req->getParameter("rncEmisor");
     q.eNcf = req->getParameter("eNcf");
 
+    if (q.rncEmisor.empty() || q.eNcf.empty()) {
+        callback(json(err("Los parámetros 'rncEmisor' y 'eNcf' son obligatorios."), k400BadRequest));
+        return;
+    }
+
     try {
         auto& services = AppServices::instance();
         auto scope = services.makeScope(mapping::currentUserFrom(req));

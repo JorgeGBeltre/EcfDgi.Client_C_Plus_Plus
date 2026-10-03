@@ -17,6 +17,7 @@ struct AppConfig {
     std::string redisConnectionString;
     std::string schemaPath = "db/schema.sql";
 
+    std::string certEncryptionKey;
     infra::JwtSettings jwt;
     domain::EcfClientOptions ecfOptions;
     domain::EcfEmisorOptions emisorOptions;

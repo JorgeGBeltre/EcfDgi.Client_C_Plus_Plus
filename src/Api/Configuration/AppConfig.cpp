@@ -108,6 +108,9 @@ AppConfig AppConfig::load(const std::string& path) {
         cfg.jwt.secret = "e_CF_Dominican_Tax_Authority_Secure_JWT_Secret_Token_2026_Key_Length_Minimum_32_Bytes!";
     }
 
+    if (const char* envCert = std::getenv("CERT_ENCRYPTION_KEY")) cfg.certEncryptionKey = envCert;
+    else if (const char* envCert2 = std::getenv("Security__CertificateEncryptionKey")) cfg.certEncryptionKey = envCert2;
+
     if (cfg.jwt.secret.length() < 32) {
         throw std::runtime_error("Seguridad: JwtSettings:Secret debe tener al menos 32 caracteres (256 bits) para firma HMAC-SHA256.");
     }

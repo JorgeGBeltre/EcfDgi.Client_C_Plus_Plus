@@ -530,6 +530,10 @@ void DocumentsController::submit(const HttpRequestPtr& req,
     if (req->attributes()->find("tenantId")) {
         tenantId = req->attributes()->get<std::string>("tenantId");
     }
+    std::string hTenant = req->getHeader("X-Tenant-Id");
+    if (!hTenant.empty()) {
+        tenantId = hTenant;
+    }
     std::string workerKeyId = "default-worker";
     if (req->attributes()->find("workerKeyId")) {
         workerKeyId = req->attributes()->get<std::string>("workerKeyId");

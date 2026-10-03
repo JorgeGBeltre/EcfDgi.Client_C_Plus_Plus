@@ -83,10 +83,21 @@ ResultT<ConsultaEstadoResponse> GetEcfStatusQueryHandler::handle(const GetEcfSta
     try {
         auto localDoc = docRepo_->getByENcf(q.eNcf);
 
-        if (localDoc.has_value() && localDoc->state == "Aceptado") {
+        // BUG-031: Verificar correspondencia de RNC emisor para prevenir acceso o sobreescritura entre tenants
+        if (localDoc.has_value() && !q.rncEmisor.empty()) {
+            std::string cleanQ = q.rncEmisor;
+            cleanQ.erase(std::remove_if(cleanQ.begin(), cleanQ.end(), [](char c){ return c == '-' || c == ' '; }), cleanQ.end());
+            std::string cleanD = localDoc->rncEmisor;
+            cleanD.erase(std::remove_if(cleanD.begin(), cleanD.end(), [](char c){ return c == '-' || c == ' '; }), cleanD.end());
+            if (!cleanQ.empty() && !cleanD.empty() && cleanQ != cleanD) {
+                return ResultT<ConsultaEstadoResponse>::Failure("Acceso denegado: El RNC emisor no coincide con el emisor del comprobante fiscal.");
+            }
+        }
+
+        if (localDoc.has_value() && (localDoc->state == "AcceptedByDgii" || localDoc->state == "Aceptado")) {
             ConsultaEstadoResponse local;
             local.codigo = 0;
-            local.estado = localDoc->state;
+            local.estado = "Aceptado";
             local.rncEmisor = localDoc->rncEmisor;
             local.ncfElectronico = localDoc->eNcf;
             local.montoTotal = localDoc->totalAmount;
@@ -104,10 +115,22 @@ ResultT<ConsultaEstadoResponse> GetEcfStatusQueryHandler::handle(const GetEcfSta
 
         auto live = client_->consultarEstado(q.rncEmisor, q.eNcf, rncComprador, secCode);
 
-        if (localDoc.has_value() && localDoc->state != live.estado) {
-            localDoc->state = live.estado;
-            docRepo_->update(*localDoc);
-            uow_->saveChanges();
+        if (localDoc.has_value()) {
+            // Mapear vocabulario externo de la DGII al vocabulario canónico interno del motor
+            std::string mappedState = live.estado;
+            if (live.estado == "Aceptado" || live.estado == "Accepted") {
+                mappedState = "AcceptedByDgii";
+            } else if (live.estado == "Rechazado" || live.estado == "Rejected") {
+                mappedState = "RejectedByDgii";
+            } else if (live.estado == "En Proceso" || live.estado == "EnProceso" || live.estado == "Processing") {
+                mappedState = "SentToDgii";
+            }
+
+            if (localDoc->state != mappedState) {
+                localDoc->state = mappedState;
+                docRepo_->update(*localDoc);
+                uow_->saveChanges();
+            }
         }
 
         return ResultT<ConsultaEstadoResponse>::Success(std::move(live));

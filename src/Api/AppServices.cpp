@@ -40,8 +40,9 @@ void AppServices::configure(AppConfig config) {
         signer_ = std::make_shared<infra::EcfXmlSigner>();
     }
 
+    std::string certKey = !config_.certEncryptionKey.empty() ? config_.certEncryptionKey : config_.jwt.secret;
     tenantSignerResolver_ = std::make_shared<infra::TenantSignerResolver>(
-        config_.connectionString, signer_, config_.jwt.secret);
+        config_.connectionString, signer_, certKey);
 
     schemaValidator_ = std::make_shared<infra::EcfSchemaValidator>(config_.ecfOptions.xsdDirectoryPath);
 }
