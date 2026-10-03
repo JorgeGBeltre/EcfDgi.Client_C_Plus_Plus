@@ -113,9 +113,9 @@ int main() {
         CHECK(infra::TenantSignerResolver::decryptPasswordIfEncrypted("") == "",
               "decryptPasswordIfEncrypted handles empty string");
 
-        // 3. Corrupted enc:v1: does not crash and returns original
-        CHECK(infra::TenantSignerResolver::decryptPasswordIfEncrypted("enc:v1:corrupt:bad") == "enc:v1:corrupt:bad",
-              "decryptPasswordIfEncrypted safely handles corrupted enc:v1 prefix without throw");
+        // 3. Corrupted enc:v1: does not crash and safely returns empty string
+        CHECK(infra::TenantSignerResolver::decryptPasswordIfEncrypted("enc:v1:corrupt:bad") == "",
+              "decryptPasswordIfEncrypted safely handles corrupted enc:v1 prefix by returning empty string without throwing");
     }
 
     std::printf("\n%s (%d failure(s))\n", failures ? "TESTS FAILED" : "ALL TESTS PASSED",

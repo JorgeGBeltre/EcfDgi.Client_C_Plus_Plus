@@ -29,31 +29,61 @@ std::string extractDigits(const std::string& s) {
 } // namespace
 
 std::string TenantSignerResolver::decryptPasswordIfEncrypted(const std::string& encryptedText, const std::string& masterKey) {
-    if (encryptedText.empty() || encryptedText.rfind("enc:v1:", 0) != 0) {
-        return encryptedText;
+    if (encryptedText.empty()) {
+        return "";
+    }
+
+    bool isV1 = encryptedText.rfind("enc:v1:", 0) == 0;
+    bool isV2 = encryptedText.rfind("enc:v2:", 0) == 0;
+    if (!isV1 && !isV2) {
+        return encryptedText; // Legacy plaintext
     }
 
     try {
-        std::string payload = encryptedText.substr(7); // skip "enc:v1:"
-        size_t pos1 = payload.find(':');
-        if (pos1 == std::string::npos) return encryptedText;
-        size_t pos2 = payload.find(':', pos1 + 1);
-        if (pos2 == std::string::npos) return encryptedText;
-        if (payload.find(':', pos2 + 1) != std::string::npos) return encryptedText;
+        std::string nonceB64, cipherB64, tagB64;
+        if (isV1) {
+            std::string payload = encryptedText.substr(7); // skip "enc:v1:"
+            size_t pos1 = payload.find(':');
+            if (pos1 == std::string::npos) return "";
+            size_t pos2 = payload.find(':', pos1 + 1);
+            if (pos2 == std::string::npos) return "";
+            if (payload.find(':', pos2 + 1) != std::string::npos) return "";
 
-        std::string nonceB64 = payload.substr(0, pos1);
-        std::string cipherB64 = payload.substr(pos1 + 1, pos2 - pos1 - 1);
-        std::string tagB64 = payload.substr(pos2 + 1);
+            nonceB64 = payload.substr(0, pos1);
+            cipherB64 = payload.substr(pos1 + 1, pos2 - pos1 - 1);
+            tagB64 = payload.substr(pos2 + 1);
+        } else {
+            // enc:v2:{keyId}:{nonce}:{cipher}:{tag}
+            std::string payload = encryptedText.substr(7); // skip "enc:v2:"
+            size_t pos1 = payload.find(':'); // after keyId
+            if (pos1 == std::string::npos) return "";
+            size_t pos2 = payload.find(':', pos1 + 1); // after nonce
+            if (pos2 == std::string::npos) return "";
+            size_t pos3 = payload.find(':', pos2 + 1); // after cipher
+            if (pos3 == std::string::npos) return "";
+            if (payload.find(':', pos3 + 1) != std::string::npos) return "";
+
+            nonceB64 = payload.substr(pos1 + 1, pos2 - pos1 - 1);
+            cipherB64 = payload.substr(pos2 + 1, pos3 - pos2 - 1);
+            tagB64 = payload.substr(pos3 + 1);
+        }
 
         std::string nonce = drogon::utils::base64Decode(nonceB64);
         std::string cipherBytes = drogon::utils::base64Decode(cipherB64);
         std::string tag = drogon::utils::base64Decode(tagB64);
 
         if (nonce.size() != 12 || tag.size() != 16) {
-            return encryptedText;
+            spdlog::warn("[TenantSignerResolver] Formato de payload cifrado inválido: nonce={}B, tag={}B", nonce.size(), tag.size());
+            return "";
         }
 
         std::string rawKey = !masterKey.empty() ? masterKey : "";
+        if (rawKey.empty()) {
+            const char* envCert = std::getenv("CERT_ENCRYPTION_KEY");
+            if (envCert && std::strlen(envCert) > 0) {
+                rawKey = envCert;
+            }
+        }
         if (rawKey.empty()) {
             const char* envJwt = std::getenv("JWT_SECRET");
             if (envJwt && std::strlen(envJwt) > 0) {
@@ -61,14 +91,15 @@ std::string TenantSignerResolver::decryptPasswordIfEncrypted(const std::string& 
             }
         }
         if (rawKey.empty()) {
-            rawKey = "saas_ecf_default_production_master_encryption_key_32b";
+            spdlog::error("[TenantSignerResolver] Clave de cifrado no configurada (CERT_ENCRYPTION_KEY o JWT_SECRET requeridos) (SEC-025)");
+            return "";
         }
 
         unsigned char key[SHA256_DIGEST_LENGTH];
         SHA256(reinterpret_cast<const unsigned char*>(rawKey.data()), rawKey.size(), key);
 
         EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
-        if (!ctx) return encryptedText;
+        if (!ctx) return "";
 
         std::string plainText;
         plainText.resize(cipherBytes.size());
@@ -98,12 +129,17 @@ std::string TenantSignerResolver::decryptPasswordIfEncrypted(const std::string& 
 
         if (ok) {
             return plainText;
+        } else {
+            spdlog::warn("[TenantSignerResolver] Error de autenticación/integridad al descifrar contraseña (tag inválido o clave incorrecta) (SEC-026)");
+            return "";
         }
+    } catch (const std::exception& ex) {
+        spdlog::warn("[TenantSignerResolver] Excepción descifrando contraseña: {}", ex.what());
+        return "";
     } catch (...) {
-        // Fall back to returning encryptedText directly
+        spdlog::warn("[TenantSignerResolver] Excepción desconocida descifrando contraseña");
+        return "";
     }
-
-    return encryptedText;
 }
 
 TenantSignerResolver::TenantSignerResolver(std::string connectionString,
