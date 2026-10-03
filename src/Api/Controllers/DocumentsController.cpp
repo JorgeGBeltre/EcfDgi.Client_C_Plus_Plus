@@ -161,10 +161,13 @@ std::shared_ptr<domain::IEcfXmlSigner> resolveSigner(
 
     // Default certificate directory search
     std::string defaultCertDir = "/app/certificates";
+    const char* envCertPwd = std::getenv("ECF_CERTIFICATE_PASSWORD");
+    std::string defaultCertPwd = envCertPwd ? envCertPwd : "";
+
     std::string tenantCertFile = defaultCertDir + "/" + tenantId + ".pfx";
     std::ifstream tf(tenantCertFile);
     if (tf.good()) {
-        std::string pwd = (certDto.has_value() && certDto->password.has_value()) ? *certDto->password : "EcfTestPassword123!";
+        std::string pwd = (certDto.has_value() && certDto->password.has_value()) ? *certDto->password : defaultCertPwd;
         try {
             return std::make_shared<infra::EcfXmlSigner>(tenantCertFile, pwd);
         } catch (...) {}
@@ -173,7 +176,7 @@ std::shared_ptr<domain::IEcfXmlSigner> resolveSigner(
     std::string rncCertFile = defaultCertDir + "/" + rncEmisor + ".pfx";
     std::ifstream rf(rncCertFile);
     if (rf.good()) {
-        std::string pwd = (certDto.has_value() && certDto->password.has_value()) ? *certDto->password : "EcfTestPassword123!";
+        std::string pwd = (certDto.has_value() && certDto->password.has_value()) ? *certDto->password : defaultCertPwd;
         try {
             return std::make_shared<infra::EcfXmlSigner>(rncCertFile, pwd);
         } catch (...) {}

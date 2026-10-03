@@ -14,10 +14,13 @@ namespace ecf::infra {
 class TenantSignerResolver : public domain::ITenantSignerResolver {
 public:
     TenantSignerResolver(std::string connectionString,
-                         std::shared_ptr<domain::IEcfXmlSigner> defaultSigner);
+                         std::shared_ptr<domain::IEcfXmlSigner> defaultSigner,
+                         std::string masterKey = "");
     ~TenantSignerResolver() override = default;
 
     std::shared_ptr<domain::IEcfXmlSigner> resolveSigner(const std::string& rnc) override;
+
+    static std::string decryptPasswordIfEncrypted(const std::string& encryptedText, const std::string& masterKey = "");
 
 private:
     struct CachedSigner {
@@ -27,6 +30,7 @@ private:
 
     std::string connectionString_;
     std::shared_ptr<domain::IEcfXmlSigner> defaultSigner_;
+    std::string masterKey_;
     std::mutex mutex_;
     std::unordered_map<std::string, CachedSigner> cache_;
 };

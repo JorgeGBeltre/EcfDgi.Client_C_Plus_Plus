@@ -97,6 +97,21 @@ int main() {
               "TenantSignerResolver falls back to default signer when RNC not found");
     }
 
+    // TenantSignerResolver decryptPasswordIfEncrypted tests
+    {
+        // 1. Plaintext returns unchanged
+        CHECK(infra::TenantSignerResolver::decryptPasswordIfEncrypted("PlainTextPass123") == "PlainTextPass123",
+              "decryptPasswordIfEncrypted preserves plaintext passwords");
+
+        // 2. Empty string returns empty
+        CHECK(infra::TenantSignerResolver::decryptPasswordIfEncrypted("") == "",
+              "decryptPasswordIfEncrypted handles empty string");
+
+        // 3. Corrupted enc:v1: does not crash and returns original
+        CHECK(infra::TenantSignerResolver::decryptPasswordIfEncrypted("enc:v1:corrupt:bad") == "enc:v1:corrupt:bad",
+              "decryptPasswordIfEncrypted safely handles corrupted enc:v1 prefix without throw");
+    }
+
     std::printf("\n%s (%d failure(s))\n", failures ? "TESTS FAILED" : "ALL TESTS PASSED",
                 failures);
     return failures == 0 ? 0 : 1;
