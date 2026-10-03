@@ -94,4 +94,38 @@ std::string EcfSequenceManager::getNextEncf(const std::string& tenantId, const s
     return seq.getCurrentEncfFormatted();
 }
 
+void EcfSequenceManager::releaseUnusedEncf(const std::string& tenantId, const std::string& tipoComprobante, const std::string& encf) {
+    if (encf.size() <= 3) return;
+    try {
+        std::string numPart = encf.substr(3);
+        long long seqNum = std::stoll(numPart);
+
+        pqxx::connection conn(connectionString_);
+        pqxx::work w(conn);
+
+        std::string altTenantId;
+        auto pos = tenantId.find(':');
+        if (pos != std::string::npos) {
+            altTenantId = tenantId.substr(0, pos);
+        }
+
+        if (!altTenantId.empty()) {
+            w.exec_params(
+                "UPDATE ecf_sequences SET secuencia_actual = secuencia_actual - 1, updated_at = NOW() "
+                "WHERE (tenant_id = $1 OR tenant_id = $2) AND tipo_comprobante = $3 AND secuencia_actual = $4",
+                tenantId, altTenantId, tipoComprobante, seqNum
+            );
+        } else {
+            w.exec_params(
+                "UPDATE ecf_sequences SET secuencia_actual = secuencia_actual - 1, updated_at = NOW() "
+                "WHERE tenant_id = $1 AND tipo_comprobante = $2 AND secuencia_actual = $3",
+                tenantId, tipoComprobante, seqNum
+            );
+        }
+        w.commit();
+    } catch (...) {
+        // Best-effort release to avoid leaving unused sequence gaps
+    }
+}
+
 } // namespace ecf::infra

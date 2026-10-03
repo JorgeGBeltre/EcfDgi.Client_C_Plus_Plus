@@ -488,8 +488,13 @@ HttpResponsePtr handleExistingDocument(domain::EcfDocument& existingDoc,
         existingDoc.state = "AwaitingTransmission";
 
         applyCanonicalContent(existingDoc, dto, editSequence, emisorRnc, emisorRazonSocial);
-        scope.docs->update(existingDoc);
-        scope.uow->saveChanges();
+        try {
+            scope.docs->update(existingDoc);
+            scope.uow->saveChanges();
+        } catch (...) {
+            services.sequenceManager()->releaseUnusedEncf(sequenceScope, dto.tipoComprobante.empty() ? "E31" : dto.tipoComprobante, newEncf);
+            throw;
+        }
         return signAndSend(existingDoc, scope, services, effectiveSigner, effectiveClient, &dto, isDefaultFallback, emisorRazonSocial);
     }
 
@@ -719,6 +724,7 @@ void DocumentsController::submit(const HttpRequestPtr& req,
                         return;
                     }
                 }
+                services.sequenceManager()->releaseUnusedEncf(sequenceScope, dto.tipoComprobante, eNcf);
                 cb(json(err(std::string("Database insert error: ") + ex.what()), k500InternalServerError));
                 return;
             }

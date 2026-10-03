@@ -11,6 +11,7 @@ public:
         : connectionString_(std::move(connectionString)) {}
 
     std::string getNextEncf(const std::string& tenantId, const std::string& tipoComprobante) override;
+    void releaseUnusedEncf(const std::string& tenantId, const std::string& tipoComprobante, const std::string& encf) override;
 
 private:
     std::string connectionString_;

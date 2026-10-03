@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS ecf_documents (
     id                 uuid PRIMARY KEY,
     e_ncf              varchar(20)   NOT NULL,
     rnc_emisor         varchar(20)   NOT NULL,
-    rnc_comprador      varchar(20),
+    rnc_comprador      varchar(100),
     tenant_id          varchar(100)  NOT NULL DEFAULT 'default-tenant',
     source_txn_id      varchar(100)  NOT NULL DEFAULT '',
     edit_sequence      varchar(50)   NOT NULL DEFAULT '',
@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS ecf_documents (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_ecf_documents_rnc_emisor_encf
-    ON ecf_documents (rnc_emisor, e_ncf);
+    ON ecf_documents (rnc_emisor, ambiente, e_ncf);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_ecf_documents_tenant_source_txn
     ON ecf_documents (tenant_id, source_txn_id, ambiente);
 CREATE INDEX IF NOT EXISTS ix_ecf_documents_track_id ON ecf_documents (track_id);
