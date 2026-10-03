@@ -149,6 +149,12 @@ Json::Value toJson(const app::CanonicalDocumentDto& d) {
         line["quantity"] = l.quantity;
         line["unitPrice"] = l.unitPrice;
         line["amount"] = l.amount;
+        line["discountAmount"] = l.discountAmount;
+        if (l.indicadorFacturacion.has_value()) line["indicadorFacturacion"] = *l.indicadorFacturacion;
+        if (l.taxRate.has_value()) line["taxRate"] = *l.taxRate;
+        if (l.taxAmount.has_value()) line["taxAmount"] = *l.taxAmount;
+        if (l.montoItbisRetenido.has_value()) line["montoItbisRetenido"] = *l.montoItbisRetenido;
+        if (l.montoIsrRetenido.has_value()) line["montoIsrRetenido"] = *l.montoIsrRetenido;
         lines.append(line);
     }
     j["lines"] = lines;

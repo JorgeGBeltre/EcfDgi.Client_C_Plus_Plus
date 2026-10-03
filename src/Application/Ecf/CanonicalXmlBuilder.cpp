@@ -234,16 +234,32 @@ std::vector<ProcessedLineItem> normalizeCanonicalLines(const std::vector<Canonic
         pi.discountAmount = safeDiscount;
         pi.montoItem = safeAmount;
 
-        // Line-level IndicadorFacturacion
-        if (line.indicadorFacturacion.has_value() && *line.indicadorFacturacion >= 0 && *line.indicadorFacturacion <= 4) {
+        // Line-level IndicadorFacturacion (BUG-049)
+        if (line.indicadorFacturacion.has_value() && *line.indicadorFacturacion >= 1 && *line.indicadorFacturacion <= 4) {
             pi.indicadorFacturacion = *line.indicadorFacturacion;
         } else if (line.taxRate.has_value()) {
             if (*line.taxRate == 18) pi.indicadorFacturacion = 1;
             else if (*line.taxRate == 16) pi.indicadorFacturacion = 2;
-            else if (*line.taxRate == 0) pi.indicadorFacturacion = 3;
+            else if (*line.taxRate == 0) {
+                if (dto.totals.montoExento.value_or(0.0) > 0.0 && dto.totals.montoGravadoTotal.value_or(0.0) == 0.0) {
+                    pi.indicadorFacturacion = 4;
+                } else {
+                    pi.indicadorFacturacion = 3;
+                }
+            }
             else pi.indicadorFacturacion = 1;
-        } else if (line.taxAmount.has_value() && *line.taxAmount > 0.0) {
-            pi.indicadorFacturacion = 1;
+        } else if (line.taxAmount.has_value()) {
+            if (*line.taxAmount > 0.0) {
+                pi.indicadorFacturacion = 1;
+            } else {
+                if (dto.totals.montoExento.value_or(0.0) > 0.0) {
+                    pi.indicadorFacturacion = 4;
+                } else {
+                    pi.indicadorFacturacion = 3;
+                }
+            }
+        } else if (dto.totals.montoExento.value_or(0.0) > 0.0 && dto.totals.montoGravadoTotal.value_or(0.0) == 0.0) {
+            pi.indicadorFacturacion = 4;
         } else {
             pi.indicadorFacturacion = 1;
         }
@@ -765,7 +781,55 @@ std::string buildRfceXml(const domain::EcfDocument& doc,
        << "    </Comprador>\n"
        << "    <Totales>\n";
 
-    if (doc.itbisAmount > 0.0) {
+    if (dto && (!dto->totals.taxBuckets.empty() || dto->totals.montoGravadoTotal.has_value() || dto->totals.montoExento.has_value())) {
+        std::optional<double> slotBase[4];
+        std::optional<double> slotTax[4];
+        double gravadoTotal = dto->totals.montoGravadoTotal.value_or(0.0);
+        double exentoTotal = dto->totals.montoExento.value_or(0.0);
+        double itbisTotal = dto->totals.montoItbis;
+
+        if (!dto->totals.taxBuckets.empty()) {
+            for (const auto& bucket : dto->totals.taxBuckets) {
+                auto it = DgiiItbisSlots.find(bucket.rate);
+                if (it != DgiiItbisSlots.end()) {
+                    int slot = it->second;
+                    slotBase[slot] = slotBase[slot].value_or(0.0) + bucket.base;
+                    slotTax[slot] = slotTax[slot].value_or(0.0) + bucket.tax;
+                }
+            }
+            if (gravadoTotal == 0.0) {
+                gravadoTotal = slotBase[1].value_or(0.0) + slotBase[2].value_or(0.0) + slotBase[3].value_or(0.0);
+            }
+        } else if (doc.itbisAmount > 0.0) {
+            double base = std::max(0.0, doc.totalAmount - doc.itbisAmount);
+            slotBase[1] = base;
+            slotTax[1] = doc.itbisAmount;
+            gravadoTotal = base;
+        } else {
+            exentoTotal = doc.totalAmount;
+        }
+
+        if (gravadoTotal > 0.0) {
+            ss << "      <MontoGravadoTotal>" << formatMoney2(gravadoTotal) << "</MontoGravadoTotal>\n";
+        }
+        for (int slot = 1; slot <= 3; ++slot) {
+            if (slotBase[slot].has_value() && *slotBase[slot] > 0.0) {
+                ss << "      <MontoGravadoI" << slot << ">" << formatMoney2(*slotBase[slot]) << "</MontoGravadoI" << slot << ">\n";
+            }
+        }
+        if (exentoTotal > 0.0) {
+            ss << "      <MontoExento>" << formatMoney2(exentoTotal) << "</MontoExento>\n";
+        }
+        if (itbisTotal > 0.0 || (slotTax[1].value_or(0.0) + slotTax[2].value_or(0.0) + slotTax[3].value_or(0.0)) > 0.0) {
+            double totalItbisVal = itbisTotal > 0.0 ? itbisTotal : (slotTax[1].value_or(0.0) + slotTax[2].value_or(0.0) + slotTax[3].value_or(0.0));
+            ss << "      <TotalITBIS>" << formatMoney2(totalItbisVal) << "</TotalITBIS>\n";
+            for (int slot = 1; slot <= 3; ++slot) {
+                if (slotTax[slot].has_value() && *slotTax[slot] > 0.0) {
+                    ss << "      <TotalITBIS" << slot << ">" << formatMoney2(*slotTax[slot]) << "</TotalITBIS" << slot << ">\n";
+                }
+            }
+        }
+    } else if (doc.itbisAmount > 0.0) {
         double montoGravado = std::max(0.0, doc.totalAmount - doc.itbisAmount);
         ss << "      <MontoGravadoTotal>" << formatMoney2(montoGravado) << "</MontoGravadoTotal>\n"
            << "      <MontoGravadoI1>" << formatMoney2(montoGravado) << "</MontoGravadoI1>\n"

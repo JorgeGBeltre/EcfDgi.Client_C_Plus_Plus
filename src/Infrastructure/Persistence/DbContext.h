@@ -28,6 +28,9 @@ public:
     // Queue a mutation to run inside the next saveChanges() transaction.
     void stage(std::function<void(pqxx::work&)> op) { pending_.push_back(std::move(op)); }
 
+    // Discard any staged pending operations (cleans the unit of work).
+    void discardChanges() noexcept { pending_.clear(); }
+
     // Executes and commits all staged mutations; returns the affected count.
     int saveChanges();
 

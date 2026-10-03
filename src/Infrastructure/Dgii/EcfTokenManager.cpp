@@ -79,20 +79,50 @@ std::string EcfTokenManager::getToken() {
     using namespace std::chrono;
     std::string cacheKey = "ecf:tokens:" + rncEmisor_ + ":" + std::to_string(static_cast<int>(config_.ambiente));
 
+    // RAII guard for distributed lock
+    struct DistLockGuard {
+        std::shared_ptr<domain::ICacheService> cache;
+        std::string key;
+        std::string val;
+        bool acquired = false;
+
+        ~DistLockGuard() {
+            release();
+        }
+
+        void release() {
+            if (acquired && cache) {
+                try {
+                    cache->releaseLock(key, val);
+                } catch (...) {}
+                acquired = false;
+            }
+        }
+    };
+
     // 1. Check Distributed Cache
     if (cacheService_) {
         if (auto tokenOpt = cacheService_->get(cacheKey)) {
-            if (!tokenOpt->empty()) return *tokenOpt;
+            if (!tokenOpt->empty()) {
+                std::lock_guard<std::mutex> tlock(tokenMutex_);
+                cachedToken_ = *tokenOpt;
+                tokenExpiry_ = system_clock::now() + std::chrono::minutes(50);
+                return *tokenOpt;
+            }
         }
     }
 
-    // 2. Check Memory Cache
-    auto valid = [&] {
-        return !cachedToken_.empty() &&
-               duration_cast<minutes>(tokenExpiry_ - system_clock::now()).count() > 5;
+    // 2. Check Memory Cache (synchronized under tokenMutex_)
+    auto validMemoryToken = [&]() -> std::optional<std::string> {
+        std::lock_guard<std::mutex> tlock(tokenMutex_);
+        if (!cachedToken_.empty() &&
+            duration_cast<minutes>(tokenExpiry_ - system_clock::now()).count() > 5) {
+            return cachedToken_;
+        }
+        return std::nullopt;
     };
 
-    if (valid()) return cachedToken_;
+    if (auto t = validMemoryToken()) return *t;
 
     // 3. Acquire Distributed / Local Lock
     std::string lockKey = "ecf:tokens:lock:" + rncEmisor_ + ":" + std::to_string(static_cast<int>(config_.ambiente));
@@ -110,49 +140,72 @@ std::string EcfTokenManager::getToken() {
             if (auto tokenOpt = cacheService_->get(cacheKey)) {
                 if (!tokenOpt->empty()) {
                     cacheService_->releaseLock(lockKey, lockValue);
+                    std::lock_guard<std::mutex> tlock(tokenMutex_);
+                    cachedToken_ = *tokenOpt;
+                    tokenExpiry_ = system_clock::now() + std::chrono::minutes(50);
                     return *tokenOpt;
                 }
             }
         } else {
             // Another instance holds the lock and is renewing the token.
-            // Wait and poll the cache instead of renewing simultaneously (DEP-003).
-            for (int attempt = 0; attempt < 10; ++attempt) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            // Wait and poll the cache instead of renewing simultaneously (BUG-052).
+            for (int attempt = 0; attempt < 12; ++attempt) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(250));
                 if (auto tokenOpt = cacheService_->get(cacheKey)) {
                     if (!tokenOpt->empty()) {
+                        std::lock_guard<std::mutex> tlock(tokenMutex_);
+                        cachedToken_ = *tokenOpt;
+                        tokenExpiry_ = system_clock::now() + std::chrono::minutes(50);
                         return *tokenOpt;
                     }
                 }
             }
             // If still not available after 3s, attempt to acquire lock one more time
             acquiredDistLock = cacheService_->acquireLock(lockKey, lockValue, std::chrono::seconds(30));
+            if (!acquiredDistLock) {
+                if (auto tokenOpt = cacheService_->get(cacheKey)) {
+                    if (!tokenOpt->empty()) {
+                        std::lock_guard<std::mutex> tlock(tokenMutex_);
+                        cachedToken_ = *tokenOpt;
+                        tokenExpiry_ = system_clock::now() + std::chrono::minutes(50);
+                        return *tokenOpt;
+                    }
+                }
+                throw EcfException("No se pudo obtener el token DGII: bloqueo distribuido retenido por otra instancia.");
+            }
         }
     }
 
+    DistLockGuard distGuard{cacheService_, lockKey, lockValue, acquiredDistLock};
+
     std::lock_guard<std::mutex> lock(renewMutex_);
-    if (valid()) {
-        if (acquiredDistLock && cacheService_) cacheService_->releaseLock(lockKey, lockValue);
-        return cachedToken_;
+    if (auto t = validMemoryToken()) {
+        distGuard.release();
+        return *t;
     }
 
     renewToken();
 
-    if (cacheService_ && !cachedToken_.empty()) {
-        auto ttl = duration_cast<seconds>(tokenExpiry_ - system_clock::now());
-        if (ttl.count() > 0) {
-            cacheService_->set(cacheKey, cachedToken_, ttl);
-        }
-        if (acquiredDistLock) {
-            cacheService_->releaseLock(lockKey, lockValue);
-        }
+    std::string tokenResult;
+    std::chrono::seconds ttlSeconds{0};
+    {
+        std::lock_guard<std::mutex> tlock(tokenMutex_);
+        tokenResult = cachedToken_;
+        ttlSeconds = duration_cast<seconds>(tokenExpiry_ - system_clock::now());
     }
 
-    return cachedToken_;
+    if (cacheService_ && !tokenResult.empty() && ttlSeconds.count() > 0) {
+        cacheService_->set(cacheKey, tokenResult, ttlSeconds);
+    }
+    distGuard.release();
+
+    return tokenResult;
 }
 
 void EcfTokenManager::invalidate() {
     {
         std::lock_guard<std::mutex> lock(renewMutex_);
+        std::lock_guard<std::mutex> tlock(tokenMutex_);
         cachedToken_.clear();
         tokenExpiry_ = {};
     }
@@ -221,9 +274,12 @@ void EcfTokenManager::renewToken() {
         throw EcfException(
             "Respuesta de autenticación inválida de DGII: falta token o fecha de expiración.");
 
-    cachedToken_ = token;
-    if (!parseExpiry(expira, tokenExpiry_)) {
-        tokenExpiry_ = std::chrono::system_clock::now() + std::chrono::hours(1);
+    {
+        std::lock_guard<std::mutex> tlock(tokenMutex_);
+        cachedToken_ = token;
+        if (!parseExpiry(expira, tokenExpiry_)) {
+            tokenExpiry_ = std::chrono::system_clock::now() + std::chrono::hours(1);
+        }
     }
 }
 

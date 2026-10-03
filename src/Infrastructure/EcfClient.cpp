@@ -87,14 +87,20 @@ RfceRecepcionResponse EcfClient::sendRfce(Rfce& rfce) {
     const std::string fileName =
         serializer_.getFileName(rfce.encabezado.emisor.rncEmisor, rfce.encabezado.idDoc.eNcf);
 
+    // BUG-051: Sign RFCE XML before schema validation and transmission
+    std::string signedXml = xml;
+    if (signer_) {
+        signedXml = signer_->signXml(xml, rfce.encabezado.emisor.rncEmisor);
+    }
+
     if (options_.validateSchemasLocal && schemaValidator_ != nullptr) {
-        auto result = schemaValidator_->validate(xml);
+        auto result = schemaValidator_->validate(signedXml);
         if (!result.isValid) {
             throw EcfValidationException(result.errors);
         }
     }
 
-    auto response = transport_->sendRfce(xml, fileName);
+    auto response = transport_->sendRfce(signedXml, fileName);
 
     if (options_.autoRetryOnReuseableSequence && response.estado == "Rechazado" &&
         !response.secuenciaUtilizada) {

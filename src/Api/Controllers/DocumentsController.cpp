@@ -804,16 +804,21 @@ void DocumentsController::submit(const HttpRequestPtr& req,
             } catch (const std::exception& ex) {
                 std::string what = ex.what();
                 if (what.find(TenantSourceTxnUniqueConstraint) != std::string::npos || what.find("23505") != std::string::npos) {
-                    // Concurrent insert race condition: winner exists
-                    auto winner = scope.docs->getBySourceTxnId(effectiveTenantId, dto.sourceReference.txnId, ambStr);
+                    // Release the sequence allocated by the loser of the race
+                    services.sequenceManager()->releaseUnusedEncf(sequenceScope, dto.tipoComprobante, eNcf);
+
+                    // BUG-048: Create a fresh recovery scope to avoid operation pollution from the failed insert
+                    auto recoveryScope = services.makeScope(mapping::currentUserFrom(req));
+                    auto winner = recoveryScope.docs->getBySourceTxnId(effectiveTenantId, dto.sourceReference.txnId, ambStr);
                     if (winner.has_value()) {
-                        auto res = handleExistingDocument(*winner, dto, editSequence, scope, services, effectiveRnc, effectiveRazonSocial, effectiveSigner, effectiveClient, effectiveTenantId, ambiente, isDefaultFallback);
+                        auto res = handleExistingDocument(*winner, dto, editSequence, recoveryScope, services, effectiveRnc, effectiveRazonSocial, effectiveSigner, effectiveClient, effectiveTenantId, ambiente, isDefaultFallback);
                         cb(res);
                         return;
                     }
+                } else {
+                    services.sequenceManager()->releaseUnusedEncf(sequenceScope, dto.tipoComprobante, eNcf);
                 }
-                services.sequenceManager()->releaseUnusedEncf(sequenceScope, dto.tipoComprobante, eNcf);
-                cb(json(err(std::string("Database insert error: ") + ex.what()), k500InternalServerError));
+                cb(json(err("Error interno al procesar el documento en base de datos."), k500InternalServerError));
                 return;
             }
 

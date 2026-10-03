@@ -143,7 +143,8 @@ int main() {
             return;
         }
         spdlog::error("Unhandled exception: {}", e.what());
-        cb(problemDetails(k500InternalServerError, "Internal Server Error", e.what(),
+        cb(problemDetails(k500InternalServerError, "Internal Server Error",
+                          "Ha ocurrido un error interno en el motor fiscal.",
                           "https://tools.ietf.org/html/rfc9457#section-6.6"));
     });
 

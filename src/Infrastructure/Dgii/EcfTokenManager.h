@@ -33,6 +33,7 @@ private:
     std::string cachedToken_;
     std::chrono::system_clock::time_point tokenExpiry_{};
     std::mutex renewMutex_;
+    mutable std::mutex tokenMutex_;
 };
 
 }  // namespace ecf::infra

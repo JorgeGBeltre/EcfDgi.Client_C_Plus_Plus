@@ -16,12 +16,17 @@ std::string DbContext::auditUsername() const {
 
 int DbContext::saveChanges() {
     if (pending_.empty()) return 0;
-    pqxx::work w(conn_);
-    for (auto& op : pending_) op(w);
-    w.commit();
-    int count = static_cast<int>(pending_.size());
-    pending_.clear();
-    return count;
+    try {
+        pqxx::work w(conn_);
+        for (auto& op : pending_) op(w);
+        w.commit();
+        int count = static_cast<int>(pending_.size());
+        pending_.clear();
+        return count;
+    } catch (...) {
+        pending_.clear();
+        throw;
+    }
 }
 
 }  // namespace ecf::infra
