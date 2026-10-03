@@ -35,6 +35,7 @@ private:
     int port_{6379};
     std::string password_;
     bool useRedis_{false};
+    std::chrono::system_clock::time_point lastPingAttempt_{};
 
     // Memory fallback store
     std::mutex memMutex_;
@@ -42,6 +43,7 @@ private:
     std::unordered_map<std::string, std::pair<std::string, std::chrono::system_clock::time_point>> locks_;
 
     void parseConnectionString(const std::string& connectionString);
+    bool checkRedisAvailability();
     std::string sendRedisCommand(const std::string& cmd);
 };
 

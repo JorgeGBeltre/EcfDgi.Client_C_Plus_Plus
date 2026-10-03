@@ -66,6 +66,7 @@ void RedisCacheService::parseConnectionString(const std::string& connectionStrin
     }
 
     // Test socket connection
+    lastPingAttempt_ = std::chrono::system_clock::now();
     std::string pingResp = sendRedisCommand("*1\r\n$4\r\nPING\r\n");
     if (!pingResp.empty() && pingResp.find("+PONG") != std::string::npos) {
         useRedis_ = true;
@@ -76,15 +77,42 @@ void RedisCacheService::parseConnectionString(const std::string& connectionStrin
     }
 }
 
+bool RedisCacheService::checkRedisAvailability() {
+    if (host_.empty()) return false;
+    if (useRedis_) return true;
+
+    auto now = std::chrono::system_clock::now();
+    if (std::chrono::duration_cast<std::chrono::seconds>(now - lastPingAttempt_).count() < 30) {
+        return false;
+    }
+    lastPingAttempt_ = now;
+
+    std::string pingResp = sendRedisCommand("*1\r\n$4\r\nPING\r\n");
+    if (!pingResp.empty() && pingResp.find("+PONG") != std::string::npos) {
+        useRedis_ = true;
+        spdlog::info("Reconnected to Redis server at {}:{}", host_, port_);
+        return true;
+    }
+    return false;
+}
+
 std::string RedisCacheService::sendRedisCommand(const std::string& cmd) {
     if (host_.empty()) return "";
 
 #if defined(_WIN32)
     SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (sock == INVALID_SOCKET) return "";
+    DWORD timeout = 2500; // 2.5s socket timeout
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
+    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout));
 #else
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) return "";
+    struct timeval tv;
+    tv.tv_sec = 2;
+    tv.tv_usec = 500000;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof(tv));
+    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (const char*)&tv, sizeof(tv));
 #endif
 
     struct addrinfo hints{}, *res = nullptr;
@@ -116,17 +144,51 @@ std::string RedisCacheService::sendRedisCommand(const std::string& cmd) {
         std::string authCmd = "*2\r\n$4\r\nAUTH\r\n$" + std::to_string(password_.length()) + "\r\n" + password_ + "\r\n";
         send(sock, authCmd.c_str(), (int)authCmd.length(), 0);
         char authBuf[256];
-        recv(sock, authBuf, sizeof(authBuf) - 1, 0);
+        int authBytes = recv(sock, authBuf, sizeof(authBuf) - 1, 0);
+        if (authBytes <= 0 || (authBytes > 0 && authBuf[0] == '-')) {
+            spdlog::error("Redis AUTH failed for host {}:{}", host_, port_);
+#if defined(_WIN32)
+            closesocket(sock);
+#else
+            close(sock);
+#endif
+            return "";
+        }
     }
 
-    send(sock, cmd.c_str(), (int)cmd.length(), 0);
+    if (send(sock, cmd.c_str(), (int)cmd.length(), 0) <= 0) {
+#if defined(_WIN32)
+        closesocket(sock);
+#else
+        close(sock);
+#endif
+        return "";
+    }
 
-    char buffer[4096];
-    int bytesRead = recv(sock, buffer, sizeof(buffer) - 1, 0);
     std::string response;
-    if (bytesRead > 0) {
-        buffer[bytesRead] = '\0';
-        response.assign(buffer, bytesRead);
+    char buffer[4096];
+    int bytesRead = 0;
+    while ((bytesRead = recv(sock, buffer, sizeof(buffer), 0)) > 0) {
+        response.append(buffer, bytesRead);
+
+        if (!response.empty()) {
+            if (response[0] == '+' || response[0] == '-' || response[0] == ':') {
+                if (response.size() >= 2 && response.substr(response.size() - 2) == "\r\n") break;
+            } else if (response[0] == '$') {
+                if (response.rfind("$-1\r\n", 0) == 0) break;
+                size_t crlf = response.find("\r\n");
+                if (crlf != std::string::npos) {
+                    try {
+                        long long len = std::stoll(response.substr(1, crlf - 1));
+                        if (len >= 0 && response.size() >= crlf + 2 + len + 2) break;
+                    } catch (...) {
+                        break;
+                    }
+                }
+            } else {
+                break;
+            }
+        }
     }
 
 #if defined(_WIN32)
@@ -139,7 +201,7 @@ std::string RedisCacheService::sendRedisCommand(const std::string& cmd) {
 }
 
 std::optional<std::string> RedisCacheService::get(const std::string& key) {
-    if (useRedis_) {
+    if (checkRedisAvailability()) {
         std::ostringstream ss;
         ss << "*2\r\n$3\r\nGET\r\n$" << key.length() << "\r\n" << key << "\r\n";
         std::string resp = sendRedisCommand(ss.str());
@@ -148,10 +210,12 @@ std::optional<std::string> RedisCacheService::get(const std::string& key) {
             if (resp.find("$-1") == 0) return std::nullopt; // Key not found
             size_t crlf = resp.find("\r\n");
             if (crlf != std::string::npos) {
-                int len = std::stoi(resp.substr(1, crlf - 1));
-                if (len > 0 && crlf + 2 + len <= resp.length()) {
-                    return resp.substr(crlf + 2, len);
-                }
+                try {
+                    int len = std::stoi(resp.substr(1, crlf - 1));
+                    if (len > 0 && crlf + 2 + len <= resp.length()) {
+                        return resp.substr(crlf + 2, len);
+                    }
+                } catch (...) { }
             }
         }
     }
@@ -171,7 +235,7 @@ std::optional<std::string> RedisCacheService::get(const std::string& key) {
 
 bool RedisCacheService::set(const std::string& key, const std::string& value,
                             std::optional<std::chrono::seconds> expiration) {
-    if (useRedis_) {
+    if (checkRedisAvailability()) {
         std::ostringstream ss;
         if (expiration.has_value()) {
             ss << "*4\r\n$3\r\nSET\r\n$" << key.length() << "\r\n" << key
@@ -202,7 +266,7 @@ bool RedisCacheService::set(const std::string& key, const std::string& value,
 }
 
 bool RedisCacheService::remove(const std::string& key) {
-    if (useRedis_) {
+    if (checkRedisAvailability()) {
         std::ostringstream ss;
         ss << "*2\r\n$3\r\nDEL\r\n$" << key.length() << "\r\n" << key << "\r\n";
         sendRedisCommand(ss.str());
@@ -215,7 +279,7 @@ bool RedisCacheService::remove(const std::string& key) {
 
 bool RedisCacheService::acquireLock(const std::string& lockKey, const std::string& lockValue,
                                     std::chrono::seconds expiration) {
-    if (useRedis_) {
+    if (checkRedisAvailability()) {
         std::ostringstream ss;
         ss << "*6\r\n$3\r\nSET\r\n$" << lockKey.length() << "\r\n" << lockKey
            << "\r\n$" << lockValue.length() << "\r\n" << lockValue
@@ -223,9 +287,13 @@ bool RedisCacheService::acquireLock(const std::string& lockKey, const std::strin
            << "\r\n" << expiration.count() << "\r\n";
         std::string resp = sendRedisCommand(ss.str());
         if (resp.find("+OK") != std::string::npos) return true;
+        
+        // If Redis responded with null bulk string ("$-1\r\n") or error, the lock is held by another instance.
+        // Returning false ensures true distributed exclusion and prevents split-brain.
+        return false;
     }
 
-    // In-memory fallback lock
+    // In-memory fallback lock only when Redis is not available
     std::lock_guard<std::mutex> lock(memMutex_);
     auto now = std::chrono::system_clock::now();
     auto it = locks_.find(lockKey);
@@ -239,12 +307,15 @@ bool RedisCacheService::acquireLock(const std::string& lockKey, const std::strin
 }
 
 bool RedisCacheService::releaseLock(const std::string& lockKey, const std::string& lockValue) {
-    if (useRedis_) {
-        // Safe lock release script or DEL key if value matches
-        std::optional<std::string> currentVal = get(lockKey);
-        if (currentVal && *currentVal == lockValue) {
-            return remove(lockKey);
-        }
+    if (checkRedisAvailability()) {
+        // Atomic compare-and-delete via EVAL Lua script
+        const std::string script = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end";
+        std::ostringstream ss;
+        ss << "*5\r\n$4\r\nEVAL\r\n$" << script.length() << "\r\n" << script
+           << "\r\n$1\r\n1\r\n$" << lockKey.length() << "\r\n" << lockKey
+           << "\r\n$" << lockValue.length() << "\r\n" << lockValue << "\r\n";
+        std::string resp = sendRedisCommand(ss.str());
+        return resp.find(":1") != std::string::npos;
     }
 
     std::lock_guard<std::mutex> lock(memMutex_);

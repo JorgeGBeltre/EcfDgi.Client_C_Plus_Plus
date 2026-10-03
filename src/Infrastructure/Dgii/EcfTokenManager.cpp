@@ -6,6 +6,9 @@
 
 #include <cstdio>
 #include <ctime>
+#include <random>
+#include <sstream>
+#include <thread>
 #include <nlohmann/json.hpp>
 
 #include "Domain/Exceptions/EcfException.h"
@@ -93,7 +96,12 @@ std::string EcfTokenManager::getToken() {
 
     // 3. Acquire Distributed / Local Lock
     std::string lockKey = "ecf:tokens:lock:" + rncEmisor_ + ":" + std::to_string(static_cast<int>(config_.ambiente));
-    std::string lockValue = "lock_" + std::to_string(duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
+    static std::random_device rd;
+    static std::mt19937_64 gen(rd());
+    static std::uniform_int_distribution<uint64_t> dis;
+    std::ostringstream ssLock;
+    ssLock << "lock_" << duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count() << "_" << std::hex << dis(gen);
+    std::string lockValue = ssLock.str();
     bool acquiredDistLock = false;
 
     if (cacheService_) {
@@ -105,6 +113,19 @@ std::string EcfTokenManager::getToken() {
                     return *tokenOpt;
                 }
             }
+        } else {
+            // Another instance holds the lock and is renewing the token.
+            // Wait and poll the cache instead of renewing simultaneously (DEP-003).
+            for (int attempt = 0; attempt < 10; ++attempt) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(300));
+                if (auto tokenOpt = cacheService_->get(cacheKey)) {
+                    if (!tokenOpt->empty()) {
+                        return *tokenOpt;
+                    }
+                }
+            }
+            // If still not available after 3s, attempt to acquire lock one more time
+            acquiredDistLock = cacheService_->acquireLock(lockKey, lockValue, std::chrono::seconds(30));
         }
     }
 
