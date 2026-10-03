@@ -41,14 +41,14 @@ std::optional<EcfDocument> EcfDocumentRepository::getBySourceTxnId(
         pqxx::result r = n.exec_params(
             std::string("SELECT ") + ecfDocumentColumns() +
             " FROM ecf_documents WHERE tenant_id = $1 AND (source_txn_id = $2 OR track_id = $2 OR e_ncf = $2) "
-            " AND (ambiente IS NULL OR ambiente = $3) AND is_deleted = false LIMIT 1",
+            " AND (ambiente IS NULL OR ambiente = $3) AND is_deleted = false ORDER BY created_at DESC LIMIT 1",
             tenantId, sourceTxnId, *ambiente);
         if (r.empty()) return std::nullopt;
         return mapEcfDocument(r[0]);
     } else {
         pqxx::result r = n.exec_params(
             std::string("SELECT ") + ecfDocumentColumns() +
-            " FROM ecf_documents WHERE tenant_id = $1 AND (source_txn_id = $2 OR track_id = $2 OR e_ncf = $2) AND is_deleted = false LIMIT 1",
+            " FROM ecf_documents WHERE tenant_id = $1 AND (source_txn_id = $2 OR track_id = $2 OR e_ncf = $2) AND is_deleted = false ORDER BY created_at DESC LIMIT 1",
             tenantId, sourceTxnId);
         if (r.empty()) return std::nullopt;
         return mapEcfDocument(r[0]);
