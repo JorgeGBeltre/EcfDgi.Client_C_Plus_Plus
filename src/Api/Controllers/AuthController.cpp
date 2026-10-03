@@ -27,36 +27,14 @@ Json::Value errorBody(const shared::Result& r) {
 
 void AuthController::login(const HttpRequestPtr& req,
                            std::function<void(const HttpResponsePtr&)>&& callback) {
-    auto body = req->getJsonObject();
-    if (!body || !body->isObject()) {
-        callback(json(Json::Value("Invalid JSON body."), k400BadRequest));
-        return;
-    }
-
-    if (body->isMember("username") && !(*body)["username"].isString()) {
-        callback(json(Json::Value("Field 'username' must be a string."), k400BadRequest));
-        return;
-    }
-    if (body->isMember("password") && !(*body)["password"].isString()) {
-        callback(json(Json::Value("Field 'password' must be a string."), k400BadRequest));
-        return;
-    }
-
-    app::LoginUserCommand cmd;
-    cmd.username = body->isMember("username") ? (*body)["username"].asString() : "";
-    cmd.password = body->isMember("password") ? (*body)["password"].asString() : "";
-
-    app::LoggingScope _log("LoginUserCommand");
-    app::validateOrThrow(cmd);
-
-    auto& services = AppServices::instance();
-    auto scope = services.makeScope(mapping::currentUserFrom(req));
-    app::LoginUserCommandHandler handler(scope.users, services.passwordHasher(),
-                                         services.tokenService());
-    auto result = handler.handle(cmd);
-
-    if (result.isFailure()) { callback(json(errorBody(result), k401Unauthorized)); return; }
-    callback(json(mapping::toJson(*result.value()), k200OK));
+    (void)req;
+    // ARC-021: Interactive end-user authentication is disabled on the C++ fiscal engine.
+    // End users authenticate exclusively through SaaS-Ecf-Back (/api/v1/auth/login).
+    // The C++ engine operates as an internal subsystem using worker tokens and mutual HMAC.
+    Json::Value resp;
+    resp["error"] = "Interactive end-user login is disabled on the C++ fiscal engine. Please authenticate through SaaS-Ecf-Back at /api/v1/auth/login.";
+    resp["status"] = 403;
+    callback(json(resp, k403Forbidden));
 }
 
 }  // namespace ecf::api
