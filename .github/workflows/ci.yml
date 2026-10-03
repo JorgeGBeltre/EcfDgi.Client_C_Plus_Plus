@@ -207,12 +207,16 @@ jobs:
           db_pass = clean(parsed.get('POSTGRES_PASSWORD'))
           redis_pass = clean(parsed.get('REDIS_PASSWORD'))
           jwt_secret = clean(parsed.get('JWT_SECRET'))
+          worker_key_id = clean(parsed.get('WORKER_KEY_ID') or parsed.get('WorkerKeyId'), 'saas-ecf-backend-worker')
+          worker_secret = clean(parsed.get('WORKER_SECRET_KEY') or parsed.get('WorkerSecretKey')) or jwt_secret
 
           dgii_env = f"""ConnectionStrings__DefaultConnection=Host=ecf-postgres-db;Port=5432;Database={db_name};Username={db_user};Password={db_pass}
           ConnectionStrings__Redis=saas-ecf-redis-db:6379,password={redis_pass}
           REDIS_PASSWORD={redis_pass}
-          WorkerSecretKey={jwt_secret}
-          WORKER_SECRET_KEY={jwt_secret}
+          WorkerKeyId={worker_key_id}
+          WORKER_KEY_ID={worker_key_id}
+          WorkerSecretKey={worker_secret}
+          WORKER_SECRET_KEY={worker_secret}
           JwtSettings__Secret={jwt_secret}
           JWT_SECRET={jwt_secret}
           """
@@ -267,7 +271,7 @@ jobs:
               docker run -d \
                 --name saas-ecf-redis-db \
                 --network netbird \
-                -p 6380:6379 \
+                -p 127.0.0.1:6380:6379 \
                 --restart unless-stopped \
                 redis:7-alpine redis-server --requirepass "${REDIS_PASSWORD:-R3d!s_SecUr3_P@ssw0rd2026}"
             fi
@@ -300,9 +304,9 @@ jobs:
             docker run -d \
               --name "$CONTAINER_NAME" \
               --network netbird \
-              -p 8086:8080 \
+              -p 127.0.0.1:8086:8080 \
               --label "traefik.enable=true" \
-              --label 'traefik.http.routers.saas-ecf-dgii.rule=Host(`dgii.app.vesismart.com`)' \
+              --label 'traefik.http.routers.saas-ecf-dgii.rule=Host(`dgii.app.vesismart.com`) && PathPrefix(`/fe/`)' \
               --label "traefik.http.routers.saas-ecf-dgii.entrypoints=websecure" \
               --label "traefik.http.routers.saas-ecf-dgii.tls.certresolver=letsencrypt" \
               --label "traefik.http.services.saas-ecf-dgii.loadbalancer.server.port=8080" \
