@@ -18,8 +18,7 @@ static std::string resolveXsdDir() {
     std::vector<std::string> candidates = {
         "Documentación Técnica (XSD)",
         "../Documentación Técnica (XSD)",
-        "../../Documentación Técnica (XSD)",
-        "C:/Users/Jorge/Pictures/DGII/EcfDgi.Client_C_Plus_Plus/Documentación Técnica (XSD)"
+        "../../Documentación Técnica (XSD)"
     };
     for (const auto& c : candidates) {
         auto p = std::filesystem::path(std::u8string_view(

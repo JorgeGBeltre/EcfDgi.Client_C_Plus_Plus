@@ -4,6 +4,7 @@
 #include <ctime>
 #include <iomanip>
 #include <sstream>
+#include <unordered_set>
 #include <libxml/parser.h>
 #include <libxml/xpath.h>
 #include <libxml/xpathInternals.h>
@@ -91,7 +92,7 @@ std::string escapeXml(const std::string& input) {
 }
 
 bool isValidRncOrCedula(const std::string& s) {
-    if (s.size() < 9 || s.size() > 11) return false;
+    if (s.size() != 9 && s.size() != 11) return false;
     for (char c : s) {
         if (!std::isdigit(static_cast<unsigned char>(c))) return false;
     }
@@ -99,8 +100,19 @@ bool isValidRncOrCedula(const std::string& s) {
 }
 
 bool isValidEncf(const std::string& s) {
-    if (s.size() != 11 || (s[0] != 'E' && s[0] != 'e')) return false;
-    for (size_t i = 1; i < s.size(); ++i) {
+    // Un e-NCF de la DGII consta exactamente de 13 caracteres:
+    // 'E' + 2 dígitos de tipo e-CF (31, 32, 33, 34, 41, 43, 44, 45, 46, 47) + 10 dígitos de secuencia
+    if (s.size() != 13 || s[0] != 'E') return false;
+
+    std::string type = s.substr(1, 2);
+    static const std::unordered_set<std::string> validTypes = {
+        "31", "32", "33", "34", "41", "43", "44", "45", "46", "47"
+    };
+    if (validTypes.find(type) == validTypes.end()) {
+        return false;
+    }
+
+    for (size_t i = 3; i < s.size(); ++i) {
         if (!std::isdigit(static_cast<unsigned char>(s[i]))) return false;
     }
     return true;
