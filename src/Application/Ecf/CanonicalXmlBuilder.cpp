@@ -211,12 +211,19 @@ std::vector<ProcessedLineItem> normalizeCanonicalLines(const std::vector<Canonic
             continue;
         }
 
-        double safeQty = rawQty > 0.0 ? rawQty : 1.0;
-        double safePrice = std::max(0.0, rawPrice);
-        double safeDiscount = line.discountAmount.has_value() ? std::max(0.0, *line.discountAmount) : 0.0;
-        double safeAmount = std::max(0.0, rawAmount);
+        double safeQty = rawQty > 0.0 ? std::round(rawQty * 100.0) / 100.0 : 1.0;
+        double safePrice = std::max(0.0, std::round(rawPrice * 10000.0) / 10000.0);
+        double safeDiscount = line.discountAmount.has_value() ? std::max(0.0, std::round(*line.discountAmount * 100.0) / 100.0) : 0.0;
+        double safeAmount = std::max(0.0, std::round(rawAmount * 100.0) / 100.0);
+
+        double calculatedAmount = std::max(0.0, std::round(((safePrice * safeQty) - safeDiscount) * 100.0) / 100.0);
+
         if (safeAmount == 0.0 && safePrice > 0.0) {
-            safeAmount = std::max(0.0, (safePrice * safeQty) - safeDiscount);
+            safeAmount = calculatedAmount;
+        } else if (std::abs(safeAmount - calculatedAmount) <= 0.05) {
+            // Reconciliar discrepancia de redondeo para garantizar la regla estricta DGII:
+            // CantidadItem * PrecioUnitarioItem - DescuentoMonto = MontoItem
+            safeAmount = calculatedAmount;
         }
 
         std::string shortName = rawName.length() > 80 ? rawName.substr(0, 80) : rawName;
