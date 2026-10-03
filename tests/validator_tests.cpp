@@ -95,6 +95,12 @@ int main() {
 
         CHECK(resolver.resolveSigner("101672919") == defaultSigner,
               "TenantSignerResolver falls back to default signer when RNC not found");
+
+        CHECK(resolver.resolveTenantSignerOnly("") == nullptr,
+              "TenantSignerResolver resolveTenantSignerOnly returns nullptr on empty RNC");
+
+        CHECK(resolver.resolveTenantSignerOnly("101672919") == nullptr,
+              "TenantSignerResolver resolveTenantSignerOnly returns nullptr when RNC not found");
     }
 
     // TenantSignerResolver decryptPasswordIfEncrypted tests

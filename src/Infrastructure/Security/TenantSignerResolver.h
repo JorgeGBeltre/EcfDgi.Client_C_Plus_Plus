@@ -19,6 +19,7 @@ public:
     ~TenantSignerResolver() override = default;
 
     std::shared_ptr<domain::IEcfXmlSigner> resolveSigner(const std::string& rnc) override;
+    std::shared_ptr<domain::IEcfXmlSigner> resolveTenantSignerOnly(const std::string& rnc) override;
 
     static std::string decryptPasswordIfEncrypted(const std::string& encryptedText, const std::string& masterKey = "");
 

@@ -152,11 +152,11 @@ void EmisorReceptorController::recepcioneCF(const HttpRequestPtr& req,
     }
 
     auto resolver = AppServices::instance().tenantSignerResolver();
-    auto signer = resolver ? resolver->resolveSigner(rncComprador) : nullptr;
-    if (!signer) {
+    auto signer = resolver ? resolver->resolveTenantSignerOnly(rncComprador) : nullptr;
+    if (!signer || signer == AppServices::instance().signer() || signer->usesFallbackCertificate()) {
         auto resp = HttpResponse::newHttpResponse();
         resp->setStatusCode(k404NotFound);
-        resp->setBody("El RNCComprador especificado no corresponde a ninguna empresa receptora registrada o activa en esta plataforma.");
+        resp->setBody("El RNCComprador especificado no corresponde a ninguna empresa receptora registrada o con certificado activo en esta plataforma.");
         callback(resp);
         return;
     }

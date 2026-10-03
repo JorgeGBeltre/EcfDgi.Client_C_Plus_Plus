@@ -24,6 +24,12 @@ public:
     /// <param name="rnc">RNC o Cédula del contribuyente (con o sin guiones).</param>
     /// <returns>Instancia de IEcfXmlSigner lista para firmar.</returns>
     virtual std::shared_ptr<IEcfXmlSigner> resolveSigner(const std::string& rnc) = 0;
+
+    /// <summary>
+    /// Obtiene la instancia de IEcfXmlSigner del contribuyente únicamente si posee
+    /// un certificado digital activo registrado en BD o disco. Retorna nullptr si no existe.
+    /// </summary>
+    virtual std::shared_ptr<IEcfXmlSigner> resolveTenantSignerOnly(const std::string& rnc) = 0;
 };
 
 }  // namespace ecf::domain

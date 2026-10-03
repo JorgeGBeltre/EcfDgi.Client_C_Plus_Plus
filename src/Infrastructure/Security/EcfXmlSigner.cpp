@@ -246,11 +246,10 @@ bool EcfXmlSigner::validateCertificateSn(const std::string& rncOCedula) const {
     std::string sRnc = toLower(rncOCedula);
     std::string sClean = toLower(cleanSn);
 
-    // 2. Direct match on Subject or Issuer (exact or clean digits)
+    // 2. Direct match on Subject (exact or clean digits)
+    // NOTE: We NEVER match against Issuer because Issuer is the CA, not the taxpayer.
     if (sSub.find(sRnc) != std::string::npos ||
-        (!sClean.empty() && sSub.find(sClean) != std::string::npos) ||
-        sIss.find(sRnc) != std::string::npos ||
-        (!sClean.empty() && sIss.find(sClean) != std::string::npos)) {
+        (!sClean.empty() && sSub.find(sClean) != std::string::npos)) {
         return true;
     }
 
@@ -272,7 +271,7 @@ bool EcfXmlSigner::validateCertificateSn(const std::string& rncOCedula) const {
                                           subjectUpper.find("NATURAL PERSON") != std::string::npos ||
                                           subjectUpper.find("IDCDO-") != std::string::npos);
 
-    if (isDominicanCa && isTaxProcedureOrNaturalPerson) {
+    if (isDominicanCa && isTaxProcedureOrNaturalPerson && !sClean.empty() && sSub.find(sClean) != std::string::npos) {
         return true;
     }
 

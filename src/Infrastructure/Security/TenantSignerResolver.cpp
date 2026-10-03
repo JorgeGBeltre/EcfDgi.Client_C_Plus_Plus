@@ -113,14 +113,14 @@ TenantSignerResolver::TenantSignerResolver(std::string connectionString,
       defaultSigner_(std::move(defaultSigner)),
       masterKey_(std::move(masterKey)) {}
 
-std::shared_ptr<domain::IEcfXmlSigner> TenantSignerResolver::resolveSigner(const std::string& rnc) {
+std::shared_ptr<domain::IEcfXmlSigner> TenantSignerResolver::resolveTenantSignerOnly(const std::string& rnc) {
     if (rnc.empty()) {
-        return defaultSigner_;
+        return nullptr;
     }
 
     std::string cleanRnc = extractDigits(rnc);
     if (cleanRnc.empty()) {
-        return defaultSigner_;
+        return nullptr;
     }
 
     auto now = std::chrono::system_clock::now();
@@ -201,8 +201,12 @@ std::shared_ptr<domain::IEcfXmlSigner> TenantSignerResolver::resolveSigner(const
         }
     }
 
-    // 4. Safe fallback
-    return defaultSigner_;
+    return nullptr;
+}
+
+std::shared_ptr<domain::IEcfXmlSigner> TenantSignerResolver::resolveSigner(const std::string& rnc) {
+    auto signer = resolveTenantSignerOnly(rnc);
+    return signer ? signer : defaultSigner_;
 }
 
 }  // namespace ecf::infra
