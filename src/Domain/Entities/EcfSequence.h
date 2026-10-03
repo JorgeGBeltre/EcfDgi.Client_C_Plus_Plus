@@ -19,10 +19,14 @@ struct EcfSequence {
     bool isActive = true;
     std::string updatedAt; // ISO-8601 UTC
 
-    std::string getNextEncfFormatted() const {
+    std::string getCurrentEncfFormatted() const {
         std::ostringstream ss;
-        ss << prefix << std::setw(10) << std::setfill('0') << (secuenciaActual + 1);
+        ss << prefix << std::setw(10) << std::setfill('0') << secuenciaActual;
         return ss.str();
+    }
+
+    std::string getNextEncfFormatted() const {
+        return getCurrentEncfFormatted();
     }
 };
 

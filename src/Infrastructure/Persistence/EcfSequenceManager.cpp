@@ -59,47 +59,22 @@ std::string EcfSequenceManager::getNextEncf(const std::string& tenantId, const s
     }
 
     if (seq.id == 0 && r.empty()) {
-        // Provision a new sequence
-        std::string prefix = tipoComprobante;
-        if (!prefix.empty() && prefix[0] != 'E' && prefix[0] != 'e') {
-            prefix = "E" + prefix;
-        }
-        seq.tenantId = tenantId;
-        seq.tipoComprobante = tipoComprobante;
-        seq.prefix = prefix;
-        seq.rangoDesde = 1;
-        seq.rangoHasta = 9999999999LL;
-        seq.secuenciaActual = 0;
-        seq.isActive = true;
-        seq.updatedAt = sys::utcNowIso();
-
-        w.exec_params(
-            "INSERT INTO ecf_sequences (tenant_id, tipo_comprobante, prefix, rango_desde, rango_hasta, "
-            "secuencia_actual, fecha_vencimiento, is_active, updated_at) "
-            "VALUES ($1, $2, $3, $4, $5, $6, NULL, $7, $8)",
-            seq.tenantId, seq.tipoComprobante, seq.prefix, seq.rangoDesde, seq.rangoHasta,
-            seq.secuenciaActual, seq.isActive, seq.updatedAt
-        );
-
-        // Fetch back to get the database-assigned SERIAL id
-        pqxx::result r_new = w.exec_params(
-            "SELECT " + std::string(ecfSequenceColumns()) + 
-            " FROM ecf_sequences WHERE tenant_id = $1 AND tipo_comprobante = $2 AND is_active = true",
-            tenantId, tipoComprobante
-        );
-        if (r_new.empty()) {
-            throw std::runtime_error("Fallo al crear la secuencia eNCF para: " + tipoComprobante);
-        }
-        seq = mapEcfSequence(r_new[0]);
+        throw std::runtime_error("No existe un rango de secuencias eNCF activo y autorizado para el tipo '" + 
+                                 tipoComprobante + "' en el ámbito '" + tenantId + "'. Debe registrar el rango otorgado por la DGII antes de emitir.");
     } else if (seq.id == 0 && !r.empty()) {
         seq = mapEcfSequence(r[0]);
     }
 
-    if (seq.fechaVencimiento && !seq.fechaVencimiento->empty()) {
-        // Check date expiration
-        if (seq.fechaVencimiento.value() < sys::utcNowIso()) {
-            throw std::runtime_error("El rango autorizado eNCF para el tipo '" + tipoComprobante + "' ha expirado.");
-        }
+    if (!seq.fechaVencimiento.has_value() || seq.fechaVencimiento->empty()) {
+        throw std::runtime_error("La secuencia eNCF para el tipo '" + tipoComprobante + "' no tiene fecha de vencimiento configurada.");
+    }
+
+    if (seq.fechaVencimiento.value() < sys::utcNowIso()) {
+        throw std::runtime_error("El rango autorizado eNCF para el tipo '" + tipoComprobante + "' ha expirado el " + seq.fechaVencimiento.value() + ".");
+    }
+
+    if (seq.secuenciaActual < seq.rangoDesde - 1) {
+        seq.secuenciaActual = seq.rangoDesde - 1;
     }
 
     if (seq.secuenciaActual >= seq.rangoHasta) {
@@ -116,7 +91,7 @@ std::string EcfSequenceManager::getNextEncf(const std::string& tenantId, const s
 
     w.commit();
 
-    return seq.getNextEncfFormatted();
+    return seq.getCurrentEncfFormatted();
 }
 
 } // namespace ecf::infra
