@@ -2,6 +2,7 @@
 // Produces an enveloped XMLDSig signature (Exclusive C14N + RSA-SHA256) using
 // xmlsec1/OpenSSL, and validates that the certificate subject carries the RNC.
 
+#include <chrono>
 #include <string>
 #include <vector>
 
@@ -27,11 +28,16 @@ public:
     // True when a dummy/fallback self-signed certificate was generated.
     bool usesFallbackCertificate() const override { return usesFallbackCertificate_; }
 
+    std::chrono::system_clock::time_point notBefore() const { return notBefore_; }
+    std::chrono::system_clock::time_point notAfter() const { return notAfter_; }
+
 private:
     std::vector<unsigned char> pfxBytes_;  // raw PKCS#12, fed to xmlsec
     std::string pfxPassword_;
     std::string certSubject_;              // parsed once via OpenSSL
     std::string certIssuer_;               // parsed once via OpenSSL
+    std::chrono::system_clock::time_point notBefore_{};
+    std::chrono::system_clock::time_point notAfter_{};
     bool isSelfSigned_ = false;
     bool usesFallbackCertificate_ = false;
 };

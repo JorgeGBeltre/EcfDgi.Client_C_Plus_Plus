@@ -10,6 +10,7 @@
 #include <openssl/evp.h>
 #include <openssl/bio.h>
 #include <openssl/err.h>
+#include <openssl/asn1.h>
 
 #include <xmlsec/crypto.h>
 #include <xmlsec/templates.h>
@@ -19,12 +20,15 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
+#include <ctime>
 #include <cstring>
 #include <fstream>
 #include <mutex>
 #include <stdexcept>
 
 #include "Domain/Exceptions/EcfException.h"
+#include "Infrastructure/Security/CertificateExpiryPolicy.h"
 
 namespace ecf::infra {
 
@@ -56,10 +60,29 @@ std::vector<unsigned char> readFile(const std::string& path) {
                                       std::istreambuf_iterator<char>());
 }
 
+static std::chrono::system_clock::time_point asn1ToTimePoint(const ASN1_TIME* aTime) {
+    if (!aTime) return std::chrono::system_clock::time_point::min();
+    struct tm tmTime = {};
+    if (!ASN1_TIME_to_tm(aTime, &tmTime)) {
+        return std::chrono::system_clock::time_point::min();
+    }
+#if defined(_WIN32)
+    time_t t = _mkgmtime(&tmTime);
+#else
+    time_t t = timegm(&tmTime);
+#endif
+    if (t == static_cast<time_t>(-1)) {
+        return std::chrono::system_clock::time_point::min();
+    }
+    return std::chrono::system_clock::from_time_t(t);
+}
+
 struct CertInfo {
     std::string subject;
     std::string issuer;
     bool isSelfSigned = false;
+    std::chrono::system_clock::time_point notBefore = std::chrono::system_clock::time_point::min();
+    std::chrono::system_clock::time_point notAfter = std::chrono::system_clock::time_point::min();
 };
 
 CertInfo parseCertInfo(const std::vector<unsigned char>& pfx,
@@ -82,6 +105,8 @@ CertInfo parseCertInfo(const std::vector<unsigned char>& pfx,
         }
         info.isSelfSigned = (X509_NAME_cmp(X509_get_subject_name(cert),
                                            X509_get_issuer_name(cert)) == 0);
+        info.notBefore = asn1ToTimePoint(X509_get0_notBefore(cert));
+        info.notAfter = asn1ToTimePoint(X509_get0_notAfter(cert));
     }
     if (pkey) EVP_PKEY_free(pkey);
     if (cert) X509_free(cert);
@@ -191,6 +216,8 @@ EcfXmlSigner::EcfXmlSigner(const std::vector<unsigned char>& pfxBytes, const std
     certSubject_ = info.subject;
     certIssuer_ = info.issuer;
     isSelfSigned_ = info.isSelfSigned;
+    notBefore_ = info.notBefore;
+    notAfter_ = info.notAfter;
 }
 
 EcfXmlSigner::EcfXmlSigner(const std::string& pfxPath, const std::string& pfxPassword)
@@ -219,6 +246,8 @@ EcfXmlSigner::EcfXmlSigner(const std::string& pfxPath, const std::string& pfxPas
     certSubject_ = info.subject;
     certIssuer_ = info.issuer;
     isSelfSigned_ = info.isSelfSigned;
+    notBefore_ = info.notBefore;
+    notAfter_ = info.notAfter;
 }
 
 bool EcfXmlSigner::validateCertificateSn(const std::string& rncOCedula) const {
@@ -280,6 +309,16 @@ bool EcfXmlSigner::validateCertificateSn(const std::string& rncOCedula) const {
 
 std::string EcfXmlSigner::signXml(const std::string& xmlContent,
                                   const std::string& rncEmisor) {
+    auto now = std::chrono::system_clock::now();
+    if (notBefore_ != std::chrono::system_clock::time_point::min() && now < notBefore_) {
+        throw EcfSigningException(
+            "El certificado digital aún no es válido (fecha de inicio de vigencia futura).");
+    }
+    if (notAfter_ != std::chrono::system_clock::time_point::min() && now > notAfter_) {
+        throw EcfSigningException(
+            "El certificado digital está vencido. Debe renovarlo ante la entidad emisora autorizada.");
+    }
+
     if (!validateCertificateSn(rncEmisor))
         throw EcfSigningException(
             "El RNC del certificado no coincide con el emisor: " + rncEmisor);
