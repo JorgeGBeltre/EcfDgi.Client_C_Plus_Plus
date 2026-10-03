@@ -354,7 +354,14 @@ HttpResponsePtr signAndSend(domain::EcfDocument& doc, AppServices::Scope& scope,
                     // Immediate check didn't complete; will be polled by background reconciler
                 }
             } else {
-                doc.state = "RejectedByDgii";
+                std::string err = response.error.value_or(response.mensaje.value_or(""));
+                if (!err.empty()) {
+                    doc.state = "RejectedByDgii";
+                    doc.dgiiResponseXml = err;
+                } else {
+                    doc.state = "Uncertain";
+                    doc.dgiiResponseXml = "Transmisión incierta: DGII no devolvió trackId ni mensaje de rechazo.";
+                }
             }
         }
     } catch (...) {
@@ -433,7 +440,36 @@ HttpResponsePtr reconcileUncertain(domain::EcfDocument& doc,
 
     bool isNotFound = (estadoTrim == "No encontrado" || estadoTrim == "no encontrado");
     if (!isNotFound && !estadoTrim.empty()) {
-        doc.state = "Signed";
+        std::string lowerEstado = estadoTrim;
+        std::transform(lowerEstado.begin(), lowerEstado.end(), lowerEstado.begin(), ::tolower);
+
+        // Recuperar trackId desde DGII mediante consultarTrackIds si aún no está asignado
+        if (!doc.trackId.has_value() || doc.trackId->empty()) {
+            try {
+                auto trackDetails = client->consultarTrackIds(doc.rncEmisor, doc.eNcf);
+                if (!trackDetails.empty() && !trackDetails.front().trackId.empty()) {
+                    doc.trackId = trackDetails.front().trackId;
+                }
+            } catch (...) {
+                // Consulta de trackId no disponible; se mantendrá trackId si existía
+            }
+        }
+
+        if (!doc.sentToDgiiAt.has_value() || doc.sentToDgiiAt->empty()) {
+            doc.sentToDgiiAt = !status.fechaEmision.empty() ? status.fechaEmision : sys::utcNowIso();
+        }
+
+        if (lowerEstado == "aceptado" || lowerEstado == "aceptado condicional") {
+            doc.state = "AcceptedByDgii";
+            doc.dgiiResponseXml = "Aceptado por DGII (Reconciliado): " + estadoTrim;
+        } else if (lowerEstado == "rechazado") {
+            doc.state = "RejectedByDgii";
+            doc.dgiiResponseXml = "Rechazado por DGII (Reconciliado): " + estadoTrim;
+        } else {
+            doc.state = "Signed";
+            doc.dgiiResponseXml = "En proceso en DGII: " + estadoTrim;
+        }
+
         scope.docs->update(doc);
         scope.uow->saveChanges();
         Json::Value out;
@@ -473,7 +509,7 @@ HttpResponsePtr handleExistingDocument(domain::EcfDocument& existingDoc,
         return signAndSend(existingDoc, scope, services, effectiveSigner, effectiveClient, &dto, isDefaultFallback, emisorRazonSocial);
     }
 
-    if (existingDoc.state == "Uncertain") {
+    if (existingDoc.state == "Uncertain" || existingDoc.state == "AwaitingTransmission") {
         return reconcileUncertain(existingDoc, dto, editSequence, scope, services, emisorRnc, emisorRazonSocial, effectiveSigner, effectiveClient, isDefaultFallback);
     }
 
