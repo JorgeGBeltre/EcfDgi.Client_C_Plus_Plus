@@ -11,6 +11,7 @@ struct User : AuditableEntity {
     std::string email;
     std::string passwordHash;
     std::string role;
+    std::string tenantId;
 };
 
 }  // namespace ecf::domain

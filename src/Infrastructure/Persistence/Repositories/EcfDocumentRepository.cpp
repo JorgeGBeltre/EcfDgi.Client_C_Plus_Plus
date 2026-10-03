@@ -37,40 +37,21 @@ std::optional<EcfDocument> EcfDocumentRepository::getBySourceTxnId(
     const std::string& sourceTxnId,
     const std::optional<std::string>& ambiente) {
     pqxx::nontransaction n(db_->connection());
-    if (tenantId == "default-tenant") {
-        if (ambiente.has_value() && !ambiente->empty()) {
-            pqxx::result r = n.exec_params(
-                std::string("SELECT ") + ecfDocumentColumns() +
-                " FROM ecf_documents WHERE (source_txn_id = $1 OR track_id = $1 OR e_ncf = $1) "
-                " AND (ambiente IS NULL OR ambiente = $2) AND is_deleted = false LIMIT 1",
-                sourceTxnId, *ambiente);
-            if (r.empty()) return std::nullopt;
-            return mapEcfDocument(r[0]);
-        } else {
-            pqxx::result r = n.exec_params(
-                std::string("SELECT ") + ecfDocumentColumns() +
-                " FROM ecf_documents WHERE (source_txn_id = $1 OR track_id = $1 OR e_ncf = $1) AND is_deleted = false LIMIT 1",
-                sourceTxnId);
-            if (r.empty()) return std::nullopt;
-            return mapEcfDocument(r[0]);
-        }
+    if (ambiente.has_value() && !ambiente->empty()) {
+        pqxx::result r = n.exec_params(
+            std::string("SELECT ") + ecfDocumentColumns() +
+            " FROM ecf_documents WHERE tenant_id = $1 AND (source_txn_id = $2 OR track_id = $2 OR e_ncf = $2) "
+            " AND (ambiente IS NULL OR ambiente = $3) AND is_deleted = false LIMIT 1",
+            tenantId, sourceTxnId, *ambiente);
+        if (r.empty()) return std::nullopt;
+        return mapEcfDocument(r[0]);
     } else {
-        if (ambiente.has_value() && !ambiente->empty()) {
-            pqxx::result r = n.exec_params(
-                std::string("SELECT ") + ecfDocumentColumns() +
-                " FROM ecf_documents WHERE tenant_id = $1 AND (source_txn_id = $2 OR track_id = $2 OR e_ncf = $2) "
-                " AND (ambiente IS NULL OR ambiente = $3) AND is_deleted = false LIMIT 1",
-                tenantId, sourceTxnId, *ambiente);
-            if (r.empty()) return std::nullopt;
-            return mapEcfDocument(r[0]);
-        } else {
-            pqxx::result r = n.exec_params(
-                std::string("SELECT ") + ecfDocumentColumns() +
-                " FROM ecf_documents WHERE tenant_id = $1 AND (source_txn_id = $2 OR track_id = $2 OR e_ncf = $2) AND is_deleted = false LIMIT 1",
-                tenantId, sourceTxnId);
-            if (r.empty()) return std::nullopt;
-            return mapEcfDocument(r[0]);
-        }
+        pqxx::result r = n.exec_params(
+            std::string("SELECT ") + ecfDocumentColumns() +
+            " FROM ecf_documents WHERE tenant_id = $1 AND (source_txn_id = $2 OR track_id = $2 OR e_ncf = $2) AND is_deleted = false LIMIT 1",
+            tenantId, sourceTxnId);
+        if (r.empty()) return std::nullopt;
+        return mapEcfDocument(r[0]);
     }
 }
 

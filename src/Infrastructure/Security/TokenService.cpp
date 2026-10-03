@@ -19,6 +19,7 @@ std::string TokenService::generateToken(const domain::User& user) {
         .set_payload_claim("name", jwt::claim(user.username))
         .set_payload_claim("email", jwt::claim(user.email))
         .set_payload_claim("role", jwt::claim(user.role))
+        .set_payload_claim("tenant_id", jwt::claim(user.tenantId.empty() ? "default-tenant" : user.tenantId))
         .sign(jwt::algorithm::hs256{settings_.secret});
 }
 

@@ -622,13 +622,26 @@ void DocumentsController::submit(const HttpRequestPtr& req,
             std::string emisorRazonSocial = services.emisorOptions().razonSocial;
             if (emisorRazonSocial.empty()) emisorRazonSocial = "WILLY CHIC DOMINICANA SRL";
 
+            std::string role;
+            if (req->attributes()->find("role")) role = req->attributes()->get<std::string>("role");
+            std::string clientType;
+            if (req->attributes()->find("clientType")) clientType = req->attributes()->get<std::string>("clientType");
+            bool isWorkerOrSuperAdmin = (clientType == "worker" || role == "Worker" || role == "SuperAdmin");
+
             std::string effectiveTenantId = tenantId;
-            if (effectiveTenantId == "default-tenant") {
+            if (isWorkerOrSuperAdmin) {
                 std::string hTenant = req->getHeader("X-Tenant-Id");
                 if (!hTenant.empty()) {
                     effectiveTenantId = hTenant;
                 } else if (dto.tenantId.has_value() && !dto.tenantId->empty()) {
                     effectiveTenantId = *dto.tenantId;
+                }
+            } else {
+                if (dto.tenantId.has_value() && !dto.tenantId->empty() && *dto.tenantId != effectiveTenantId) {
+                    Json::Value errBody;
+                    errBody["error"] = "Forbidden: Cannot submit document for another tenant.";
+                    cb(json(errBody, k403Forbidden));
+                    return;
                 }
             }
 
@@ -716,12 +729,18 @@ void DocumentsController::submit(const HttpRequestPtr& req,
 void DocumentsController::getBySourceTxnId(const HttpRequestPtr& req,
                                           std::function<void(const HttpResponsePtr&)>&& callback,
                                           std::string txnId) {
+    std::string role;
+    if (req->attributes()->find("role")) role = req->attributes()->get<std::string>("role");
+    std::string clientType;
+    if (req->attributes()->find("clientType")) clientType = req->attributes()->get<std::string>("clientType");
+    bool isWorkerOrSuperAdmin = (clientType == "worker" || role == "Worker" || role == "SuperAdmin");
+
     std::string tenantId = "default-tenant";
     if (req->attributes()->find("tenantId")) {
         std::string t = req->attributes()->get<std::string>("tenantId");
-        if (!t.empty() && t != "default-tenant") tenantId = t;
+        if (!t.empty()) tenantId = t;
     }
-    if (tenantId == "default-tenant") {
+    if (isWorkerOrSuperAdmin) {
         std::string hTenant = req->getHeader("X-Tenant-Id");
         if (!hTenant.empty()) tenantId = hTenant;
     }
@@ -731,7 +750,7 @@ void DocumentsController::getBySourceTxnId(const HttpRequestPtr& req,
         auto scope = services.makeScope(mapping::currentUserFrom(req));
 
         auto doc = scope.docs->getBySourceTxnId(tenantId, txnId);
-        if (!doc.has_value()) {
+        if (!doc.has_value() || (!isWorkerOrSuperAdmin && doc->tenantId != tenantId)) {
             Json::Value errBody;
             errBody["error"] = "Document with source TxnId '" + txnId + "' not found.";
             callback(json(errBody, k404NotFound));
@@ -891,12 +910,18 @@ void DocumentsController::getXmlById(const HttpRequestPtr& req,
 void DocumentsController::getById(const HttpRequestPtr& req,
                                   std::function<void(const HttpResponsePtr&)>&& callback,
                                   std::string id) {
+    std::string role;
+    if (req->attributes()->find("role")) role = req->attributes()->get<std::string>("role");
+    std::string clientType;
+    if (req->attributes()->find("clientType")) clientType = req->attributes()->get<std::string>("clientType");
+    bool isWorkerOrSuperAdmin = (clientType == "worker" || role == "Worker" || role == "SuperAdmin");
+
     std::string tenantId = "default-tenant";
     if (req->attributes()->find("tenantId")) {
         std::string t = req->attributes()->get<std::string>("tenantId");
-        if (!t.empty() && t != "default-tenant") tenantId = t;
+        if (!t.empty()) tenantId = t;
     }
-    if (tenantId == "default-tenant") {
+    if (isWorkerOrSuperAdmin) {
         std::string hTenant = req->getHeader("X-Tenant-Id");
         if (!hTenant.empty()) tenantId = hTenant;
     }
@@ -906,7 +931,7 @@ void DocumentsController::getById(const HttpRequestPtr& req,
         auto scope = services.makeScope(mapping::currentUserFrom(req));
 
         auto doc = scope.docs->getById(id);
-        if (!doc.has_value() || (tenantId != "default-tenant" && doc->tenantId != tenantId)) {
+        if (!doc.has_value() || (!isWorkerOrSuperAdmin && doc->tenantId != tenantId)) {
             Json::Value errBody;
             errBody["error"] = "Document '" + id + "' not found.";
             callback(json(errBody, k404NotFound));
