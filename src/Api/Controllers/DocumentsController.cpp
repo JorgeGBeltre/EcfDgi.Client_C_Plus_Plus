@@ -233,7 +233,7 @@ HttpResponsePtr signAndSend(domain::EcfDocument& doc, AppServices::Scope& scope,
         doc.signedXmlContent = doc.xmlContent;
         scope.docs->update(doc);
         scope.uow->saveChanges();
-        return json(err(std::string("Error al firmar digitalmente el XML de e-CF: ") + ex.what()), k400BadRequest);
+        return json(err(std::string("Error al firmar digitalmente el XML de e-CF: ") + ex.what()), k500InternalServerError);
     }
 
     const auto& ecfOpts = services.ecfClientOptions();
@@ -258,17 +258,20 @@ HttpResponsePtr signAndSend(domain::EcfDocument& doc, AppServices::Scope& scope,
 
     if (signer->usesFallbackCertificate()) {
         doc.state = "Unsigned";
+        doc.signedXmlContent = std::nullopt;
+        doc.securityCode = std::nullopt;
         scope.docs->update(doc);
         scope.uow->saveChanges();
         Json::Value out;
         out["documentId"] = doc.id;
         out["eNcf"] = doc.eNcf;
         out["state"] = doc.state;
-        out["trackId"] = doc.trackId.value_or("");
-        out["securityCode"] = doc.securityCode.value_or("");
-        out["signedXml"] = doc.signedXmlContent.value_or("");
-        out["dgiiResponse"] = doc.dgiiResponseXml.value_or("");
-        return json(out, k202Accepted);
+        out["trackId"] = Json::nullValue;
+        out["securityCode"] = Json::nullValue;
+        out["signedXml"] = Json::nullValue;
+        out["dgiiResponse"] = doc.dgiiResponseXml.value_or("Certificado digital de producción no configurado para el tenant. Comprobante no firmado.");
+        out["error"] = "Certificado digital de producción no configurado para el tenant. Comprobante no firmado.";
+        return json(out, k422UnprocessableEntity);
     }
 
     scope.docs->update(doc);
@@ -278,7 +281,7 @@ HttpResponsePtr signAndSend(domain::EcfDocument& doc, AppServices::Scope& scope,
         bool isRfce = (doc.eNcf.rfind("E32", 0) == 0 || doc.eNcf.rfind("e32", 0) == 0) && doc.totalAmount < 250000.0;
         if (isRfce) {
             std::string defaultRazon = !emisorRazonSocial.empty() ? emisorRazonSocial : services.emisorOptions().razonSocial;
-            if (defaultRazon.empty()) defaultRazon = "WILLY CHIC DOMINICANA SRL";
+            if (defaultRazon.empty()) defaultRazon = "EMPRESA EMISORA";
 
             std::string emisorRazon = (!isDefaultFallback && dto && !dto->header.razonSocialEmisor.empty())
                 ? dto->header.razonSocialEmisor
@@ -375,10 +378,24 @@ HttpResponsePtr signAndSend(domain::EcfDocument& doc, AppServices::Scope& scope,
     out["documentId"] = doc.id;
     out["eNcf"] = doc.eNcf;
     out["state"] = doc.state;
-    out["trackId"] = doc.trackId.value_or("");
-    out["securityCode"] = doc.securityCode.value_or("");
-    out["signedXml"] = doc.signedXmlContent.value_or("");
-    out["dgiiResponse"] = doc.dgiiResponseXml.value_or("");
+    out["trackId"] = doc.trackId.has_value() ? Json::Value(*doc.trackId) : Json::nullValue;
+    out["securityCode"] = doc.securityCode.has_value() ? Json::Value(*doc.securityCode) : Json::nullValue;
+    out["signedXml"] = doc.signedXmlContent.has_value() ? Json::Value(*doc.signedXmlContent) : Json::nullValue;
+    out["dgiiResponse"] = doc.dgiiResponseXml.has_value() ? Json::Value(*doc.dgiiResponseXml) : Json::nullValue;
+
+    if (doc.state == "AcceptedByDgii") {
+        return json(out, k200OK);
+    } else if (doc.state == "Signed") {
+        return json(out, k202Accepted);
+    } else if (doc.state == "RejectedByDgii") {
+        out["error"] = doc.dgiiResponseXml.value_or("Rechazado por DGII");
+        return json(out, k422UnprocessableEntity);
+    } else if (doc.state == "AwaitingTransmission") {
+        return json(out, k409Conflict);
+    } else if (doc.state == "Uncertain") {
+        out["error"] = doc.dgiiResponseXml.value_or("Transmisión incierta a DGII.");
+        return json(out, k503ServiceUnavailable);
+    }
     return json(out, k202Accepted);
 }
 
@@ -404,11 +421,11 @@ HttpResponsePtr reconcileUncertain(domain::EcfDocument& doc,
                 out["documentId"] = doc.id;
                 out["eNcf"] = doc.eNcf;
                 out["state"] = doc.state;
-                out["trackId"] = doc.trackId.value_or("");
-                out["securityCode"] = doc.securityCode.value_or("");
-                out["signedXml"] = doc.signedXmlContent.value_or("");
-                out["dgiiResponse"] = doc.dgiiResponseXml.value_or("");
-                return json(out, k202Accepted);
+                out["trackId"] = doc.trackId.has_value() ? Json::Value(*doc.trackId) : Json::nullValue;
+                out["securityCode"] = doc.securityCode.has_value() ? Json::Value(*doc.securityCode) : Json::nullValue;
+                out["signedXml"] = doc.signedXmlContent.has_value() ? Json::Value(*doc.signedXmlContent) : Json::nullValue;
+                out["dgiiResponse"] = doc.dgiiResponseXml.has_value() ? Json::Value(*doc.dgiiResponseXml) : Json::nullValue;
+                return json(out, doc.state == "Signed" ? k202Accepted : k409Conflict);
             }
         }
     }
@@ -427,11 +444,12 @@ HttpResponsePtr reconcileUncertain(domain::EcfDocument& doc,
         out["documentId"] = doc.id;
         out["eNcf"] = doc.eNcf;
         out["state"] = doc.state;
-        out["trackId"] = doc.trackId.value_or("");
-        out["securityCode"] = doc.securityCode.value_or("");
-        out["signedXml"] = doc.signedXmlContent.value_or("");
-        out["dgiiResponse"] = doc.dgiiResponseXml.value_or("");
-        return json(out, k202Accepted);
+        out["trackId"] = doc.trackId.has_value() ? Json::Value(*doc.trackId) : Json::nullValue;
+        out["securityCode"] = doc.securityCode.has_value() ? Json::Value(*doc.securityCode) : Json::nullValue;
+        out["signedXml"] = doc.signedXmlContent.has_value() ? Json::Value(*doc.signedXmlContent) : Json::nullValue;
+        out["dgiiResponse"] = doc.dgiiResponseXml.has_value() ? Json::Value(*doc.dgiiResponseXml) : Json::nullValue;
+        out["error"] = "Fallo de comunicación al consultar estado en DGII. Documento permanece en estado incierto.";
+        return json(out, k503ServiceUnavailable);
     }
 
     std::string estadoTrim = status.estado;
@@ -476,10 +494,18 @@ HttpResponsePtr reconcileUncertain(domain::EcfDocument& doc,
         out["documentId"] = doc.id;
         out["eNcf"] = doc.eNcf;
         out["state"] = doc.state;
-        out["trackId"] = doc.trackId.value_or("");
-        out["securityCode"] = doc.securityCode.value_or("");
-        out["signedXml"] = doc.signedXmlContent.value_or("");
-        out["dgiiResponse"] = doc.dgiiResponseXml.value_or("");
+        out["trackId"] = doc.trackId.has_value() ? Json::Value(*doc.trackId) : Json::nullValue;
+        out["securityCode"] = doc.securityCode.has_value() ? Json::Value(*doc.securityCode) : Json::nullValue;
+        out["signedXml"] = doc.signedXmlContent.has_value() ? Json::Value(*doc.signedXmlContent) : Json::nullValue;
+        out["dgiiResponse"] = doc.dgiiResponseXml.has_value() ? Json::Value(*doc.dgiiResponseXml) : Json::nullValue;
+        if (doc.state == "AcceptedByDgii") {
+            return json(out, k200OK);
+        } else if (doc.state == "Signed") {
+            return json(out, k202Accepted);
+        } else if (doc.state == "RejectedByDgii") {
+            out["error"] = doc.dgiiResponseXml.value_or("Rechazado por DGII (Reconciliado)");
+            return json(out, k422UnprocessableEntity);
+        }
         return json(out, k202Accepted);
     }
 
@@ -555,7 +581,18 @@ HttpResponsePtr handleExistingDocument(domain::EcfDocument& existingDoc,
     out["securityCode"] = existingDoc.securityCode.value_or("");
     out["signedXml"] = existingDoc.signedXmlContent.value_or("");
     out["dgiiResponse"] = existingDoc.dgiiResponseXml.value_or("");
-    return json(out, k202Accepted);
+
+    HttpStatusCode statusCode = k202Accepted;
+    if (existingDoc.state == "AcceptedByDgii") {
+        statusCode = k200OK;
+    } else if (existingDoc.state == "RejectedByDgii") {
+        statusCode = k422UnprocessableEntity;
+    } else if (existingDoc.state == "AwaitingTransmission") {
+        statusCode = k409Conflict;
+    } else if (existingDoc.state == "Uncertain") {
+        statusCode = k503ServiceUnavailable;
+    }
+    return json(out, statusCode);
 }
 
 } // namespace
@@ -679,7 +716,7 @@ void DocumentsController::submit(const HttpRequestPtr& req,
             std::string emisorRnc = services.emisorOptions().rnc;
             if (emisorRnc.empty()) emisorRnc = services.ecfClientOptions().rncEmisor.value_or("101672919");
             std::string emisorRazonSocial = services.emisorOptions().razonSocial;
-            if (emisorRazonSocial.empty()) emisorRazonSocial = "WILLY CHIC DOMINICANA SRL";
+            if (emisorRazonSocial.empty()) emisorRazonSocial = "EMPRESA EMISORA";
 
             std::string role;
             if (req->attributes()->find("role")) role = req->attributes()->get<std::string>("role");
@@ -749,7 +786,7 @@ void DocumentsController::submit(const HttpRequestPtr& req,
             try {
                 eNcf = services.sequenceManager()->getNextEncf(sequenceScope, dto.tipoComprobante);
             } catch (const std::exception& ex) {
-                cb(json(err(ex.what()), k400BadRequest));
+                cb(json(err(ex.what()), k503ServiceUnavailable));
                 return;
             }
 

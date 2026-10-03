@@ -135,6 +135,10 @@ Json::Value toJson(const app::CanonicalDocumentDto& d) {
     if (d.header.correoComprador.has_value()) h["correoComprador"] = *d.header.correoComprador;
     h["fechaEmision"] = d.header.fechaEmision;
     if (d.header.fechaVencimientoSecuencia.has_value()) h["fechaVencimientoSecuencia"] = *d.header.fechaVencimientoSecuencia;
+    if (d.header.direccionEmisor.has_value()) h["direccionEmisor"] = *d.header.direccionEmisor;
+    if (d.header.tipoPago.has_value()) h["tipoPago"] = *d.header.tipoPago;
+    if (d.header.fechaLimitePago.has_value()) h["fechaLimitePago"] = *d.header.fechaLimitePago;
+    if (d.header.tipoIngresos.has_value()) h["tipoIngresos"] = *d.header.tipoIngresos;
     j["header"] = h;
 
     Json::Value lines(Json::arrayValue);
@@ -175,6 +179,7 @@ Json::Value toJson(const app::CanonicalDocumentDto& d) {
     if (d.references.razonModificacion.has_value()) r["razonModificacion"] = *d.references.razonModificacion;
     if (d.references.fechaNcfModificado.has_value()) r["fechaNcfModificado"] = *d.references.fechaNcfModificado;
     if (d.references.rncOtroContribuyente.has_value()) r["rncOtroContribuyente"] = *d.references.rncOtroContribuyente;
+    if (d.references.indicadorNotaCredito.has_value()) r["indicadorNotaCredito"] = *d.references.indicadorNotaCredito;
     j["references"] = r;
 
     if (d.retention.has_value()) {
@@ -302,7 +307,16 @@ app::CanonicalDocumentDto canonicalDocumentFromJson(const Json::Value& j) {
         d.header.correoComprador = optStr(h, "correoComprador");
         d.header.fechaEmision = jstr(h, "fechaEmision");
         d.header.fechaVencimientoSecuencia = optStr(h, "fechaVencimientoSecuencia");
+        d.header.direccionEmisor = optStr(h, "direccionEmisor");
+        d.header.tipoPago = optInt(h, "tipoPago");
+        d.header.fechaLimitePago = optStr(h, "fechaLimitePago");
+        d.header.tipoIngresos = optStr(h, "tipoIngresos");
     }
+
+    if (!d.header.direccionEmisor.has_value()) d.header.direccionEmisor = optStr(j, "direccionEmisor");
+    if (!d.header.tipoPago.has_value()) d.header.tipoPago = optInt(j, "tipoPago");
+    if (!d.header.fechaLimitePago.has_value()) d.header.fechaLimitePago = optStr(j, "fechaLimitePago");
+    if (!d.header.tipoIngresos.has_value()) d.header.tipoIngresos = optStr(j, "tipoIngresos");
 
     d.fechaVencimientoSecuencia = optStr(j, "fechaVencimientoSecuencia");
 
@@ -350,6 +364,11 @@ app::CanonicalDocumentDto canonicalDocumentFromJson(const Json::Value& j) {
         d.references.razonModificacion = optStr(r, "razonModificacion");
         d.references.fechaNcfModificado = optStr(r, "fechaNcfModificado");
         d.references.rncOtroContribuyente = optStr(r, "rncOtroContribuyente");
+        d.references.indicadorNotaCredito = optInt(r, "indicadorNotaCredito");
+    }
+
+    if (!d.references.indicadorNotaCredito.has_value()) {
+        d.references.indicadorNotaCredito = optInt(j, "indicadorNotaCredito");
     }
 
     if (has(j, "retention")) {

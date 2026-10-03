@@ -158,6 +158,27 @@ std::string normalizeFechaDgii(const std::string& value) {
     return out;
 }
 
+int parseDateToDays(const std::string& raw) {
+    if (raw.empty()) return 0;
+    std::string norm = normalizeFechaDgii(raw);
+    static const std::regex rgx(R"(^(\d{2})-(\d{2})-(\d{4})$)");
+    std::smatch m;
+    if (std::regex_match(norm, m, rgx)) {
+        int d = std::stoi(m[1].str());
+        int mon = std::stoi(m[2].str());
+        int y = std::stoi(m[3].str());
+        std::tm tm = {};
+        tm.tm_mday = d;
+        tm.tm_mon = mon - 1;
+        tm.tm_year = y - 1900;
+        std::time_t t = std::mktime(&tm);
+        if (t != static_cast<std::time_t>(-1)) {
+            return static_cast<int>(t / 86400);
+        }
+    }
+    return 0;
+}
+
 std::vector<ProcessedLineItem> normalizeCanonicalLines(const std::vector<CanonicalLineDto>& lines, double defaultTotal) {
     std::vector<ProcessedLineItem> result;
 
@@ -324,7 +345,17 @@ std::string buildXmlFromCanonical(const CanonicalDocumentDto& dto,
        << "      <eNCF>" << eNcf << "</eNCF>\n";
 
     if (tipoEcf == "34") {
-        ss << "      <IndicadorNotaCredito>0</IndicadorNotaCredito>\n";
+        int inc = 0;
+        if (dto.references.indicadorNotaCredito.has_value()) {
+            inc = *dto.references.indicadorNotaCredito;
+        } else if (dto.references.fechaNcfModificado.has_value() && !dto.references.fechaNcfModificado->empty()) {
+            int issueDays = parseDateToDays(dto.header.fechaEmision);
+            int modDays = parseDateToDays(*dto.references.fechaNcfModificado);
+            if (issueDays > 0 && modDays > 0 && (issueDays - modDays) > 30) {
+                inc = 1;
+            }
+        }
+        ss << "      <IndicadorNotaCredito>" << inc << "</IndicadorNotaCredito>\n";
     } else if (tipoEcf != "32") {
         std::string fechaVenc;
         if (dto.fechaVencimientoSecuencia.has_value() && !dto.fechaVencimientoSecuencia->empty()) {
@@ -362,17 +393,38 @@ std::string buildXmlFromCanonical(const CanonicalDocumentDto& dto,
     }
 
     if (tipoEcf != "41" && tipoEcf != "43" && tipoEcf != "47") {
-        std::string tipoIngresoVal = (tipoEcf == "46") ? "02" : "01";
+        std::string tipoIngresoVal;
+        if (dto.header.tipoIngresos.has_value() && !dto.header.tipoIngresos->empty()) {
+            tipoIngresoVal = *dto.header.tipoIngresos;
+            if (tipoIngresoVal.length() == 1) tipoIngresoVal = "0" + tipoIngresoVal;
+        } else {
+            tipoIngresoVal = (tipoEcf == "46") ? "02" : "01";
+        }
         ss << "      <TipoIngresos>" << tipoIngresoVal << "</TipoIngresos>\n";
     }
-    ss << "      <TipoPago>1</TipoPago>\n"
-       << "    </IdDoc>\n";
+
+    int tipoPagoVal = 1;
+    if (dto.header.tipoPago.has_value() && *dto.header.tipoPago >= 1 && *dto.header.tipoPago <= 3) {
+        tipoPagoVal = *dto.header.tipoPago;
+    }
+    ss << "      <TipoPago>" << tipoPagoVal << "</TipoPago>\n";
+    if (tipoPagoVal == 2 && dto.header.fechaLimitePago.has_value() && !dto.header.fechaLimitePago->empty()) {
+        ss << "      <FechaLimitePago>" << normalizeFechaDgii(*dto.header.fechaLimitePago) << "</FechaLimitePago>\n";
+    }
+    ss << "    </IdDoc>\n";
 
     ss << "    <Emisor>\n"
        << "      <RNCEmisor>" << emisorRnc << "</RNCEmisor>\n";
     std::string safeEmisorName = emisorRazonSocial.length() > 150 ? emisorRazonSocial.substr(0, 150) : emisorRazonSocial;
-    ss << "      <RazonSocialEmisor>" << escapeXml(safeEmisorName) << "</RazonSocialEmisor>\n"
-       << "      <DireccionEmisor>Distrito Nacional, SD</DireccionEmisor>\n";
+    ss << "      <RazonSocialEmisor>" << escapeXml(safeEmisorName) << "</RazonSocialEmisor>\n";
+
+    std::string direccionEmisor = "Distrito Nacional, SD";
+    if (dto.header.direccionEmisor.has_value() && !dto.header.direccionEmisor->empty()) {
+        direccionEmisor = *dto.header.direccionEmisor;
+    }
+    std::string safeDireccion = direccionEmisor.length() > 100 ? direccionEmisor.substr(0, 100) : direccionEmisor;
+    ss << "      <DireccionEmisor>" << escapeXml(safeDireccion) << "</DireccionEmisor>\n";
+
     std::string fechaEmision = normalizeFechaDgii(dto.header.fechaEmision);
     ss << "      <FechaEmision>" << fechaEmision << "</FechaEmision>\n"
        << "    </Emisor>\n";
@@ -673,9 +725,18 @@ std::string buildRfceXml(const domain::EcfDocument& doc,
        << "    <Version>1.0</Version>\n"
        << "    <IdDoc>\n"
        << "      <TipoeCF>32</TipoeCF>\n"
-       << "      <eNCF>" << doc.eNcf << "</eNCF>\n"
-       << "      <TipoIngresos>01</TipoIngresos>\n"
-       << "      <TipoPago>1</TipoPago>\n"
+       << "      <eNCF>" << doc.eNcf << "</eNCF>\n";
+    std::string rfceTipoIngreso = "01";
+    if (dto && dto->header.tipoIngresos.has_value() && !dto->header.tipoIngresos->empty()) {
+        rfceTipoIngreso = *dto->header.tipoIngresos;
+        if (rfceTipoIngreso.length() == 1) rfceTipoIngreso = "0" + rfceTipoIngreso;
+    }
+    int rfceTipoPago = 1;
+    if (dto && dto->header.tipoPago.has_value() && *dto->header.tipoPago >= 1 && *dto->header.tipoPago <= 3) {
+        rfceTipoPago = *dto->header.tipoPago;
+    }
+    ss << "      <TipoIngresos>" << rfceTipoIngreso << "</TipoIngresos>\n"
+       << "      <TipoPago>" << rfceTipoPago << "</TipoPago>\n"
        << "    </IdDoc>\n"
        << "    <Emisor>\n"
        << "      <RNCEmisor>" << doc.rncEmisor << "</RNCEmisor>\n";

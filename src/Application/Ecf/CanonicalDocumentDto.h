@@ -21,6 +21,10 @@ struct CanonicalHeaderDto {
     // ISO 8601 (yyyy-MM-dd) or DGII format (dd-MM-yyyy)
     std::string fechaEmision;
     std::optional<std::string> fechaVencimientoSecuencia;
+    std::optional<std::string> direccionEmisor;
+    std::optional<int> tipoPago;
+    std::optional<std::string> fechaLimitePago;
+    std::optional<std::string> tipoIngresos;
 };
 
 struct CanonicalLineDto {
@@ -59,6 +63,7 @@ struct CanonicalReferencesDto {
     std::optional<std::string> razonModificacion;
     std::optional<std::string> fechaNcfModificado;
     std::optional<std::string> rncOtroContribuyente;
+    std::optional<int> indicadorNotaCredito;
 };
 
 struct CanonicalRetentionDto {
