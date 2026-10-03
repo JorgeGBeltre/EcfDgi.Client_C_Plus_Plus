@@ -9,6 +9,7 @@
 #include "Domain/Entities/EcfClientOptions.h"
 #include "Infrastructure/Security/EcfSecurityUtils.h"
 #include "Infrastructure/Dgii/EcfEnvironmentConfig.h"
+#include "Shared/Common/Sys.h"
 
 using namespace ecf;
 
@@ -349,6 +350,34 @@ int main() {
         std::string xmlCert = app::buildXmlFromCanonical(dtoCert, "E310000000001", "101672919", "WILLY CHIC DOMINICANA SRL");
         CHECK(xmlCert.find("<FechaVencimientoSecuencia>31-12-2028</FechaVencimientoSecuencia>") != std::string::npos,
               "Certificacion environment defaults sequence expiry to 31-12-2028");
+    }
+
+    // Test 18: sys::parseIsoUtc handles ISO UTC, PostgreSQL ::text format, fractions and timezones (BUG-027)
+    {
+        // Standard ISO 8601 with Z
+        auto t1 = sys::parseIsoUtc("2026-10-02T14:30:15Z");
+        CHECK(t1 != std::chrono::system_clock::time_point{}, "parseIsoUtc parses standard ISO 8601 with Z");
+
+        // PostgreSQL ::text format (space separator, microseconds, +00)
+        auto t2 = sys::parseIsoUtc("2026-10-02 14:30:15.123456+00");
+        CHECK(t2 != std::chrono::system_clock::time_point{}, "parseIsoUtc parses PostgreSQL timestamptz ::text format with space and microseconds");
+
+        // Both timestamps represent the same second in UTC
+        auto s1 = std::chrono::duration_cast<std::chrono::seconds>(t1.time_since_epoch()).count();
+        auto s2 = std::chrono::duration_cast<std::chrono::seconds>(t2.time_since_epoch()).count();
+        CHECK(s1 == s2, "parseIsoUtc ISO and PostgreSQL formats produce identical UTC timestamp");
+
+        // Offset -04:00 (Santo Domingo local time) => 10:30:15 -04:00 is 14:30:15 UTC
+        auto t3 = sys::parseIsoUtc("2026-10-02 10:30:15-04:00");
+        auto s3 = std::chrono::duration_cast<std::chrono::seconds>(t3.time_since_epoch()).count();
+        CHECK(s1 == s3, "parseIsoUtc timezone offset -04:00 correctly converted to UTC");
+
+        // Empty / invalid returns time_point{} (epoch)
+        auto tEmpty = sys::parseIsoUtc("");
+        CHECK(tEmpty == std::chrono::system_clock::time_point{}, "parseIsoUtc empty returns default time_point");
+
+        auto tInvalid = sys::parseIsoUtc("not-a-date");
+        CHECK(tInvalid == std::chrono::system_clock::time_point{}, "parseIsoUtc invalid returns default time_point");
     }
 
     std::printf("\nTotal failures: %d\n", failures);

@@ -387,21 +387,22 @@ HttpResponsePtr reconcileUncertain(domain::EcfDocument& doc,
                                    bool isDefaultFallback = true) {
     auto client = effectiveClient ? effectiveClient : services.ecfClient();
 
-    // Check minimum age: updatedAt or createdAt
     std::string timestampStr = doc.updatedAt.value_or(doc.createdAt);
     if (!timestampStr.empty()) {
         auto docTime = sys::parseIsoUtc(timestampStr);
-        auto now = std::chrono::system_clock::now();
-        if (now - docTime < MinimumUncertainAgeBeforeReconciliation) {
-            Json::Value out;
-            out["documentId"] = doc.id;
-            out["eNcf"] = doc.eNcf;
-            out["state"] = doc.state;
-            out["trackId"] = doc.trackId.value_or("");
-            out["securityCode"] = doc.securityCode.value_or("");
-            out["signedXml"] = doc.signedXmlContent.value_or("");
-            out["dgiiResponse"] = doc.dgiiResponseXml.value_or("");
-            return json(out, k202Accepted);
+        if (docTime != std::chrono::system_clock::time_point{}) {
+            auto now = std::chrono::system_clock::now();
+            if (now - docTime < MinimumUncertainAgeBeforeReconciliation) {
+                Json::Value out;
+                out["documentId"] = doc.id;
+                out["eNcf"] = doc.eNcf;
+                out["state"] = doc.state;
+                out["trackId"] = doc.trackId.value_or("");
+                out["securityCode"] = doc.securityCode.value_or("");
+                out["signedXml"] = doc.signedXmlContent.value_or("");
+                out["dgiiResponse"] = doc.dgiiResponseXml.value_or("");
+                return json(out, k202Accepted);
+            }
         }
     }
 

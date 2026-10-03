@@ -44,24 +44,83 @@ std::string toIsoUtc(std::chrono::system_clock::time_point tp) {
 
 std::chrono::system_clock::time_point parseIsoUtc(const std::string& iso) {
     if (iso.empty()) return std::chrono::system_clock::time_point{};
-    std::tm tm{};
-    int year, month, day, hour, minute, second;
-    if (std::sscanf(iso.c_str(), "%d-%d-%dT%d:%d:%d", &year, &month, &day, &hour, &minute, &second) >= 6) {
-        tm.tm_year = year - 1900;
-        tm.tm_mon = month - 1;
-        tm.tm_mday = day;
-        tm.tm_hour = hour;
-        tm.tm_min = minute;
-        tm.tm_sec = second;
-        tm.tm_isdst = 0;
-#if defined(_WIN32)
-        std::time_t t = _mkgmtime(&tm);
-#else
-        std::time_t t = timegm(&tm);
-#endif
-        return std::chrono::system_clock::from_time_t(t);
+
+    size_t start = 0;
+    while (start < iso.size() && (iso[start] == ' ' || iso[start] == '\t' || iso[start] == '\r' || iso[start] == '\n')) {
+        start++;
     }
-    return std::chrono::system_clock::time_point{};
+    if (start >= iso.size()) return std::chrono::system_clock::time_point{};
+
+    std::tm tm{};
+    int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
+    char sep = 0;
+    int charsRead = 0;
+
+    int matched = std::sscanf(iso.c_str() + start, "%d-%d-%d%c%d:%d:%d%n",
+                              &year, &month, &day, &sep, &hour, &minute, &second, &charsRead);
+
+    if (matched < 7 || (sep != 'T' && sep != 't' && sep != ' ')) {
+        return std::chrono::system_clock::time_point{};
+    }
+
+    if (year < 1970 || month < 1 || month > 12 || day < 1 || day > 31 ||
+        hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 60) {
+        return std::chrono::system_clock::time_point{};
+    }
+
+    tm.tm_year = year - 1900;
+    tm.tm_mon = month - 1;
+    tm.tm_mday = day;
+    tm.tm_hour = hour;
+    tm.tm_min = minute;
+    tm.tm_sec = second;
+    tm.tm_isdst = 0;
+
+#if defined(_WIN32)
+    std::time_t t = _mkgmtime(&tm);
+#else
+    std::time_t t = timegm(&tm);
+#endif
+
+    if (t == static_cast<std::time_t>(-1)) {
+        return std::chrono::system_clock::time_point{};
+    }
+
+    const char* ptr = iso.c_str() + start + charsRead;
+
+    // Skip fractional seconds (e.g. .123456)
+    if (*ptr == '.') {
+        ptr++;
+        while (*ptr >= '0' && *ptr <= '9') {
+            ptr++;
+        }
+    }
+
+    // Skip whitespace before timezone
+    while (*ptr == ' ') {
+        ptr++;
+    }
+
+    // Timezone offset
+    if (*ptr == 'Z' || *ptr == 'z') {
+        // UTC, no adjustment
+    } else if (*ptr == '+' || *ptr == '-') {
+        char sign = *ptr++;
+        int tzHour = 0, tzMin = 0;
+        if (std::sscanf(ptr, "%d:%d", &tzHour, &tzMin) >= 1) {
+            // parsed tzHour and optional tzMin
+        } else if (std::sscanf(ptr, "%2d%2d", &tzHour, &tzMin) >= 1) {
+            // parsed 2-digit hour
+        }
+        long offsetSec = tzHour * 3600 + tzMin * 60;
+        if (sign == '+') {
+            t -= offsetSec;
+        } else {
+            t += offsetSec;
+        }
+    }
+
+    return std::chrono::system_clock::from_time_t(t);
 }
 
 }  // namespace ecf::sys

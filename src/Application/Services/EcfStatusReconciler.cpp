@@ -48,20 +48,22 @@ int EcfStatusReconciler::reconcile() {
 
         if (doc.sentToDgiiAt.has_value()) {
             auto sentTime = sys::parseIsoUtc(*doc.sentToDgiiAt);
-            auto age = now - sentTime;
-            if (age >= std::chrono::hours(options_.maxPollingWindowHours)) {
-                doc.state = "RequiresManualReview";
-                doc.lastStatusCheckAt = nowIso;
-                spdlog::critical(
-                    "e-CF {} (RNC {}) lleva {}h sin confirmación definitiva de DGII "
-                    "(ventana de {}h agotada); requiere revisión manual.",
-                    doc.eNcf, doc.rncEmisor,
-                    std::chrono::duration_cast<std::chrono::hours>(age).count(),
-                    options_.maxPollingWindowHours);
-                try {
-                    docsRepo_->update(doc);
-                } catch (...) {}
-                continue;
+            if (sentTime != std::chrono::system_clock::time_point{}) {
+                auto age = now - sentTime;
+                if (age >= std::chrono::hours(options_.maxPollingWindowHours)) {
+                    doc.state = "RequiresManualReview";
+                    doc.lastStatusCheckAt = nowIso;
+                    spdlog::critical(
+                        "e-CF {} (RNC {}) lleva {}h sin confirmación definitiva de DGII "
+                        "(ventana de {}h agotada); requiere revisión manual.",
+                        doc.eNcf, doc.rncEmisor,
+                        std::chrono::duration_cast<std::chrono::hours>(age).count(),
+                        options_.maxPollingWindowHours);
+                    try {
+                        docsRepo_->update(doc);
+                    } catch (...) {}
+                    continue;
+                }
             }
         }
 
