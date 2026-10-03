@@ -52,12 +52,25 @@ void CustomersController::getById(const HttpRequestPtr& req,
 void CustomersController::create(const HttpRequestPtr& req,
                                  std::function<void(const HttpResponsePtr&)>&& callback) {
     auto body = req->getJsonObject();
-    if (!body) { callback(json(err("Invalid JSON body."), k400BadRequest)); return; }
+    if (!body || !body->isObject()) { callback(json(err("Invalid JSON body."), k400BadRequest)); return; }
+
+    if (body->isMember("name") && !(*body)["name"].isString()) {
+        callback(json(err("Field 'name' must be a string."), k400BadRequest));
+        return;
+    }
+    if (body->isMember("email") && !(*body)["email"].isString()) {
+        callback(json(err("Field 'email' must be a string."), k400BadRequest));
+        return;
+    }
+    if (body->isMember("rnc") && !(*body)["rnc"].isString()) {
+        callback(json(err("Field 'rnc' must be a string."), k400BadRequest));
+        return;
+    }
 
     app::CreateCustomerCommand cmd;
-    cmd.name = (*body).get("name", "").asString();
-    cmd.email = (*body).get("email", "").asString();
-    cmd.rnc = (*body).get("rnc", "").asString();
+    cmd.name = body->isMember("name") ? (*body)["name"].asString() : "";
+    cmd.email = body->isMember("email") ? (*body)["email"].asString() : "";
+    cmd.rnc = body->isMember("rnc") ? (*body)["rnc"].asString() : "";
 
     app::LoggingScope _log("CreateCustomerCommand");
     app::validateOrThrow(cmd);
@@ -77,19 +90,37 @@ void CustomersController::update(const HttpRequestPtr& req,
                                  std::function<void(const HttpResponsePtr&)>&& callback,
                                  std::string id) {
     auto body = req->getJsonObject();
-    if (!body) { callback(json(err("Invalid JSON body."), k400BadRequest)); return; }
+    if (!body || !body->isObject()) { callback(json(err("Invalid JSON body."), k400BadRequest)); return; }
 
-    if ((*body).isMember("id") && (*body)["id"].isString() &&
-        (*body)["id"].asString() != id) {
-        callback(json(err("Mismatched route ID and request body ID."), k400BadRequest));
+    if (body->isMember("id")) {
+        if (!(*body)["id"].isString()) {
+            callback(json(err("Field 'id' must be a string."), k400BadRequest));
+            return;
+        }
+        if ((*body)["id"].asString() != id) {
+            callback(json(err("Mismatched route ID and request body ID."), k400BadRequest));
+            return;
+        }
+    }
+
+    if (body->isMember("name") && !(*body)["name"].isString()) {
+        callback(json(err("Field 'name' must be a string."), k400BadRequest));
+        return;
+    }
+    if (body->isMember("email") && !(*body)["email"].isString()) {
+        callback(json(err("Field 'email' must be a string."), k400BadRequest));
+        return;
+    }
+    if (body->isMember("rnc") && !(*body)["rnc"].isString()) {
+        callback(json(err("Field 'rnc' must be a string."), k400BadRequest));
         return;
     }
 
     app::UpdateCustomerCommand cmd;
     cmd.id = id;
-    cmd.name = (*body).get("name", "").asString();
-    cmd.email = (*body).get("email", "").asString();
-    cmd.rnc = (*body).get("rnc", "").asString();
+    cmd.name = body->isMember("name") ? (*body)["name"].asString() : "";
+    cmd.email = body->isMember("email") ? (*body)["email"].asString() : "";
+    cmd.rnc = body->isMember("rnc") ? (*body)["rnc"].asString() : "";
 
     app::LoggingScope _log("UpdateCustomerCommand");
     app::validateOrThrow(cmd);

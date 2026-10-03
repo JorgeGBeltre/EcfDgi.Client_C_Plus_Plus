@@ -195,17 +195,20 @@ Json::Value toJson(const app::CanonicalDocumentDto& d) {
 }
 
 Rfce rfceFromJson(const Json::Value& j) {
+    if (!j.isObject()) {
+        throw std::invalid_argument("Payload must be a JSON object.");
+    }
     Rfce rfce;
-    const Json::Value& enc = j["encabezado"];
+    const Json::Value& enc = (j.isMember("encabezado") && j["encabezado"].isObject()) ? j["encabezado"] : Json::Value(Json::nullValue);
     auto& e = rfce.encabezado;
     e.version = jstr(enc, "version", "1.0");
 
-    const Json::Value& idDoc = enc["idDoc"];
+    const Json::Value& idDoc = (enc.isObject() && enc.isMember("idDoc") && enc["idDoc"].isObject()) ? enc["idDoc"] : Json::Value(Json::nullValue);
     e.idDoc.tipoeCF = jstr(idDoc, "tipoeCF", "32");
     e.idDoc.eNcf = jstr(idDoc, "eNcf");
     e.idDoc.tipoIngresos = jint(idDoc, "tipoIngresos");
     e.idDoc.tipoPago = jint(idDoc, "tipoPago");
-    if (idDoc.isMember("tablaFormasPago") && idDoc["tablaFormasPago"].isArray()) {
+    if (idDoc.isObject() && idDoc.isMember("tablaFormasPago") && idDoc["tablaFormasPago"].isArray()) {
         for (const auto& fp : idDoc["tablaFormasPago"]) {
             FormaDePagoItem item;
             item.formaPago = jint(fp, "formaPago");
@@ -214,7 +217,7 @@ Rfce rfceFromJson(const Json::Value& j) {
         }
     }
 
-    const Json::Value& em = enc["emisor"];
+    const Json::Value& em = (enc.isObject() && enc.isMember("emisor") && enc["emisor"].isObject()) ? enc["emisor"] : Json::Value(Json::nullValue);
     e.emisor.rncEmisor = jstr(em, "rncEmisor");
     e.emisor.razonSocialEmisor = jstr(em, "razonSocialEmisor");
     e.emisor.fechaEmision = jstr(em, "fechaEmision");
@@ -228,7 +231,7 @@ Rfce rfceFromJson(const Json::Value& j) {
         e.comprador = comp;
     }
 
-    const Json::Value& t = enc["totales"];
+    const Json::Value& t = (enc.isObject() && enc.isMember("totales") && enc["totales"].isObject()) ? enc["totales"] : Json::Value(Json::nullValue);
     auto& to = e.totales;
     to.montoGravadoTotal = optDbl(t, "montoGravadoTotal");
     to.montoGravadoI1 = optDbl(t, "montoGravadoI1");
@@ -240,7 +243,7 @@ Rfce rfceFromJson(const Json::Value& j) {
     to.totalITBIS2 = optDbl(t, "totalITBIS2");
     to.totalITBIS3 = optDbl(t, "totalITBIS3");
     to.montoImpuestoAdicional = optDbl(t, "montoImpuestoAdicional");
-    if (t.isMember("impuestosAdicionales") && t["impuestosAdicionales"].isArray()) {
+    if (t.isObject() && t.isMember("impuestosAdicionales") && t["impuestosAdicionales"].isArray()) {
         for (const auto& ia : t["impuestosAdicionales"]) {
             ImpuestoAdicionalItem item;
             item.tipoImpuesto = jstr(ia, "tipoImpuesto");
@@ -255,7 +258,7 @@ Rfce rfceFromJson(const Json::Value& j) {
     to.montoTotal = jdbl(t, "montoTotal");
     to.montoNoFacturable = optDbl(t, "montoNoFacturable");
     to.codigoSeguridadeCF = optStr(t, "codigoSeguridadeCF");
-    if (enc.isMember("codigoSeguridadeCF") && !enc["codigoSeguridadeCF"].isNull()) {
+    if (enc.isObject() && enc.isMember("codigoSeguridadeCF") && !enc["codigoSeguridadeCF"].isNull()) {
         e.codigoSeguridadeCF = optStr(enc, "codigoSeguridadeCF");
     } else {
         e.codigoSeguridadeCF = to.codigoSeguridadeCF;

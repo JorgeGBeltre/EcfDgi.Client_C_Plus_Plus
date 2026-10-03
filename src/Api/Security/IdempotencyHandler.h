@@ -62,21 +62,29 @@ public:
         }
 
         // Status == Reserved: Execute handler and capture the response
-        next([store, scopedKey, callback = std::move(callback)](const drogon::HttpResponsePtr& resp) {
-            int sc = resp->statusCode();
-            // Selective caching: Cache business domain results (2xx, 400, 404, 422).
-            bool shouldCache = sc >= 200 && sc < 500 &&
-                               sc != 401 && sc != 403 && sc != 408 && sc != 409 && sc != 429;
+        try {
+            next([store, scopedKey, callback = std::move(callback)](const drogon::HttpResponsePtr& resp) {
+                int sc = resp->statusCode();
+                // Selective caching: Cache business domain results (2xx, 400, 404, 422).
+                bool shouldCache = sc >= 200 && sc < 500 &&
+                                   sc != 401 && sc != 403 && sc != 408 && sc != 409 && sc != 429;
 
-            if (shouldCache) {
-                domain::IdempotentResult result;
-                result.statusCode = sc;
-                result.contentType = resp->contentTypeString();
-                result.body = std::string(resp->body().data(), resp->body().size());
-                store->complete(scopedKey, result);
-            }
-            callback(resp);
-        });
+                if (shouldCache) {
+                    domain::IdempotentResult result;
+                    result.statusCode = sc;
+                    result.contentType = resp->contentTypeString();
+                    result.body = std::string(resp->body().data(), resp->body().size());
+                    store->complete(scopedKey, result);
+                }
+                callback(resp);
+            });
+        } catch (const std::exception& ex) {
+            Json::Value err;
+            err["error"] = std::string("Operation error: ") + ex.what();
+            auto res = drogon::HttpResponse::newHttpJsonResponse(err);
+            res->setStatusCode(drogon::k400BadRequest);
+            callback(res);
+        }
     }
 };
 

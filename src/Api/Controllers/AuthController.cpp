@@ -28,11 +28,23 @@ Json::Value errorBody(const shared::Result& r) {
 void AuthController::login(const HttpRequestPtr& req,
                            std::function<void(const HttpResponsePtr&)>&& callback) {
     auto body = req->getJsonObject();
-    if (!body) { callback(json(Json::Value("Invalid JSON body."), k400BadRequest)); return; }
+    if (!body || !body->isObject()) {
+        callback(json(Json::Value("Invalid JSON body."), k400BadRequest));
+        return;
+    }
+
+    if (body->isMember("username") && !(*body)["username"].isString()) {
+        callback(json(Json::Value("Field 'username' must be a string."), k400BadRequest));
+        return;
+    }
+    if (body->isMember("password") && !(*body)["password"].isString()) {
+        callback(json(Json::Value("Field 'password' must be a string."), k400BadRequest));
+        return;
+    }
 
     app::LoginUserCommand cmd;
-    cmd.username = (*body).get("username", "").asString();
-    cmd.password = (*body).get("password", "").asString();
+    cmd.username = body->isMember("username") ? (*body)["username"].asString() : "";
+    cmd.password = body->isMember("password") ? (*body)["password"].asString() : "";
 
     app::LoggingScope _log("LoginUserCommand");
     app::validateOrThrow(cmd);

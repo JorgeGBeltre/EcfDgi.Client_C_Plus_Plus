@@ -45,17 +45,46 @@ void EcfController::send(const HttpRequestPtr& req,
         std::move(callback),
         [req, &services](std::function<void(const HttpResponsePtr&)>&& cb) {
             auto body = req->getJsonObject();
-            if (!body) { cb(json(err("Invalid JSON body."), k400BadRequest)); return; }
+            if (!body || !body->isObject()) { cb(json(err("Invalid JSON body."), k400BadRequest)); return; }
+
+            if (body->isMember("xmlContent") && !(*body)["xmlContent"].isString()) {
+                cb(json(err("Field 'xmlContent' must be a string."), k400BadRequest));
+                return;
+            }
+            if (body->isMember("fileName") && !(*body)["fileName"].isString()) {
+                cb(json(err("Field 'fileName' must be a string."), k400BadRequest));
+                return;
+            }
+            if (body->isMember("rncEmisor") && !(*body)["rncEmisor"].isString()) {
+                cb(json(err("Field 'rncEmisor' must be a string."), k400BadRequest));
+                return;
+            }
+            if (body->isMember("eNcf") && !(*body)["eNcf"].isString()) {
+                cb(json(err("Field 'eNcf' must be a string."), k400BadRequest));
+                return;
+            }
+            if (body->isMember("rncComprador") && !(*body)["rncComprador"].isString()) {
+                cb(json(err("Field 'rncComprador' must be a string."), k400BadRequest));
+                return;
+            }
+            if (body->isMember("totalAmount") && !(*body)["totalAmount"].isNumeric()) {
+                cb(json(err("Field 'totalAmount' must be a numeric value."), k400BadRequest));
+                return;
+            }
+            if (body->isMember("itbisAmount") && !(*body)["itbisAmount"].isNumeric()) {
+                cb(json(err("Field 'itbisAmount' must be a numeric value."), k400BadRequest));
+                return;
+            }
 
             app::SendEcfCommand cmd;
-            cmd.xmlContent = (*body).get("xmlContent", "").asString();
-            cmd.fileName = (*body).get("fileName", "").asString();
-            cmd.rncEmisor = (*body).get("rncEmisor", "").asString();
-            cmd.eNcf = (*body).get("eNcf", "").asString();
-            if ((*body).isMember("rncComprador") && (*body)["rncComprador"].isString())
+            cmd.xmlContent = body->isMember("xmlContent") ? (*body)["xmlContent"].asString() : "";
+            cmd.fileName = body->isMember("fileName") ? (*body)["fileName"].asString() : "";
+            cmd.rncEmisor = body->isMember("rncEmisor") ? (*body)["rncEmisor"].asString() : "";
+            cmd.eNcf = body->isMember("eNcf") ? (*body)["eNcf"].asString() : "";
+            if (body->isMember("rncComprador"))
                 cmd.rncComprador = (*body)["rncComprador"].asString();
-            cmd.totalAmount = (*body).get("totalAmount", 0.0).asDouble();
-            cmd.itbisAmount = (*body).get("itbisAmount", 0.0).asDouble();
+            cmd.totalAmount = body->isMember("totalAmount") ? (*body)["totalAmount"].asDouble() : 0.0;
+            cmd.itbisAmount = body->isMember("itbisAmount") ? (*body)["itbisAmount"].asDouble() : 0.0;
 
             app::LoggingScope _log("SendEcfCommand");
             app::validateOrThrow(cmd);  // throws ValidationException -> 400
@@ -94,14 +123,25 @@ void EcfController::sendRfce(const HttpRequestPtr& req,
         std::move(callback),
         [req, &services](std::function<void(const HttpResponsePtr&)>&& cb) {
             auto body = req->getJsonObject();
-            if (!body) { cb(json(err("Invalid JSON body."), k400BadRequest)); return; }
+            if (!body || !body->isObject()) { cb(json(err("Invalid JSON body."), k400BadRequest)); return; }
 
             app::SendRfceCommand cmd;
             app::LoggingScope _log("SendRfceCommand");
 
             const Json::Value& rfceJson =
-                (*body).isMember("rfceModel") ? (*body)["rfceModel"] : *body;
-            cmd.rfceModel = mapping::rfceFromJson(rfceJson);
+                body->isMember("rfceModel") ? (*body)["rfceModel"] : *body;
+            if (!rfceJson.isObject()) {
+                cb(json(err("Field 'rfceModel' must be a valid JSON object."), k400BadRequest));
+                return;
+            }
+
+            try {
+                cmd.rfceModel = mapping::rfceFromJson(rfceJson);
+            } catch (const std::exception& ex) {
+                cb(json(err(std::string("RFCE JSON parsing error: ") + ex.what()), k400BadRequest));
+                return;
+            }
+
             app::validateOrThrow(cmd);  // throws ValidationException -> 400
 
             try {

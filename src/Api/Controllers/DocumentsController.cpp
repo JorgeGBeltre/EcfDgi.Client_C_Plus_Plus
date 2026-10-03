@@ -561,6 +561,16 @@ void DocumentsController::submit(const HttpRequestPtr& req,
                 return;
             }
 
+            if (dto.lines.empty()) {
+                cb(json(err("El documento debe contener al menos una línea de detalle."), k400BadRequest));
+                return;
+            }
+
+            if (dto.totals.montoTotal < 0.0) {
+                cb(json(err("El MontoTotal no puede ser negativo."), k400BadRequest));
+                return;
+            }
+
             std::string tipoComprobante = dto.tipoComprobante;
             std::transform(tipoComprobante.begin(), tipoComprobante.end(), tipoComprobante.begin(), ::toupper);
 
