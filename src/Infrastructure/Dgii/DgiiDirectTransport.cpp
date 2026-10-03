@@ -109,7 +109,9 @@ EcfRecepcionResponse DgiiDirectTransport::sendEcf(const std::string& xmlContent,
                                                   const std::string& fileName) {
     auto resp = sendWithReactiveAuth([&](const std::string& token) {
         return cpr::Post(cpr::Url{config_.recepcionUrl + "/api/facturaselectronicas"},
-                         cpr::Bearer{token}, xmlPart(xmlContent, fileName));
+                         cpr::Bearer{token}, xmlPart(xmlContent, fileName),
+                         cpr::Timeout{kReceptionTimeout},
+                         cpr::ConnectTimeout{kDefaultConnectTimeout});
     });
     if (looksLikeXml(resp.text, contentTypeOf(resp)))
         return xmlSerializer_.deserializeEcfRecepcion(resp.text);
@@ -128,7 +130,9 @@ RfceRecepcionResponse DgiiDirectTransport::sendRfce(const std::string& xmlConten
                                                     const std::string& fileName) {
     auto resp = sendWithReactiveAuth([&](const std::string& token) {
         return cpr::Post(cpr::Url{config_.recepcionFcUrl + "/api/recepcion/ecf"},
-                         cpr::Bearer{token}, xmlPart(xmlContent, fileName));
+                         cpr::Bearer{token}, xmlPart(xmlContent, fileName),
+                         cpr::Timeout{kReceptionTimeout},
+                         cpr::ConnectTimeout{kDefaultConnectTimeout});
     });
     if (looksLikeXml(resp.text, contentTypeOf(resp)))
         return xmlSerializer_.deserializeRfceRecepcion(resp.text);
@@ -147,7 +151,9 @@ ConsultaResultadoResponse DgiiDirectTransport::consultarResultado(const std::str
     auto resp = sendWithReactiveAuth([&](const std::string& token) {
         return cpr::Get(
             cpr::Url{config_.consultaResultadoUrl + "/api/consultas/estado?trackid=" + trackId},
-            cpr::Bearer{token}, cpr::Header{{"Accept", "application/json"}});
+            cpr::Bearer{token}, cpr::Header{{"Accept", "application/json"}},
+            cpr::Timeout{kDefaultReadTimeout},
+            cpr::ConnectTimeout{kDefaultConnectTimeout});
     });
     json j = parseJson(resp.text);
     ConsultaResultadoResponse r;
@@ -173,7 +179,9 @@ ConsultaEstadoResponse DgiiDirectTransport::consultarEstado(const ConsultaEstado
 
     auto resp = sendWithReactiveAuth([&](const std::string& token) {
         return cpr::Get(cpr::Url{url}, cpr::Bearer{token},
-                        cpr::Header{{"Accept", "application/json"}});
+                        cpr::Header{{"Accept", "application/json"}},
+                        cpr::Timeout{kDefaultReadTimeout},
+                        cpr::ConnectTimeout{kDefaultConnectTimeout});
     });
     json j = parseJson(resp.text);
     ConsultaEstadoResponse r;
@@ -197,7 +205,9 @@ std::vector<TrackIdDetalle> DgiiDirectTransport::consultarTrackIds(const std::st
         return cpr::Get(cpr::Url{config_.consultaTrackIdsUrl +
                                  "/api/trackids/consulta?rncemisor=" + rncEmisor +
                                  "&encf=" + eNcf},
-                        cpr::Bearer{token}, cpr::Header{{"Accept", "application/json"}});
+                        cpr::Bearer{token}, cpr::Header{{"Accept", "application/json"}},
+                        cpr::Timeout{kDefaultReadTimeout},
+                        cpr::ConnectTimeout{kDefaultConnectTimeout});
     });
     json j = parseJson(resp.text);
     std::vector<TrackIdDetalle> out;
@@ -220,7 +230,9 @@ RfceConsultaResponse DgiiDirectTransport::consultarRfce(const std::string& rncEm
         return cpr::Get(cpr::Url{config_.consultaRfceUrl +
                                  "/api/Consultas/Consulta?RNC_Emisor=" + rncEmisor +
                                  "&ENCF=" + eNcf + "&Cod_Seguridad_eCF=" + codigoSeguridad},
-                        cpr::Bearer{token}, cpr::Header{{"Accept", "application/json"}});
+                        cpr::Bearer{token}, cpr::Header{{"Accept", "application/json"}},
+                        cpr::Timeout{kDefaultReadTimeout},
+                        cpr::ConnectTimeout{kDefaultConnectTimeout});
     });
     json j = parseJson(resp.text);
     RfceConsultaResponse r;
@@ -237,7 +249,9 @@ AprobacionComercialResponse DgiiDirectTransport::sendAprobacionComercial(
     const std::string& xmlContent, const std::string& fileName) {
     auto resp = sendWithReactiveAuth([&](const std::string& token) {
         return cpr::Post(cpr::Url{config_.aprobacionComercialUrl + "/api/aprobacioncomercial"},
-                         cpr::Bearer{token}, xmlPart(xmlContent, fileName));
+                         cpr::Bearer{token}, xmlPart(xmlContent, fileName),
+                         cpr::Timeout{kReceptionTimeout},
+                         cpr::ConnectTimeout{kDefaultConnectTimeout});
     });
 
     bool isWhitespace = true;
@@ -247,7 +261,8 @@ AprobacionComercialResponse DgiiDirectTransport::sendAprobacionComercial(
             break;
         }
     }
-    if (isWhitespace) {
+    // BUG-014: Only accept empty body as success if HTTP status is explicitly 200 or 204
+    if (isWhitespace && (resp.status_code == 200 || resp.status_code == 204)) {
         AprobacionComercialResponse r;
         r.estado = "Aceptado";
         r.codigo = "1";
@@ -279,7 +294,9 @@ AnulacionResponse DgiiDirectTransport::anularRangos(const std::string& xmlConten
         return cpr::Post(cpr::Url{config_.anulacionRangosUrl + "/api/operaciones/anularrango"},
                          cpr::Bearer{token},
                          cpr::Header{{"Content-Type", "text/xml; charset=utf-8"}},
-                         cpr::Body{xmlContent});
+                         cpr::Body{xmlContent},
+                         cpr::Timeout{kReceptionTimeout},
+                         cpr::ConnectTimeout{kDefaultConnectTimeout});
     });
     json j = parseJson(resp.text);
     AnulacionResponse r;
@@ -294,7 +311,10 @@ AnulacionResponse DgiiDirectTransport::anularRangos(const std::string& xmlConten
 
 std::vector<DirectorioContribuyente> DgiiDirectTransport::consultarDirectorio() {
     auto resp = cpr::Get(cpr::Url{config_.directorioUrl + "/api/consultas/listado"},
-                         cpr::Header{{"Accept", "application/json"}});
+                         cpr::Header{{"Accept", "application/json"}},
+                         cpr::Timeout{kDefaultReadTimeout},
+                         cpr::ConnectTimeout{kDefaultConnectTimeout});
+    validateDgiiResponse(resp);
     json j = parseJson(resp.text);
     std::vector<DirectorioContribuyente> out;
     if (j.is_array()) {
@@ -314,7 +334,10 @@ std::vector<DirectorioContribuyente> DgiiDirectTransport::consultarDirectorio() 
 DirectorioContribuyente DgiiDirectTransport::consultarDirectorioPorRnc(const std::string& rnc) {
     auto resp = cpr::Get(cpr::Url{config_.directorioUrl +
                                   "/api/consultas/obtenerdirectorioporrnc?RNC=" + rnc},
-                         cpr::Header{{"Accept", "application/json"}});
+                         cpr::Header{{"Accept", "application/json"}},
+                         cpr::Timeout{kDefaultReadTimeout},
+                         cpr::ConnectTimeout{kDefaultConnectTimeout});
+    validateDgiiResponse(resp);
     json j = parseJson(resp.text);
     DirectorioContribuyente d;
     d.nombre = jstr(j, "nombre");
@@ -327,7 +350,10 @@ DirectorioContribuyente DgiiDirectTransport::consultarDirectorioPorRnc(const std
 
 TimbreResponse DgiiDirectTransport::consultarTimbre(const TimbreEcfRequest& req) {
     std::string url = EcfSecurityUtils::buildTimbreUrl(config_.timbreUrl, req);
-    auto resp = cpr::Get(cpr::Url{url}, cpr::Header{{"Accept", "application/json"}});
+    auto resp = cpr::Get(cpr::Url{url}, cpr::Header{{"Accept", "application/json"}},
+                         cpr::Timeout{kDefaultReadTimeout},
+                         cpr::ConnectTimeout{kDefaultConnectTimeout});
+    validateDgiiResponse(resp);
     json j = parseJson(resp.text);
     TimbreResponse r;
     r.rncEmisor = jstr(j, "rncEmisor");
@@ -344,7 +370,10 @@ TimbreResponse DgiiDirectTransport::consultarTimbre(const TimbreEcfRequest& req)
 
 TimbreFcResponse DgiiDirectTransport::consultarTimbreFc(const TimbreFcRequest& req) {
     std::string url = EcfSecurityUtils::buildTimbreFcUrl(config_.timbreFcUrl, req);
-    auto resp = cpr::Get(cpr::Url{url}, cpr::Header{{"Accept", "application/json"}});
+    auto resp = cpr::Get(cpr::Url{url}, cpr::Header{{"Accept", "application/json"}},
+                         cpr::Timeout{kDefaultReadTimeout},
+                         cpr::ConnectTimeout{kDefaultConnectTimeout});
+    validateDgiiResponse(resp);
     json j = parseJson(resp.text);
     TimbreFcResponse r;
     r.rncEmisor = jstr(j, "rncEmisor");
@@ -357,7 +386,10 @@ TimbreFcResponse DgiiDirectTransport::consultarTimbreFc(const TimbreFcRequest& r
 std::vector<EstatusServicio> DgiiDirectTransport::consultarEstatusServicios() {
     auto resp = cpr::Get(cpr::Url{config_.estatusServiciosUrl +
                                   "/api/estatusservicios/obtenerestatus"},
-                         cpr::Header{{"Accept", "application/json"}});
+                         cpr::Header{{"Accept", "application/json"}},
+                         cpr::Timeout{kDefaultReadTimeout},
+                         cpr::ConnectTimeout{kDefaultConnectTimeout});
+    validateDgiiResponse(resp);
     json j = parseJson(resp.text);
     std::vector<EstatusServicio> out;
     if (j.is_array()) {
@@ -375,7 +407,10 @@ std::vector<EstatusServicio> DgiiDirectTransport::consultarEstatusServicios() {
 std::vector<VentanaMantenimiento> DgiiDirectTransport::consultarVentanasMantenimiento() {
     auto resp = cpr::Get(cpr::Url{config_.estatusServiciosUrl +
                                   "/api/estatusservicios/obtenerventanasmantenimiento"},
-                         cpr::Header{{"Accept", "application/json"}});
+                         cpr::Header{{"Accept", "application/json"}},
+                         cpr::Timeout{kDefaultReadTimeout},
+                         cpr::ConnectTimeout{kDefaultConnectTimeout});
+    validateDgiiResponse(resp);
     json j = parseJson(resp.text);
     std::vector<VentanaMantenimiento> out;
     if (j.is_array()) {
@@ -399,7 +434,10 @@ std::string DgiiDirectTransport::verificarEstadoAmbiente(AmbienteEnum ambiente) 
     }
     auto resp = cpr::Get(cpr::Url{config_.estatusServiciosUrl +
                                   "/api/estatusservicios/verificarestado?ambiente=" +
-                                  std::to_string(ambienteId)});
+                                  std::to_string(ambienteId)},
+                         cpr::Timeout{kDefaultReadTimeout},
+                         cpr::ConnectTimeout{kDefaultConnectTimeout});
+    validateDgiiResponse(resp);
     return resp.text;
 }
 

@@ -9,6 +9,7 @@
 #include "Domain/Entities/EcfClientOptions.h"
 #include "Infrastructure/Security/EcfSecurityUtils.h"
 #include "Infrastructure/Dgii/EcfEnvironmentConfig.h"
+#include "Infrastructure/Dgii/DgiiDirectTransport.h"
 #include "Shared/Common/Sys.h"
 
 using namespace ecf;
@@ -378,6 +379,72 @@ int main() {
 
         auto tInvalid = sys::parseIsoUtc("not-a-date");
         CHECK(tInvalid == std::chrono::system_clock::time_point{}, "parseIsoUtc invalid returns default time_point");
+    }
+
+    // Test 19: DGII Transport explicit timeouts & network error discrimination (BUG-014, PERF-001)
+    {
+        CHECK(infra::kDefaultConnectTimeout.count() == 5000, "PERF-001: kDefaultConnectTimeout is 5000ms");
+        CHECK(infra::kDefaultReadTimeout.count() == 15000, "PERF-001: kDefaultReadTimeout is 15000ms");
+        CHECK(infra::kReceptionTimeout.count() == 30000, "PERF-001: kReceptionTimeout is 30000ms");
+
+        // Network error code throws EcfException
+        cpr::Response netErrResp;
+        netErrResp.error.code = cpr::ErrorCode::CONNECTION_FAILURE;
+        netErrResp.error.message = "Connection refused";
+        bool caughtNetErr = false;
+        try {
+            infra::DgiiDirectTransport::validateDgiiResponse(netErrResp);
+        } catch (const domain::EcfException&) {
+            caughtNetErr = true;
+        }
+        CHECK(caughtNetErr, "BUG-014: validateDgiiResponse throws EcfException on cpr network failure");
+
+        // HTTP 0 (Unreachable) throws EcfException
+        cpr::Response http0Resp;
+        http0Resp.status_code = 0;
+        bool caughtHttp0 = false;
+        try {
+            infra::DgiiDirectTransport::validateDgiiResponse(http0Resp);
+        } catch (const domain::EcfException&) {
+            caughtHttp0 = true;
+        }
+        CHECK(caughtHttp0, "BUG-014: validateDgiiResponse throws EcfException on HTTP 0");
+
+        // HTTP 503 Server error throws EcfException
+        cpr::Response http500Resp;
+        http500Resp.status_code = 503;
+        http500Resp.text = "Service Unavailable";
+        bool caught500 = false;
+        try {
+            infra::DgiiDirectTransport::validateDgiiResponse(http500Resp);
+        } catch (const domain::EcfException&) {
+            caught500 = true;
+        }
+        CHECK(caught500, "BUG-014: validateDgiiResponse throws EcfException on HTTP 503");
+
+        // HTTP 401 Unauthorized throws EcfException
+        cpr::Response http401Resp;
+        http401Resp.status_code = 401;
+        http401Resp.text = "Unauthorized token";
+        bool caught401 = false;
+        try {
+            infra::DgiiDirectTransport::validateDgiiResponse(http401Resp);
+        } catch (const domain::EcfException&) {
+            caught401 = true;
+        }
+        CHECK(caught401, "BUG-014: validateDgiiResponse throws EcfException on HTTP 401");
+
+        // HTTP 200 OK does NOT throw
+        cpr::Response http200Resp;
+        http200Resp.status_code = 200;
+        http200Resp.text = "{\"trackId\":\"TRK-123\"}";
+        bool noThrow = true;
+        try {
+            infra::DgiiDirectTransport::validateDgiiResponse(http200Resp);
+        } catch (...) {
+            noThrow = false;
+        }
+        CHECK(noThrow, "BUG-014: validateDgiiResponse allows HTTP 200 OK to pass");
     }
 
     std::printf("\nTotal failures: %d\n", failures);

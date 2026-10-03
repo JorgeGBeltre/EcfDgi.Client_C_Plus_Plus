@@ -143,9 +143,12 @@ void EcfTokenManager::invalidate() {
 
 void EcfTokenManager::renewToken() {
     // 1. Request the seed.
-    auto seedResp = cpr::Get(cpr::Url{config_.autenticacionUrl + "/api/autenticacion/semilla"});
-    if (seedResp.status_code == 0)
-        throw EcfException("No se pudo obtener la semilla: " + seedResp.error.message);
+    auto seedResp = cpr::Get(
+        cpr::Url{config_.autenticacionUrl + "/api/autenticacion/semilla"},
+        cpr::Timeout{15000},
+        cpr::ConnectTimeout{5000});
+    if (seedResp.error.code != cpr::ErrorCode::OK || seedResp.status_code == 0)
+        throw EcfException("No se pudo obtener la semilla: " + (seedResp.error.message.empty() ? "HTTP 0" : seedResp.error.message));
     const std::string semillaXml = seedResp.text;
 
     // 2. Sign the seed.
@@ -155,10 +158,13 @@ void EcfTokenManager::renewToken() {
     auto validateResp = cpr::Post(
         cpr::Url{config_.autenticacionUrl + "/api/autenticacion/validarsemilla"},
         cpr::Multipart{{"xml", cpr::Buffer{semillaFirmada.begin(), semillaFirmada.end(),
-                                           "semilla.xml"}}});
-    if (validateResp.status_code < 200 || validateResp.status_code >= 300)
+                                           "semilla.xml"}}},
+        cpr::Timeout{15000},
+        cpr::ConnectTimeout{5000});
+    if (validateResp.error.code != cpr::ErrorCode::OK || validateResp.status_code < 200 || validateResp.status_code >= 300)
         throw EcfException("Fallo la validación de la semilla (HTTP " +
-                           std::to_string(validateResp.status_code) + ").");
+                           std::to_string(validateResp.status_code) + "): " +
+                           (validateResp.error.message.empty() ? validateResp.text : validateResp.error.message));
 
     // 4. Extract token + expiry (supports both XML and JSON formats from DGII / mock endpoints).
     std::string token;
