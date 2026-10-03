@@ -55,11 +55,11 @@ int main() {
     auto& services = ecf::api::AppServices::instance();
     services.configure(config);
 
-    // Auto-apply schema and seed the default admin user on startup.
+    // Auto-apply schema and apply maintenance migrations on startup.
     try {
         ecf::infra::DbInitializer::initialize(config.connectionString, config.schemaPath,
                                               *services.passwordHasher());
-        spdlog::info("Database schema applied and admin user ensured.");
+        spdlog::info("Database schema applied and verified.");
     } catch (const std::exception& ex) {
         spdlog::warn("Database initialization skipped/failed: {}", ex.what());
     }

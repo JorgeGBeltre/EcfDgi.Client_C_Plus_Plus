@@ -149,7 +149,7 @@ TenantSignerResolver::TenantSignerResolver(std::string connectionString,
       defaultSigner_(std::move(defaultSigner)),
       masterKey_(std::move(masterKey)) {}
 
-std::shared_ptr<domain::IEcfXmlSigner> TenantSignerResolver::resolveTenantSignerOnly(const std::string& rnc) {
+std::shared_ptr<domain::IEcfXmlSigner> TenantSignerResolver::resolveTenantSignerOnly(const std::string& rnc, const std::string& tenantId) {
     if (rnc.empty()) {
         return nullptr;
     }
@@ -159,12 +159,13 @@ std::shared_ptr<domain::IEcfXmlSigner> TenantSignerResolver::resolveTenantSigner
         return nullptr;
     }
 
+    std::string cacheKey = cleanRnc + ":" + tenantId;
     auto now = std::chrono::system_clock::now();
 
     // 1. Check in-memory cache
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        auto it = cache_.find(cleanRnc);
+        auto it = cache_.find(cacheKey);
         if (it != cache_.end() && it->second.expiresAt > now) {
             return it->second.signer;
         }
@@ -177,13 +178,27 @@ std::shared_ptr<domain::IEcfXmlSigner> TenantSignerResolver::resolveTenantSigner
         try {
             pqxx::connection conn(connectionString_);
             pqxx::nontransaction n(conn);
-            pqxx::result r = n.exec_params(
-                "SELECT \"Code\", \"CompanyName\", \"CertificateRawData\", \"CertificatePasswordEncrypted\" "
-                "FROM \"Tenants\" "
-                "WHERE REPLACE(REPLACE(\"Rnc\", '-', ''), ' ', '') = $1 "
-                "  AND \"IsActive\" = true "
-                "LIMIT 1;",
-                cleanRnc);
+            
+            pqxx::result r;
+            if (!tenantId.empty() && tenantId != "default" && tenantId != "default-tenant") {
+                // SEC-047: Restringir material criptográfico estrictamente a la empresa autenticada
+                r = n.exec_params(
+                    "SELECT \"Code\", \"CompanyName\", \"CertificateRawData\", \"CertificatePasswordEncrypted\" "
+                    "FROM \"Tenants\" "
+                    "WHERE REPLACE(REPLACE(\"Rnc\", '-', ''), ' ', '') = $1 "
+                    "  AND (\"Code\" = $2 OR \"Id\"::text = $2) "
+                    "  AND \"IsActive\" = true "
+                    "LIMIT 1;",
+                    cleanRnc, tenantId);
+            } else {
+                r = n.exec_params(
+                    "SELECT \"Code\", \"CompanyName\", \"CertificateRawData\", \"CertificatePasswordEncrypted\" "
+                    "FROM \"Tenants\" "
+                    "WHERE REPLACE(REPLACE(\"Rnc\", '-', ''), ' ', '') = $1 "
+                    "  AND \"IsActive\" = true "
+                    "LIMIT 1;",
+                    cleanRnc);
+            }
 
             if (!r.empty()) {
                 std::string code = r[0]["Code"].is_null() ? "" : r[0]["Code"].as<std::string>();
@@ -201,7 +216,7 @@ std::shared_ptr<domain::IEcfXmlSigner> TenantSignerResolver::resolveTenantSigner
                             spdlog::info("[TenantSignerResolver] Certificado digital cargado desde BD para RNC {} ({})", cleanRnc, companyName);
 
                             std::lock_guard<std::mutex> lock(mutex_);
-                            cache_[cleanRnc] = CachedSigner{signer, now + std::chrono::minutes(5)};
+                            cache_[cacheKey] = CachedSigner{signer, now + std::chrono::minutes(5)};
                             return signer;
                         } catch (const std::exception& ex) {
                             spdlog::warn("[TenantSignerResolver] Fallo al instanciar certificado digital para Tenant {} (RNC {}) desde BD: {}",
@@ -216,23 +231,26 @@ std::shared_ptr<domain::IEcfXmlSigner> TenantSignerResolver::resolveTenantSigner
     }
 
     // 3. Check disk (/app/certificates or certificates)
-    const char* envPwd = std::getenv("ECF_CERTIFICATE_PASSWORD");
-    std::string diskCertPassword = envPwd ? envPwd : "";
+    // SEC-047: Si se indicó tenantId específico, no permitir cross-tenant en disco
+    if (tenantId.empty() || tenantId == cleanRnc || tenantId == "default" || tenantId == "default-tenant") {
+        const char* envPwd = std::getenv("ECF_CERTIFICATE_PASSWORD");
+        std::string diskCertPassword = envPwd ? envPwd : "";
 
-    std::vector<std::string> certDirs = {"/app/certificates", "certificates"};
-    for (const auto& dir : certDirs) {
-        std::string pfxPath = dir + "/" + cleanRnc + ".pfx";
-        std::error_code ec;
-        if (std::filesystem::exists(pfxPath, ec)) {
-            try {
-                auto signer = std::make_shared<EcfXmlSigner>(pfxPath, diskCertPassword);
-                spdlog::info("[TenantSignerResolver] Certificado digital cargado desde disco para RNC {} ({})", cleanRnc, pfxPath);
+        std::vector<std::string> certDirs = {"/app/certificates", "certificates"};
+        for (const auto& dir : certDirs) {
+            std::string pfxPath = dir + "/" + cleanRnc + ".pfx";
+            std::error_code ec;
+            if (std::filesystem::exists(pfxPath, ec)) {
+                try {
+                    auto signer = std::make_shared<EcfXmlSigner>(pfxPath, diskCertPassword);
+                    spdlog::info("[TenantSignerResolver] Certificado digital cargado desde disco para RNC {} ({})", cleanRnc, pfxPath);
 
-                std::lock_guard<std::mutex> lock(mutex_);
-                cache_[cleanRnc] = CachedSigner{signer, now + std::chrono::minutes(5)};
-                return signer;
-            } catch (const std::exception& ex) {
-                spdlog::warn("[TenantSignerResolver] Fallo al cargar certificado en disco {}: {}", pfxPath, ex.what());
+                    std::lock_guard<std::mutex> lock(mutex_);
+                    cache_[cacheKey] = CachedSigner{signer, now + std::chrono::minutes(5)};
+                    return signer;
+                } catch (const std::exception& ex) {
+                    spdlog::warn("[TenantSignerResolver] Fallo al cargar certificado en disco {}: {}", pfxPath, ex.what());
+                }
             }
         }
     }

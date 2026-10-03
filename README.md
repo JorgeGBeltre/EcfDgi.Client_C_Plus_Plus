@@ -92,9 +92,7 @@ graph TD
 >
 > **Interactive Documentation:** open [http://localhost:8080/scalar](http://localhost:8080/scalar) or [http://localhost:8080/swagger](http://localhost:8080/swagger) to view interactive API docs.
 >
-> **Default Admin Credentials:** a default admin user is seeded on first run:
-> - **Username:** `admin`
-> - **Password:** `AdminPassword123!`
+> **User Management:** users and credentials are authenticated and managed securely via `SaaS-Ecf-Back`. Legacy engine-seeded default users are disabled.
 
 ---
 

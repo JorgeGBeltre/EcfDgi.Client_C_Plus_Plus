@@ -150,7 +150,7 @@ std::shared_ptr<domain::IEcfXmlSigner> resolveSigner(
     // Cargar certificado dinámico real desde PostgreSQL (Tenants)
     if (services.tenantSignerResolver() && !rncEmisor.empty()) {
         try {
-            auto tenantSigner = services.tenantSignerResolver()->resolveTenantSignerOnly(rncEmisor);
+            auto tenantSigner = services.tenantSignerResolver()->resolveTenantSignerOnly(rncEmisor, tenantId);
             if (tenantSigner && tenantSigner != services.signer()) {
                 return tenantSigner;
             }

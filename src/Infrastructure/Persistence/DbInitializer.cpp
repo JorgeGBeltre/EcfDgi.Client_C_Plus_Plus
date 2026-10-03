@@ -46,7 +46,12 @@ void DbInitializer::initialize(const std::string& connectionString,
         w.commit();
     }
 
-    // 2. Default admin user seed removed for security (CRIT-08). Users are managed via SaaS-Ecf-Back.
+    // 2. SEC-053: Purge legacy seeded admin user and insecure accounts. Users are managed via SaaS-Ecf-Back.
+    {
+        pqxx::work w(conn);
+        w.exec("DELETE FROM users WHERE id = '9f3c7e09-8b2a-4c1d-9e3f-1a2b3c4d5e6f' OR username = 'admin' OR email LIKE '%@ecfdgii.client.com';");
+        w.commit();
+    }
 
     // 3. Seed the default "Consumidor Final" customer with a fixed
     //    id/RNC/date so the seed is stable across runs.

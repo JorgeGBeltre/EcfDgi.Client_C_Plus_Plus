@@ -28,8 +28,9 @@ public:
     /// <summary>
     /// Obtiene la instancia de IEcfXmlSigner del contribuyente únicamente si posee
     /// un certificado digital activo registrado en BD o disco. Retorna nullptr si no existe.
+    /// Valida que el RNC pertenezca al tenantId provisto si se especifica.
     /// </summary>
-    virtual std::shared_ptr<IEcfXmlSigner> resolveTenantSignerOnly(const std::string& rnc) = 0;
+    virtual std::shared_ptr<IEcfXmlSigner> resolveTenantSignerOnly(const std::string& rnc, const std::string& tenantId = "") = 0;
 };
 
 }  // namespace ecf::domain
