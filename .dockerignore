@@ -48,7 +48,7 @@ postgres_data
 
 Dockerfile.old
 docker-compose.override.yml
-
-This is especially useful when Docker spends too much time in:
-
-transferring context
+.env
+*.env
+production.env
+docker-compose*.env

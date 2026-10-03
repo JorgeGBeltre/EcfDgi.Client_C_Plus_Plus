@@ -224,10 +224,14 @@ jobs:
               with open(github_env, "a", encoding="utf-8") as f:
                   for k, v in parsed.items():
                       clean_v = clean(v)
+                      if clean_v:
+                          print(f"::add-mask::{clean_v}")
                       delimiter = f"DELIMITER_{k}"
                       f.write(f"{k}<<{delimiter}\n{clean_v}\n{delimiter}\n")
+                  if dgii_b64:
+                      print(f"::add-mask::{dgii_b64}")
                   f.write(f"DGII_ENV_BASE64<<DELIMITER_DGII\n{dgii_b64}\nDELIMITER_DGII\n")
-              print(f"Extracted {len(parsed)} variables into GITHUB_ENV along with DGII_ENV_BASE64.")
+              print(f"Extracted and masked {len(parsed)} variables into GITHUB_ENV along with DGII_ENV_BASE64.")
           PYEOF
 
       - name: Deploy C++ Engine via SSH
