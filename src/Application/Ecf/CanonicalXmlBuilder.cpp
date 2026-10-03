@@ -35,6 +35,51 @@ bool hasAlpha(const std::string& s) {
     return false;
 }
 
+std::tm getDominicanTm(std::time_t tt) {
+    // Dominican Republic is UTC-4 year-round (no DST)
+    std::time_t dom_tt = tt - (4 * 3600);
+    std::tm tm{};
+#if defined(_WIN32)
+    gmtime_s(&tm, &dom_tt);
+#else
+    gmtime_r(&dom_tt, &tm);
+#endif
+    return tm;
+}
+
+std::string formatMoney2(double val) {
+    std::ostringstream os;
+    os << std::fixed << std::setprecision(2) << val;
+    return os.str();
+}
+
+std::string formatPrice4(double val) {
+    std::ostringstream os;
+    os << std::fixed << std::setprecision(4) << val;
+    std::string s = os.str();
+    size_t dot = s.find('.');
+    if (dot != std::string::npos) {
+        while (s.size() > dot + 3 && s.back() == '0') {
+            s.pop_back();
+        }
+    }
+    return s;
+}
+
+std::string formatQty2(double val) {
+    std::ostringstream os;
+    os << std::fixed << std::setprecision(2) << val;
+    std::string s = os.str();
+    while (s.find('.') != std::string::npos && (s.back() == '0' || s.back() == '.')) {
+        if (s.back() == '.') {
+            s.pop_back();
+            break;
+        }
+        s.pop_back();
+    }
+    return s;
+}
+
 } // namespace
 
 std::string escapeXml(const std::string& value) {
@@ -73,12 +118,7 @@ std::string normalizeFechaDgii(const std::string& value) {
     if (value.empty()) {
         auto now = std::chrono::system_clock::now();
         std::time_t tt = std::chrono::system_clock::to_time_t(now);
-        std::tm tm{};
-#if defined(_WIN32)
-        localtime_s(&tm, &tt);
-#else
-        localtime_r(&tt, &tm);
-#endif
+        std::tm tm = getDominicanTm(tt);
         char buf[32];
         std::strftime(buf, sizeof(buf), "%d-%m-%Y", &tm);
         return std::string(buf);
@@ -123,12 +163,13 @@ std::vector<ProcessedLineItem> normalizeCanonicalLines(const std::vector<Canonic
 
     for (const auto& line : lines) {
         double rawQty = line.quantity > 0.0 ? line.quantity : 1.0;
-        double rawPrice = line.quantity > 0.0 ? line.unitPrice : line.amount;
+        double rawPrice = line.unitPrice;
+        double rawAmount = line.amount;
         std::string rawName = !line.itemName.empty() ? line.itemName : "Item";
 
         // Negative line (discount in QuickBooks)
-        if (line.amount < 0.0 || rawPrice < 0.0) {
-            double absDiscount = std::abs(line.amount);
+        if (rawAmount < 0.0 || rawPrice < 0.0) {
+            double absDiscount = std::abs(rawAmount != 0.0 ? rawAmount : rawPrice * rawQty);
             if (!result.empty()) {
                 auto& prev = result.back();
                 prev.discountAmount += absDiscount;
@@ -137,14 +178,25 @@ std::vector<ProcessedLineItem> normalizeCanonicalLines(const std::vector<Canonic
             }
         }
 
-        // Regla DGII: Líneas con valor 0 o precio 0 no se agregan al XML
-        if (line.amount == 0.0 || rawPrice == 0.0) {
+        // Derive price or amount if omitted
+        if (rawAmount > 0.0 && rawPrice <= 0.0) {
+            rawPrice = rawAmount / rawQty;
+        } else if (rawAmount <= 0.0 && rawPrice > 0.0) {
+            rawAmount = rawPrice * rawQty;
+        }
+
+        // Regla DGII: Líneas con valor 0 y precio 0 no se agregan al XML
+        if (rawAmount <= 0.0 && rawPrice <= 0.0) {
             continue;
         }
 
         double safeQty = rawQty > 0.0 ? rawQty : 1.0;
         double safePrice = std::max(0.0, rawPrice);
-        double safeAmount = std::max(0.0, line.amount);
+        double safeDiscount = line.discountAmount.has_value() ? std::max(0.0, *line.discountAmount) : 0.0;
+        double safeAmount = std::max(0.0, rawAmount);
+        if (safeAmount == 0.0 && safePrice > 0.0) {
+            safeAmount = std::max(0.0, (safePrice * safeQty) - safeDiscount);
+        }
 
         std::string shortName = rawName.length() > 80 ? rawName.substr(0, 80) : rawName;
         std::string extendedDesc;
@@ -158,8 +210,26 @@ std::vector<ProcessedLineItem> normalizeCanonicalLines(const std::vector<Canonic
         pi.description = extendedDesc;
         pi.quantity = safeQty;
         pi.unitPrice = safePrice;
-        pi.discountAmount = 0.0;
+        pi.discountAmount = safeDiscount;
         pi.montoItem = safeAmount;
+
+        // Line-level IndicadorFacturacion
+        if (line.indicadorFacturacion.has_value() && *line.indicadorFacturacion >= 0 && *line.indicadorFacturacion <= 4) {
+            pi.indicadorFacturacion = *line.indicadorFacturacion;
+        } else if (line.taxRate.has_value()) {
+            if (*line.taxRate == 18) pi.indicadorFacturacion = 1;
+            else if (*line.taxRate == 16) pi.indicadorFacturacion = 2;
+            else if (*line.taxRate == 0) pi.indicadorFacturacion = 3;
+            else pi.indicadorFacturacion = 1;
+        } else if (line.taxAmount.has_value() && *line.taxAmount > 0.0) {
+            pi.indicadorFacturacion = 1;
+        } else {
+            pi.indicadorFacturacion = 1;
+        }
+
+        pi.montoItbisRetenido = line.montoItbisRetenido;
+        pi.montoIsrRetenido = line.montoIsrRetenido;
+
         result.push_back(pi);
     }
 
@@ -171,6 +241,7 @@ std::vector<ProcessedLineItem> normalizeCanonicalLines(const std::vector<Canonic
         pi.unitPrice = defaultTotal;
         pi.discountAmount = 0.0;
         pi.montoItem = defaultTotal;
+        pi.indicadorFacturacion = 1;
         result.push_back(pi);
     }
 
@@ -184,16 +255,49 @@ void appendRetencion(std::ostringstream& ss, const std::optional<CanonicalRetent
        << "        <IndicadorAgenteRetencionoPercepcion>" << retention->indicadorAgenteRetencionoPercepcion << "</IndicadorAgenteRetencionoPercepcion>\n";
     if (tipoEcf == "47") {
         double isr = retention->montoIsrRetenido.value_or(0.0);
-        ss << std::fixed << std::setprecision(2);
-        ss << "        <MontoISRRetenido>" << isr << "</MontoISRRetenido>\n";
+        ss << "        <MontoISRRetenido>" << formatMoney2(isr) << "</MontoISRRetenido>\n";
     } else {
-        ss << std::fixed << std::setprecision(2);
-        ss << "        <MontoITBISRetenido>" << retention->montoItbisRetenido << "</MontoITBISRetenido>\n";
+        ss << "        <MontoITBISRetenido>" << formatMoney2(retention->montoItbisRetenido) << "</MontoITBISRetenido>\n";
         if (retention->montoIsrRetenido.has_value()) {
-            ss << "        <MontoISRRetenido>" << *retention->montoIsrRetenido << "</MontoISRRetenido>\n";
+            ss << "        <MontoISRRetenido>" << formatMoney2(*retention->montoIsrRetenido) << "</MontoISRRetenido>\n";
         }
     }
     ss << "      </Retencion>\n";
+}
+
+void appendLineRetencion(std::ostringstream& ss,
+                         const ProcessedLineItem& item,
+                         int indicadorAgente,
+                         const std::string& tipoEcf) {
+    double itbis = item.montoItbisRetenido.value_or(0.0);
+    double isr = item.montoIsrRetenido.value_or(0.0);
+
+    if (tipoEcf == "47") {
+        ss << "      <Retencion>\n"
+           << "        <IndicadorAgenteRetencionoPercepcion>" << indicadorAgente << "</IndicadorAgenteRetencionoPercepcion>\n"
+           << "        <MontoISRRetenido>" << formatMoney2(isr) << "</MontoISRRetenido>\n"
+           << "      </Retencion>\n";
+    } else if (tipoEcf == "41") {
+        ss << "      <Retencion>\n"
+           << "        <IndicadorAgenteRetencionoPercepcion>" << indicadorAgente << "</IndicadorAgenteRetencionoPercepcion>\n"
+           << "        <MontoITBISRetenido>" << formatMoney2(itbis) << "</MontoITBISRetenido>\n";
+        if (isr > 0.0) {
+            ss << "        <MontoISRRetenido>" << formatMoney2(isr) << "</MontoISRRetenido>\n";
+        }
+        ss << "      </Retencion>\n";
+    } else if (tipoEcf == "31" || tipoEcf == "33" || tipoEcf == "34") {
+        if (itbis > 0.0 || isr > 0.0) {
+            ss << "      <Retencion>\n"
+               << "        <IndicadorAgenteRetencionoPercepcion>" << indicadorAgente << "</IndicadorAgenteRetencionoPercepcion>\n";
+            if (itbis > 0.0) {
+                ss << "        <MontoITBISRetenido>" << formatMoney2(itbis) << "</MontoITBISRetenido>\n";
+            }
+            if (isr > 0.0) {
+                ss << "        <MontoISRRetenido>" << formatMoney2(isr) << "</MontoISRRetenido>\n";
+            }
+            ss << "      </Retencion>\n";
+        }
+    }
 }
 
 std::string buildXmlFromCanonical(const CanonicalDocumentDto& dto,
@@ -244,12 +348,7 @@ std::string buildXmlFromCanonical(const CanonicalDocumentDto& dto,
             } else {
                 auto now = std::chrono::system_clock::now();
                 std::time_t tt = std::chrono::system_clock::to_time_t(now);
-                std::tm tm{};
-#if defined(_WIN32)
-                localtime_s(&tm, &tt);
-#else
-                localtime_r(&tt, &tm);
-#endif
+                std::tm tm = getDominicanTm(tt);
                 int currentYear = tm.tm_year + 1900;
                 year = std::max(2027, currentYear + 1);
             }
@@ -337,33 +436,32 @@ std::string buildXmlFromCanonical(const CanonicalDocumentDto& dto,
     }
 
     ss << "    <Totales>\n";
-    ss << std::fixed << std::setprecision(2);
     double total = dto.totals.montoTotal;
     double itbis = dto.totals.montoItbis;
     double gravado = dto.totals.montoGravadoTotal.value_or(dto.totals.montoSubtotal);
     double exento = dto.totals.montoExento.value_or(0.0);
 
     if (tipoEcf == "43" || tipoEcf == "44") {
-        if (total > 0.0) ss << "      <MontoExento>" << total << "</MontoExento>\n";
-        ss << "      <MontoTotal>" << total << "</MontoTotal>\n";
+        if (total > 0.0) ss << "      <MontoExento>" << formatMoney2(total) << "</MontoExento>\n";
+        ss << "      <MontoTotal>" << formatMoney2(total) << "</MontoTotal>\n";
     } else if (tipoEcf == "47") {
-        if (total > 0.0) ss << "      <MontoExento>" << total << "</MontoExento>\n";
-        ss << "      <MontoTotal>" << total << "</MontoTotal>\n";
+        if (total > 0.0) ss << "      <MontoExento>" << formatMoney2(total) << "</MontoExento>\n";
+        ss << "      <MontoTotal>" << formatMoney2(total) << "</MontoTotal>\n";
         if (dto.retention.has_value() && dto.retention->montoIsrRetenido.has_value() && *dto.retention->montoIsrRetenido > 0.0) {
-            ss << "      <TotalISRRetencion>" << *dto.retention->montoIsrRetenido << "</TotalISRRetencion>\n";
+            ss << "      <TotalISRRetencion>" << formatMoney2(*dto.retention->montoIsrRetenido) << "</TotalISRRetencion>\n";
         }
     } else if (tipoEcf == "46") {
         if (total > 0.0) {
-            ss << "      <MontoGravadoTotal>" << total << "</MontoGravadoTotal>\n"
-               << "      <MontoGravadoI3>" << total << "</MontoGravadoI3>\n"
+            ss << "      <MontoGravadoTotal>" << formatMoney2(total) << "</MontoGravadoTotal>\n"
+               << "      <MontoGravadoI3>" << formatMoney2(total) << "</MontoGravadoI3>\n"
                << "      <ITBIS3>0</ITBIS3>\n"
                << "      <TotalITBIS>0.00</TotalITBIS>\n"
                << "      <TotalITBIS3>0.00</TotalITBIS3>\n";
         }
-        ss << "      <MontoTotal>" << total << "</MontoTotal>\n";
+        ss << "      <MontoTotal>" << formatMoney2(total) << "</MontoTotal>\n";
     } else {
         if (gravado > 0.0) {
-            ss << "      <MontoGravadoTotal>" << gravado << "</MontoGravadoTotal>\n";
+            ss << "      <MontoGravadoTotal>" << formatMoney2(gravado) << "</MontoGravadoTotal>\n";
         }
 
         std::optional<double> slotBase[4];
@@ -383,16 +481,17 @@ std::string buildXmlFromCanonical(const CanonicalDocumentDto& dto,
         } else if (gravado > 0.0) {
             slotBase[1] = gravado;
             slotTax[1] = itbis;
+            slotRate[1] = 18;
         }
 
         for (int slot = 1; slot <= 3; ++slot) {
             if (slotBase[slot].has_value()) {
-                ss << "      <MontoGravadoI" << slot << ">" << *slotBase[slot] << "</MontoGravadoI" << slot << ">\n";
+                ss << "      <MontoGravadoI" << slot << ">" << formatMoney2(*slotBase[slot]) << "</MontoGravadoI" << slot << ">\n";
             }
         }
 
         if (exento > 0.0) {
-            ss << "      <MontoExento>" << exento << "</MontoExento>\n";
+            ss << "      <MontoExento>" << formatMoney2(exento) << "</MontoExento>\n";
         }
 
         for (int slot = 1; slot <= 3; ++slot) {
@@ -401,45 +500,29 @@ std::string buildXmlFromCanonical(const CanonicalDocumentDto& dto,
             }
         }
 
-        ss << "      <TotalITBIS>" << itbis << "</TotalITBIS>\n";
+        ss << "      <TotalITBIS>" << formatMoney2(itbis) << "</TotalITBIS>\n";
 
         for (int slot = 1; slot <= 3; ++slot) {
             if (slotTax[slot].has_value()) {
-                ss << "      <TotalITBIS" << slot << ">" << *slotTax[slot] << "</TotalITBIS" << slot << ">\n";
+                ss << "      <TotalITBIS" << slot << ">" << formatMoney2(*slotTax[slot]) << "</TotalITBIS" << slot << ">\n";
             }
         }
 
-        ss << "      <MontoTotal>" << total << "</MontoTotal>\n";
+        ss << "      <MontoTotal>" << formatMoney2(total) << "</MontoTotal>\n";
 
         if (tipoEcf == "31" || tipoEcf == "33" || tipoEcf == "34" || tipoEcf == "41") {
             if (dto.retention.has_value()) {
                 if (dto.retention->montoItbisRetenido > 0.0) {
-                    ss << "      <TotalITBISRetenido>" << dto.retention->montoItbisRetenido << "</TotalITBISRetenido>\n";
+                    ss << "      <TotalITBISRetenido>" << formatMoney2(dto.retention->montoItbisRetenido) << "</TotalITBISRetenido>\n";
                 }
                 if (dto.retention->montoIsrRetenido.has_value() && *dto.retention->montoIsrRetenido > 0.0) {
-                    ss << "      <TotalISRRetencion>" << *dto.retention->montoIsrRetenido << "</TotalISRRetencion>\n";
+                    ss << "      <TotalISRRetencion>" << formatMoney2(*dto.retention->montoIsrRetenido) << "</TotalISRRetencion>\n";
                 }
             }
         }
     }
     ss << "    </Totales>\n"
        << "  </Encabezado>\n";
-
-    std::optional<CanonicalRetentionDto> retention;
-    if (tipoEcf == "31" || tipoEcf == "33" || tipoEcf == "34" || tipoEcf == "41" || tipoEcf == "47") {
-        retention = dto.retention;
-    }
-
-    std::string indicadorFacturacion = "1";
-    if (tipoEcf == "43" || tipoEcf == "44" || tipoEcf == "47") {
-        indicadorFacturacion = "4";
-    } else if (tipoEcf == "46") {
-        indicadorFacturacion = "3";
-    } else if (dto.totals.montoExento.value_or(0.0) > 0.0 &&
-               dto.totals.montoGravadoTotal.value_or(0.0) == 0.0 &&
-               dto.totals.montoItbis == 0.0) {
-        indicadorFacturacion = "4";
-    }
 
     std::string indicadorBienoServicio = "1";
     if (tipoEcf == "47") {
@@ -448,30 +531,89 @@ std::string buildXmlFromCanonical(const CanonicalDocumentDto& dto,
         indicadorBienoServicio = "2";
     }
 
-    ss << "  <DetallesItems>\n";
     auto processedItems = normalizeCanonicalLines(dto.lines, std::max(0.0, dto.totals.montoTotal));
+
+    // Prorate document retentions across items if items lack individual retentions
+    if (dto.retention.has_value()) {
+        bool hasLineRetentions = false;
+        for (const auto& pi : processedItems) {
+            if ((pi.montoItbisRetenido.has_value() && *pi.montoItbisRetenido > 0.0) ||
+                (pi.montoIsrRetenido.has_value() && *pi.montoIsrRetenido > 0.0)) {
+                hasLineRetentions = true;
+                break;
+            }
+        }
+
+        if (!hasLineRetentions && !processedItems.empty()) {
+            double docItbis = dto.retention->montoItbisRetenido;
+            double docIsr = dto.retention->montoIsrRetenido.value_or(0.0);
+
+            double sumAmounts = 0.0;
+            for (const auto& pi : processedItems) {
+                sumAmounts += pi.montoItem;
+            }
+
+            double assignedItbis = 0.0;
+            double assignedIsr = 0.0;
+
+            for (size_t i = 0; i < processedItems.size(); ++i) {
+                if (i == processedItems.size() - 1) {
+                    processedItems[i].montoItbisRetenido = std::max(0.0, std::round((docItbis - assignedItbis) * 100.0) / 100.0);
+                    processedItems[i].montoIsrRetenido = std::max(0.0, std::round((docIsr - assignedIsr) * 100.0) / 100.0);
+                } else if (sumAmounts > 0.0) {
+                    double share = processedItems[i].montoItem / sumAmounts;
+                    double itbisShare = std::round(docItbis * share * 100.0) / 100.0;
+                    double isrShare = std::round(docIsr * share * 100.0) / 100.0;
+                    processedItems[i].montoItbisRetenido = itbisShare;
+                    processedItems[i].montoIsrRetenido = isrShare;
+                    assignedItbis += itbisShare;
+                    assignedIsr += isrShare;
+                } else {
+                    processedItems[i].montoItbisRetenido = 0.0;
+                    processedItems[i].montoIsrRetenido = 0.0;
+                }
+            }
+        }
+    }
+
+    ss << "  <DetallesItems>\n";
     for (const auto& item : processedItems) {
+        int itemIndicador = item.indicadorFacturacion;
+        if (tipoEcf == "43" || tipoEcf == "44" || tipoEcf == "47") {
+            itemIndicador = 4;
+        } else if (tipoEcf == "46") {
+            itemIndicador = 3;
+        } else if (dto.totals.montoExento.value_or(0.0) > 0.0 &&
+                   dto.totals.montoGravadoTotal.value_or(0.0) == 0.0 &&
+                   dto.totals.montoItbis == 0.0) {
+            itemIndicador = 4;
+        }
+
         ss << "    <Item>\n"
            << "      <NumeroLinea>" << item.lineNumber << "</NumeroLinea>\n"
-           << "      <IndicadorFacturacion>" << indicadorFacturacion << "</IndicadorFacturacion>\n";
-        appendRetencion(ss, retention, tipoEcf);
+           << "      <IndicadorFacturacion>" << itemIndicador << "</IndicadorFacturacion>\n";
+
+        if (dto.retention.has_value()) {
+            appendLineRetencion(ss, item, dto.retention->indicadorAgenteRetencionoPercepcion, tipoEcf);
+        }
+
         ss << "      <NombreItem>" << escapeXml(item.name) << "</NombreItem>\n"
            << "      <IndicadorBienoServicio>" << indicadorBienoServicio << "</IndicadorBienoServicio>\n";
         if (!item.description.empty()) {
             ss << "      <DescripcionItem>" << escapeXml(item.description) << "</DescripcionItem>\n";
         }
-        ss << "      <CantidadItem>" << item.quantity << "</CantidadItem>\n"
-           << "      <PrecioUnitarioItem>" << item.unitPrice << "</PrecioUnitarioItem>\n";
+        ss << "      <CantidadItem>" << formatQty2(item.quantity) << "</CantidadItem>\n"
+           << "      <PrecioUnitarioItem>" << formatPrice4(item.unitPrice) << "</PrecioUnitarioItem>\n";
         if (tipoEcf != "43" && tipoEcf != "47" && item.discountAmount > 0.0) {
-            ss << "      <DescuentoMonto>" << item.discountAmount << "</DescuentoMonto>\n"
+            ss << "      <DescuentoMonto>" << formatMoney2(item.discountAmount) << "</DescuentoMonto>\n"
                << "      <TablaSubDescuento>\n"
                << "        <SubDescuento>\n"
                << "          <TipoSubDescuento>$</TipoSubDescuento>\n"
-               << "          <MontoSubDescuento>" << item.discountAmount << "</MontoSubDescuento>\n"
+               << "          <MontoSubDescuento>" << formatMoney2(item.discountAmount) << "</MontoSubDescuento>\n"
                << "        </SubDescuento>\n"
                << "      </TablaSubDescuento>\n";
         }
-        ss << "      <MontoItem>" << item.montoItem << "</MontoItem>\n"
+        ss << "      <MontoItem>" << formatMoney2(item.montoItem) << "</MontoItem>\n"
            << "    </Item>\n";
     }
     ss << "  </DetallesItems>\n";
@@ -512,12 +654,7 @@ std::string buildXmlFromCanonical(const CanonicalDocumentDto& dto,
 
     auto now = std::chrono::system_clock::now();
     std::time_t tt = std::chrono::system_clock::to_time_t(now);
-    std::tm tm{};
-#if defined(_WIN32)
-    localtime_s(&tm, &tt);
-#else
-    localtime_r(&tt, &tm);
-#endif
+    std::tm tm = getDominicanTm(tt);
     char buf[32];
     std::strftime(buf, sizeof(buf), "%d-%m-%Y %H:%M:%S", &tm);
     ss << "  <FechaHoraFirma>" << buf << "</FechaHoraFirma>\n"
@@ -530,7 +667,6 @@ std::string buildRfceXml(const domain::EcfDocument& doc,
                          const CanonicalDocumentDto* dto,
                          const std::string& emisorRazonSocial) {
     std::ostringstream ss;
-    ss << std::fixed << std::setprecision(2);
     ss << "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
        << "<RFCE>\n"
        << "  <Encabezado>\n"
@@ -570,14 +706,14 @@ std::string buildRfceXml(const domain::EcfDocument& doc,
 
     if (doc.itbisAmount > 0.0) {
         double montoGravado = std::max(0.0, doc.totalAmount - doc.itbisAmount);
-        ss << "      <MontoGravadoTotal>" << montoGravado << "</MontoGravadoTotal>\n"
-           << "      <MontoGravadoI1>" << montoGravado << "</MontoGravadoI1>\n"
-           << "      <TotalITBIS>" << doc.itbisAmount << "</TotalITBIS>\n"
-           << "      <TotalITBIS1>" << doc.itbisAmount << "</TotalITBIS1>\n";
+        ss << "      <MontoGravadoTotal>" << formatMoney2(montoGravado) << "</MontoGravadoTotal>\n"
+           << "      <MontoGravadoI1>" << formatMoney2(montoGravado) << "</MontoGravadoI1>\n"
+           << "      <TotalITBIS>" << formatMoney2(doc.itbisAmount) << "</TotalITBIS>\n"
+           << "      <TotalITBIS1>" << formatMoney2(doc.itbisAmount) << "</TotalITBIS1>\n";
     } else {
-        ss << "      <MontoExento>" << doc.totalAmount << "</MontoExento>\n";
+        ss << "      <MontoExento>" << formatMoney2(doc.totalAmount) << "</MontoExento>\n";
     }
-    ss << "      <MontoTotal>" << doc.totalAmount << "</MontoTotal>\n"
+    ss << "      <MontoTotal>" << formatMoney2(doc.totalAmount) << "</MontoTotal>\n"
        << "    </Totales>\n"
        << "    <CodigoSeguridadeCF>" << doc.securityCode.value_or("") << "</CodigoSeguridadeCF>\n"
        << "  </Encabezado>\n"

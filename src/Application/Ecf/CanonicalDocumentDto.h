@@ -29,6 +29,12 @@ struct CanonicalLineDto {
     double quantity = 0.0;
     double unitPrice = 0.0;
     double amount = 0.0;
+    double discountAmount = 0.0;
+    std::optional<int> indicadorFacturacion;
+    std::optional<double> taxRate;
+    std::optional<double> taxAmount;
+    std::optional<double> montoItbisRetenido;
+    std::optional<double> montoIsrRetenido;
 };
 
 struct CanonicalTaxBucketDto {

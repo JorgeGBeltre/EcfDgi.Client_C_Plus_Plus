@@ -311,6 +311,12 @@ app::CanonicalDocumentDto canonicalDocumentFromJson(const Json::Value& j) {
             line.quantity = jdbl(l, "quantity");
             line.unitPrice = jdbl(l, "unitPrice");
             line.amount = jdbl(l, "amount");
+            line.discountAmount = optDbl(l, "discountAmount").value_or(0.0);
+            line.indicadorFacturacion = optInt(l, "indicadorFacturacion");
+            line.taxRate = optDbl(l, "taxRate");
+            line.taxAmount = optDbl(l, "taxAmount");
+            line.montoItbisRetenido = optDbl(l, "montoItbisRetenido");
+            line.montoIsrRetenido = optDbl(l, "montoIsrRetenido");
             d.lines.push_back(line);
         }
     }

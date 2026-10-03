@@ -52,7 +52,7 @@ FROM ubuntu:24.04 AS final
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates libpq5 curl \
+    ca-certificates libpq5 curl tzdata \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

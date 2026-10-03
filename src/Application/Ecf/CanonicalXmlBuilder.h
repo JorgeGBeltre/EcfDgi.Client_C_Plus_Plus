@@ -18,6 +18,9 @@ struct ProcessedLineItem {
     double unitPrice = 0.0;
     double discountAmount = 0.0;
     double montoItem = 0.0;
+    int indicadorFacturacion = 1;
+    std::optional<double> montoItbisRetenido;
+    std::optional<double> montoIsrRetenido;
 };
 
 std::string escapeXml(const std::string& value);
