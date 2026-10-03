@@ -100,6 +100,18 @@ AppConfig AppConfig::load(const std::string& path) {
     if (const char* envJwt = std::getenv("JwtSettings__Secret")) cfg.jwt.secret = envJwt;
     else if (const char* envJwt2 = std::getenv("JWT_SECRET")) cfg.jwt.secret = envJwt2;
 
+    if (cfg.jwt.secret.empty()) {
+        const char* aspEnv = std::getenv("ASPNETCORE_ENVIRONMENT");
+        if (aspEnv && std::string(aspEnv) == "Production") {
+            throw std::runtime_error("Seguridad: JwtSettings:Secret es obligatorio y no puede estar vacío en ambiente de producción.");
+        }
+        cfg.jwt.secret = "e_CF_Dominican_Tax_Authority_Secure_JWT_Secret_Token_2026_Key_Length_Minimum_32_Bytes!";
+    }
+
+    if (cfg.jwt.secret.length() < 32) {
+        throw std::runtime_error("Seguridad: JwtSettings:Secret debe tener al menos 32 caracteres (256 bits) para firma HMAC-SHA256.");
+    }
+
     if (j.contains("EcfClientOptions")) {
         const auto& s = j["EcfClientOptions"];
         auto& o = cfg.ecfOptions;
@@ -110,6 +122,8 @@ AppConfig AppConfig::load(const std::string& path) {
         o.rncEmisor = getStr(s, "RncEmisor");
         o.certificatePath = getStr(s, "CertificatePath");
         o.certificatePassword = getStr(s, "CertificatePassword");
+        if (const char* envCertPass = std::getenv("ECF_CERTIFICATE_PASSWORD")) o.certificatePassword = envCertPass;
+        else if (const char* envCertPass2 = std::getenv("EcfClientOptions__CertificatePassword")) o.certificatePassword = envCertPass2;
         if (s.contains("AutoRetryOnReuseableSequence"))
             o.autoRetryOnReuseableSequence = s["AutoRetryOnReuseableSequence"].get<bool>();
         if (s.contains("ValidateSchemasLocal"))

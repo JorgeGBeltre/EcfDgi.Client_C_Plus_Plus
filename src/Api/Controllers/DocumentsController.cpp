@@ -776,8 +776,8 @@ void DocumentsController::getBySourceTxnId(const HttpRequestPtr& req,
             return;
         }
 
-        // Si el comprobante sigue en Signed con TrackId, verificar dinámicamente con DGII
-        if (doc->state == "Signed" && doc->trackId.has_value() && !doc->trackId->empty()) {
+        // Si el comprobante sigue en estado no terminal con TrackId, verificar dinámicamente con DGII
+        if ((doc->state == "Signed" || doc->state == "SentToDgii" || doc->state == "Processing" || doc->state == "Uncertain" || doc->state == "AwaitingTransmission") && doc->trackId.has_value() && !doc->trackId->empty()) {
             try {
                 auto effectiveSigner = resolveSigner(doc->tenantId, doc->rncEmisor, std::nullopt, false, services);
                 auto defaultAmbiente = services.ecfClientOptions().toAmbiente(services.ecfClientOptions().environment);
