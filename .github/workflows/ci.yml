@@ -242,12 +242,15 @@ jobs:
 
       - name: Deploy C++ Engine via SSH
         uses: appleboy/ssh-action@v1.2.0
+        env:
+          REDIS_PASSWORD: ${{ env.REDIS_PASSWORD || secrets.REDIS_PASSWORD }}
         with:
           host: ${{ env.HOSTINGER_SERVER || secrets.HOSTINGER_SERVER }}
           username: ${{ env.HOSTINGER_USERNAME || secrets.HOSTINGER_USERNAME || 'root' }}
           key: ${{ env.HOSTINGER_SSH_KEY || secrets.HOSTINGER_SSH_KEY }}
           password: ${{ env.HOSTINGER_PASSWORD || secrets.HOSTINGER_PASSWORD }}
           port: ${{ env.HOSTINGER_SSH_PORT || secrets.HOSTINGER_SSH_PORT || 22 }}
+          envs: REDIS_PASSWORD
           script: |
             set -e
             CONTAINER_NAME="saas-ecf-dgii-api"
@@ -270,12 +273,16 @@ jobs:
             if ! docker ps -q -f "name=^/saas-ecf-redis-db$" | grep -q .; then
               docker stop saas-ecf-redis-db 2>/dev/null || true
               docker rm saas-ecf-redis-db 2>/dev/null || true
+              if [ -z "$REDIS_PASSWORD" ]; then
+                echo "ERROR: REDIS_PASSWORD no está definida en el entorno"
+                exit 1
+              fi
               docker run -d \
                 --name saas-ecf-redis-db \
                 --network netbird \
                 -p 127.0.0.1:6380:6379 \
                 --restart unless-stopped \
-                redis:7-alpine redis-server --requirepass "${REDIS_PASSWORD:-R3d!s_SecUr3_P@ssw0rd2026}"
+                redis:7-alpine redis-server --requirepass "$REDIS_PASSWORD"
             fi
 
             echo "Autenticando en GHCR..."
@@ -307,6 +314,7 @@ jobs:
               --name "$CONTAINER_NAME" \
               --network netbird \
               -p 127.0.0.1:8086:8080 \
+              -e TZ=America/Santo_Domingo \
               --label "traefik.enable=true" \
               --label 'traefik.http.routers.saas-ecf-dgii.rule=Host(`dgii.app.vesismart.com`) && PathPrefix(`/fe/`)' \
               --label "traefik.http.routers.saas-ecf-dgii.entrypoints=websecure" \

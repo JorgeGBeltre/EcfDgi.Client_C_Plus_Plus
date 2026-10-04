@@ -175,11 +175,12 @@ void EmisorReceptorController::recepcioneCF(const HttpRequestPtr& req,
 
     auto now = std::chrono::system_clock::now();
     std::time_t tt = std::chrono::system_clock::to_time_t(now);
+    std::time_t dom_tt = tt - (4 * 3600);
     std::tm tm{};
 #if defined(_WIN32)
-    localtime_s(&tm, &tt);
+    gmtime_s(&tm, &dom_tt);
 #else
-    localtime_r(&tt, &tm);
+    gmtime_r(&dom_tt, &tm);
 #endif
     char fechaHora[64];
     std::strftime(fechaHora, sizeof(fechaHora), "%d-%m-%Y %H:%M:%S", &tm);

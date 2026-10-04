@@ -49,7 +49,8 @@ RUN --mount=type=cache,id=ecfdgii-vcpkg-bincache,target=/vcpkg-bincache \
 
 FROM ubuntu:24.04 AS final
 
-ENV DEBIAN_FRONTEND=noninteractive
+ENV DEBIAN_FRONTEND=noninteractive \
+    TZ=America/Santo_Domingo
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates libpq5 curl tzdata \
