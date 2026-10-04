@@ -92,35 +92,7 @@ void applyCanonicalContent(domain::EcfDocument& doc,
     doc.state = "SequenceAllocated";
 }
 
-bool tryResolveAmbienteEnum(const std::string& rawEnv, domain::AmbienteEnum& outAmb) {
-    if (rawEnv.empty()) return false;
-    std::string lower = rawEnv;
-    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
-    while (!lower.empty() && std::isspace(static_cast<unsigned char>(lower.front()))) lower.erase(lower.begin());
-    while (!lower.empty() && std::isspace(static_cast<unsigned char>(lower.back()))) lower.pop_back();
 
-    if (lower == "test" || lower == "testecf" || lower.find("precert") != std::string::npos || lower == "1") {
-        outAmb = domain::AmbienteEnum::PreCertificacion;
-        return true;
-    }
-    if (lower == "cert" || lower == "certecf" || lower.find("certific") != std::string::npos || lower.find("homolog") != std::string::npos || lower == "3") {
-        outAmb = domain::AmbienteEnum::Certificacion;
-        return true;
-    }
-    if (lower == "prod" || lower == "prd" || lower == "production" || lower == "ecf" || lower.find("producc") != std::string::npos || lower == "2") {
-        outAmb = domain::AmbienteEnum::Produccion;
-        return true;
-    }
-    return false;
-}
-
-domain::AmbienteEnum resolveAmbienteEnum(const std::string& rawEnv, domain::AmbienteEnum defaultAmbiente) {
-    domain::AmbienteEnum resolved;
-    if (tryResolveAmbienteEnum(rawEnv, resolved)) {
-        return resolved;
-    }
-    return defaultAmbiente;
-}
 
 std::string ambienteToString(domain::AmbienteEnum amb) {
     switch (amb) {
@@ -618,6 +590,36 @@ HttpResponsePtr handleExistingDocument(domain::EcfDocument& existingDoc,
 
 } // namespace
 
+bool tryResolveAmbienteEnum(const std::string& rawEnv, domain::AmbienteEnum& outAmb) {
+    if (rawEnv.empty()) return false;
+    std::string lower = rawEnv;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+    while (!lower.empty() && std::isspace(static_cast<unsigned char>(lower.front()))) lower.erase(lower.begin());
+    while (!lower.empty() && std::isspace(static_cast<unsigned char>(lower.back()))) lower.pop_back();
+
+    if (lower == "test" || lower == "testecf" || lower.find("precert") != std::string::npos || lower == "1") {
+        outAmb = domain::AmbienteEnum::PreCertificacion;
+        return true;
+    }
+    if (lower == "cert" || lower == "certecf" || lower.find("certific") != std::string::npos || lower.find("homolog") != std::string::npos || lower == "3") {
+        outAmb = domain::AmbienteEnum::Certificacion;
+        return true;
+    }
+    if (lower == "prod" || lower == "prd" || lower == "production" || lower == "ecf" || lower.find("producc") != std::string::npos || lower == "2") {
+        outAmb = domain::AmbienteEnum::Produccion;
+        return true;
+    }
+    return false;
+}
+
+domain::AmbienteEnum resolveAmbienteEnum(const std::string& rawEnv, domain::AmbienteEnum defaultAmbiente) {
+    domain::AmbienteEnum resolved;
+    if (tryResolveAmbienteEnum(rawEnv, resolved)) {
+        return resolved;
+    }
+    return defaultAmbiente;
+}
+
 void DocumentsController::submit(const HttpRequestPtr& req,
                                  std::function<void(const HttpResponsePtr&)>&& callback) {
     std::string tenantId = "default-tenant";
@@ -671,16 +673,16 @@ void DocumentsController::submit(const HttpRequestPtr& req,
 
             for (const auto& line : dto.lines) {
                 if (line.quantity <= 0.0) {
-                    cb(json(err("La cantidad de cada línea debe ser mayor a cero (Ítem: '" + line.name + "')."), k400BadRequest));
+                    cb(json(err("La cantidad de cada línea debe ser mayor a cero (Ítem: '" + line.itemName + "')."), k400BadRequest));
                     return;
                 }
-                if (line.unitPrice < 0.0 || line.discountAmount < 0.0 || line.montoItem < 0.0) {
-                    cb(json(err("El precio unitario, descuento y monto de cada línea no pueden ser negativos (Ítem: '" + line.name + "')."), k400BadRequest));
+                if (line.unitPrice < 0.0 || line.discountAmount < 0.0 || line.amount < 0.0) {
+                    cb(json(err("El precio unitario, descuento y monto de cada línea no pueden ser negativos (Ítem: '" + line.itemName + "')."), k400BadRequest));
                     return;
                 }
             }
 
-            if (dto.totals.montoSubtotal.value_or(0.0) < 0.0 || dto.totals.montoItbis < 0.0 || dto.totals.montoTotal < 0.0) {
+            if (dto.totals.montoSubtotal < 0.0 || dto.totals.montoItbis < 0.0 || dto.totals.montoTotal < 0.0) {
                 cb(json(err("Subtotal, ITBIS y MontoTotal no pueden ser negativos."), k400BadRequest));
                 return;
             }

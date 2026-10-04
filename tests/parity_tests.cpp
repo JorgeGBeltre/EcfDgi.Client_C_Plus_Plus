@@ -390,7 +390,7 @@ int main() {
 
         // Network error code throws EcfException
         cpr::Response netErrResp;
-        netErrResp.error.code = cpr::ErrorCode::CONNECTION_FAILURE;
+        netErrResp.error.code = cpr::ErrorCode::NO_CONNECTION_AVAILABLE;
         netErrResp.error.message = "Connection refused";
         bool caughtNetErr = false;
         try {

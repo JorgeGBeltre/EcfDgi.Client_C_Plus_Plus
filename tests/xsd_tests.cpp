@@ -13,6 +13,7 @@
 #include "Domain/Entities/ResponseModels.h"
 #include "Application/Ecf/CanonicalDocumentDto.h"
 #include "Application/Ecf/CanonicalXmlBuilder.h"
+#include "Domain/Exceptions/EcfException.h"
 
 static std::string resolveXsdDir() {
     std::vector<std::string> candidates = {

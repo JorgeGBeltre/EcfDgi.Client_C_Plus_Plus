@@ -269,7 +269,7 @@ std::vector<ProcessedLineItem> normalizeCanonicalLines(const std::vector<Canonic
 
         double safeQty = rawQty > 0.0 ? std::round(rawQty * 100.0) / 100.0 : 1.0;
         double safePrice = std::max(0.0, std::round(rawPrice * 10000.0) / 10000.0);
-        double safeDiscount = line.discountAmount.has_value() ? std::max(0.0, std::round(*line.discountAmount * 100.0) / 100.0) : 0.0;
+        double safeDiscount = line.discountAmount > 0.0 ? std::max(0.0, std::round(line.discountAmount * 100.0) / 100.0) : 0.0;
         double safeAmount = std::max(0.0, std::round(rawAmount * 100.0) / 100.0);
 
         double calculatedAmount = std::max(0.0, std::round(((safePrice * safeQty) - safeDiscount) * 100.0) / 100.0);
@@ -304,25 +304,15 @@ std::vector<ProcessedLineItem> normalizeCanonicalLines(const std::vector<Canonic
             if (*line.taxRate == 18) pi.indicadorFacturacion = 1;
             else if (*line.taxRate == 16) pi.indicadorFacturacion = 2;
             else if (*line.taxRate == 0) {
-                if (dto.totals.montoExento.value_or(0.0) > 0.0 && dto.totals.montoGravadoTotal.value_or(0.0) == 0.0) {
-                    pi.indicadorFacturacion = 4;
-                } else {
-                    pi.indicadorFacturacion = 3;
-                }
+                pi.indicadorFacturacion = 4;
             }
             else pi.indicadorFacturacion = 1;
         } else if (line.taxAmount.has_value()) {
             if (*line.taxAmount > 0.0) {
                 pi.indicadorFacturacion = 1;
             } else {
-                if (dto.totals.montoExento.value_or(0.0) > 0.0) {
-                    pi.indicadorFacturacion = 4;
-                } else {
-                    pi.indicadorFacturacion = 3;
-                }
+                pi.indicadorFacturacion = 4;
             }
-        } else if (dto.totals.montoExento.value_or(0.0) > 0.0 && dto.totals.montoGravadoTotal.value_or(0.0) == 0.0) {
-            pi.indicadorFacturacion = 4;
         } else {
             pi.indicadorFacturacion = 1;
         }
