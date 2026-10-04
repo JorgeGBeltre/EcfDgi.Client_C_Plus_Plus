@@ -61,13 +61,19 @@ bool EcfValidator::isValidRnc(const std::string& rnc) {
 void EcfValidator::validateTotalesConsistency(const RfceTotales& t,
                                               std::vector<std::string>& errors) {
     // BUG-111: Fundamental consistency: MontoTotal must equal MontoGravadoTotal + TotalITBIS + MontoExento (+ MontoImpuestoAdicional)
-    if (t.montoGravadoTotal.has_value() || t.totalITBIS.has_value() || t.montoExento.has_value()) {
-        double expectedTotal = t.montoGravadoTotal.value_or(0.0) +
+    // Only verify when MontoGravadoTotal is provided or when MontoExento is provided without ITBIS
+    if (t.montoGravadoTotal.has_value()) {
+        double expectedTotal = *t.montoGravadoTotal +
                                t.totalITBIS.value_or(0.0) +
                                t.montoExento.value_or(0.0) +
                                t.montoImpuestoAdicional.value_or(0.0);
         if (std::fabs(t.montoTotal - expectedTotal) > 0.01) {
             errors.push_back("MontoTotal no coincide con la suma de MontoGravadoTotal + TotalITBIS + MontoExento.");
+        }
+    } else if (t.montoExento.has_value() && !t.totalITBIS.has_value()) {
+        double expectedTotal = *t.montoExento + t.montoImpuestoAdicional.value_or(0.0);
+        if (std::fabs(t.montoTotal - expectedTotal) > 0.01) {
+            errors.push_back("MontoTotal no coincide con MontoExento.");
         }
     }
 

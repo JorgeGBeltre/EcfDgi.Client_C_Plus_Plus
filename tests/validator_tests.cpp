@@ -30,6 +30,7 @@ static domain::Rfce makeValidRfce() {
     r.encabezado.emisor.rncEmisor = "101672919";  // 9 digits
     r.encabezado.emisor.razonSocialEmisor = "ACME SRL";
     r.encabezado.emisor.fechaEmision = "30-06-2026";  // dd-MM-yyyy
+    r.encabezado.totales.montoGravadoTotal = 1000.00;
     r.encabezado.totales.montoTotal = 1180.00;
     r.encabezado.totales.totalITBIS = 180.00;
     return r;
@@ -42,6 +43,20 @@ int main() {
         auto rfce = makeValidRfce();
         auto result = validator.validateRfce(rfce);
         CHECK(result.isValid(), "valid RFCE passes validation");
+    }
+
+    {
+        auto rfce = makeValidRfce();
+        rfce.encabezado.totales.montoTotal = 2000.00;  // 1000 + 180 != 2000 (BUG-111)
+        auto result = validator.validateRfce(rfce);
+        CHECK(!result.isValid(), "inconsistent MontoTotal is rejected");
+    }
+
+    {
+        auto rfce = makeValidRfce();
+        rfce.encabezado.emisor.fechaEmision = "31-02-2026";  // invalid calendar date (BUG-111)
+        auto result = validator.validateRfce(rfce);
+        CHECK(!result.isValid(), "invalid calendar date (31-02-2026) is rejected");
     }
 
     {
