@@ -113,6 +113,26 @@ EcfRecepcionResponse DgiiDirectTransport::sendEcf(const std::string& xmlContent,
                          cpr::Timeout{kReceptionTimeout},
                          cpr::ConnectTimeout{kDefaultConnectTimeout});
     });
+    if (resp.status_code >= 400) {
+        if (looksLikeXml(resp.text, contentTypeOf(resp))) {
+            try {
+                auto xmlResp = xmlSerializer_.deserializeEcfRecepcion(resp.text);
+                if (xmlResp.error.has_value() || !xmlResp.trackId.empty()) return xmlResp;
+            } catch (...) {}
+        }
+        try {
+            json j = parseJson(resp.text);
+            EcfRecepcionResponse r;
+            r.trackId = jstr(j, "trackId");
+            std::string err = jstr(j, "error");
+            if (!err.empty()) r.error = err;
+            std::string msg = jstr(j, "mensaje");
+            if (!msg.empty()) r.mensaje = msg;
+            if (r.error.has_value() || !r.trackId.empty()) return r;
+        } catch (...) {}
+        throw EcfException("Error HTTP " + std::to_string(resp.status_code) + " en recepción DGII: " + resp.text);
+    }
+
     if (looksLikeXml(resp.text, contentTypeOf(resp)))
         return xmlSerializer_.deserializeEcfRecepcion(resp.text);
 
@@ -123,6 +143,9 @@ EcfRecepcionResponse DgiiDirectTransport::sendEcf(const std::string& xmlContent,
     if (!err.empty()) r.error = err;
     std::string msg = jstr(j, "mensaje");
     if (!msg.empty()) r.mensaje = msg;
+    if (r.trackId.empty() && !r.error.has_value()) {
+        throw EcfException("Respuesta JSON DGII sin trackId ni mensaje de error.");
+    }
     return r;
 }
 
@@ -134,6 +157,25 @@ RfceRecepcionResponse DgiiDirectTransport::sendRfce(const std::string& xmlConten
                          cpr::Timeout{kReceptionTimeout},
                          cpr::ConnectTimeout{kDefaultConnectTimeout});
     });
+    if (resp.status_code >= 400) {
+        if (looksLikeXml(resp.text, contentTypeOf(resp))) {
+            try {
+                return xmlSerializer_.deserializeRfceRecepcion(resp.text);
+            } catch (...) {}
+        }
+        try {
+            json j = parseJson(resp.text);
+            RfceRecepcionResponse r;
+            r.codigo = jint(j, "codigo");
+            r.estado = jstr(j, "estado");
+            r.mensajes = jmensajes(j);
+            r.eNcf = jstr(j, "encf");
+            r.secuenciaUtilizada = jbool(j, "secuenciaUtilizada");
+            if (!r.estado.empty() || !r.mensajes.empty() || r.codigo != 0) return r;
+        } catch (...) {}
+        throw EcfException("Error HTTP " + std::to_string(resp.status_code) + " en recepción RFCE DGII: " + resp.text);
+    }
+
     if (looksLikeXml(resp.text, contentTypeOf(resp)))
         return xmlSerializer_.deserializeRfceRecepcion(resp.text);
 
@@ -155,6 +197,9 @@ ConsultaResultadoResponse DgiiDirectTransport::consultarResultado(const std::str
             cpr::Timeout{kDefaultReadTimeout},
             cpr::ConnectTimeout{kDefaultConnectTimeout});
     });
+    if (resp.status_code >= 400) {
+        throw EcfException("Error HTTP " + std::to_string(resp.status_code) + " en consulta DGII trackId " + trackId + ": " + resp.text);
+    }
     json j = parseJson(resp.text);
     ConsultaResultadoResponse r;
     r.trackId = jstr(j, "trackId");

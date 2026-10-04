@@ -207,12 +207,21 @@ EcfRecepcionResponse EcfXmlSerializer::deserializeEcfRecepcion(const std::string
     XmlDocGuard g(xml);
     if (!g.doc) throw EcfException("XML de respuesta inválido (RespuestaRecepcion).");
     xmlNode* root = xmlDocGetRootElement(g.doc);
+    if (!root || !root->name) {
+        throw EcfException("Respuesta XML DGII inválida: documento sin elemento raíz.");
+    }
+    std::string rootName = reinterpret_cast<const char*>(root->name);
     EcfRecepcionResponse r;
     r.trackId = childText(root, "trackId");
     std::string err = childText(root, "error");
     if (!err.empty()) r.error = err;
     std::string msg = childText(root, "mensaje");
     if (!msg.empty()) r.mensaje = msg;
+
+    // BUG-078: Validar campos obligatorios. Un XML sin trackId ni error no es una respuesta válida de recepción.
+    if (r.trackId.empty() && !r.error.has_value()) {
+        throw EcfException("Respuesta XML DGII inválida: elemento raíz '" + rootName + "' no contiene trackId ni error.");
+    }
     return r;
 }
 
@@ -220,12 +229,21 @@ RfceRecepcionResponse EcfXmlSerializer::deserializeRfceRecepcion(const std::stri
     XmlDocGuard g(xml);
     if (!g.doc) throw EcfException("XML de respuesta inválido (Respuesta).");
     xmlNode* root = xmlDocGetRootElement(g.doc);
+    if (!root || !root->name) {
+        throw EcfException("Respuesta XML DGII inválida: documento sin elemento raíz.");
+    }
+    std::string rootName = reinterpret_cast<const char*>(root->name);
     RfceRecepcionResponse r;
     r.codigo = childInt(root, "codigo");
     r.estado = childText(root, "estado");
     r.mensajes = parseMensajes(root);
     r.eNcf = childText(root, "encf");
     r.secuenciaUtilizada = childBool(root, "secuenciaUtilizada");
+
+    // BUG-078: Validar que contenga estado o mensajes significativos
+    if (r.estado.empty() && r.codigo == 0 && r.mensajes.empty()) {
+        throw EcfException("Respuesta XML DGII RFCE inválida: elemento raíz '" + rootName + "' no contiene campos obligatorios (estado/codigo).");
+    }
     return r;
 }
 
@@ -234,6 +252,10 @@ ConsultaResultadoResponse EcfXmlSerializer::deserializeConsultaResultado(
     XmlDocGuard g(xml);
     if (!g.doc) throw EcfException("XML de respuesta inválido (RespuestaConsultaTrackId).");
     xmlNode* root = xmlDocGetRootElement(g.doc);
+    if (!root || !root->name) {
+        throw EcfException("Respuesta XML DGII inválida: documento sin elemento raíz.");
+    }
+    std::string rootName = reinterpret_cast<const char*>(root->name);
     ConsultaResultadoResponse r;
     r.trackId = childText(root, "trackId");
     r.codigo = childInt(root, "codigo");
@@ -243,6 +265,11 @@ ConsultaResultadoResponse EcfXmlSerializer::deserializeConsultaResultado(
     r.secuenciaUtilizada = childBool(root, "secuenciaUtilizada");
     r.fechaRecepcion = childText(root, "fechaRecepcion");
     r.mensajes = parseMensajes(root);
+
+    // BUG-078: Validar que contenga estado, trackId o mensajes significativos
+    if (r.estado.empty() && r.trackId.empty() && r.codigo == 0 && r.mensajes.empty()) {
+        throw EcfException("Respuesta XML DGII Consulta inválida: elemento raíz '" + rootName + "' no contiene información de estado.");
+    }
     return r;
 }
 

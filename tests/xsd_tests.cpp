@@ -636,6 +636,36 @@ int main() {
         signAndCheck(xml, "101889063", "e-CF 46 v.1.0.xsd", "Tipo 46 with EXTRANJERO fallback passes XSD");
     }
 
+    // Test 24: BUG-078 - Deserializers reject empty or non-conforming XML responses
+    {
+        ecf::infra::EcfXmlSerializer serializer;
+        bool threwRecepcion = false;
+        try {
+            // Well-formed XML without trackId or error (e.g. WAF, proxy, or foreign endpoint)
+            std::string foreignXml = "<ProblemDetails><Status>502</Status><Title>Bad Gateway</Title></ProblemDetails>";
+            serializer.deserializeEcfRecepcion(foreignXml);
+        } catch (const ecf::domain::EcfException&) {
+            threwRecepcion = true;
+        }
+        CHECK(threwRecepcion, "deserializeEcfRecepcion rejects well-formed XML lacking trackId and error");
+
+        bool validRecepcion = false;
+        try {
+            std::string validXml = "<RespuestaRecepcion><trackId>test-track-1234</trackId></RespuestaRecepcion>";
+            auto r = serializer.deserializeEcfRecepcion(validXml);
+            validRecepcion = (r.trackId == "test-track-1234");
+        } catch (...) {}
+        CHECK(validRecepcion, "deserializeEcfRecepcion accepts XML with valid trackId");
+
+        bool errorRecepcion = false;
+        try {
+            std::string errXml = "<RespuestaRecepcion><error>Certificado digital vencido</error></RespuestaRecepcion>";
+            auto r = serializer.deserializeEcfRecepcion(errXml);
+            errorRecepcion = (r.error.value_or("") == "Certificado digital vencido");
+        } catch (...) {}
+        CHECK(errorRecepcion, "deserializeEcfRecepcion accepts XML with error field");
+    }
+
     if (failures == 0) {
         std::printf("All XSD, multi-tenant, and security tests passed successfully!\n");
     } else {

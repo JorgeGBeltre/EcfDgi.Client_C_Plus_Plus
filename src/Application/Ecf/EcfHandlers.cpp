@@ -13,7 +13,7 @@ using shared::ResultT;
 ResultT<EcfRecepcionResponse> SendEcfCommandHandler::handle(const SendEcfCommand& cmd) {
     try {
         auto response = client_->sendEcf(cmd.xmlContent, cmd.fileName);
-        const bool hasError = response.error.has_value() && !response.error->empty();
+        const bool hasError = (response.error.has_value() && !response.error->empty()) || response.trackId.empty();
 
         EcfDocument doc;
         doc.eNcf = cmd.eNcf;
@@ -30,8 +30,8 @@ ResultT<EcfRecepcionResponse> SendEcfCommandHandler::handle(const SendEcfCommand
         uow_->saveChanges();
 
         if (hasError) {
-            const std::string msg =
-                response.mensaje.value_or(response.error.value_or("Error"));
+            const std::string msg = response.mensaje.value_or(
+                response.error.value_or(response.trackId.empty() ? "La DGII no devolvió un trackId de recepción válido." : "Error"));
             return ResultT<EcfRecepcionResponse>::Failure(msg);
         }
         return ResultT<EcfRecepcionResponse>::Success(std::move(response));
