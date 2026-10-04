@@ -6,7 +6,7 @@
 namespace ecf::domain {
 
 struct SchemaValidationResult {
-    bool isValid = true;
+    bool isValid = false;
     std::vector<std::string> errors;
 
     void addError(const std::string& err) {

@@ -169,7 +169,17 @@ AppConfig AppConfig::load(const std::string& path) {
         cfg.ecfOptions.rncEmisor = envRnc2;
     }
     if (const char* envRazon = std::getenv("ECF_EMISOR_RAZON_SOCIAL")) cfg.emisorOptions.razonSocial = envRazon;
-    if (const char* envXsd = std::getenv("ECF_XSD_DIR")) cfg.ecfOptions.xsdDirectoryPath = envXsd;
+    if (const char* envXsd = std::getenv("ECF_XSD_DIR")) {
+        cfg.ecfOptions.xsdDirectoryPath = envXsd;
+    } else if (const char* envXsd2 = std::getenv("EcfClientOptions__XsdDirectoryPath")) {
+        cfg.ecfOptions.xsdDirectoryPath = envXsd2;
+    }
+
+    // BUG-077: Fallback predeterminado para asegurar validación XSD activa en contenedor Docker (fail-closed)
+    if (!cfg.ecfOptions.xsdDirectoryPath.has_value() || cfg.ecfOptions.xsdDirectoryPath->empty()) {
+        cfg.ecfOptions.xsdDirectoryPath = "/app/Documentación Técnica (XSD)";
+    }
+
     if (const char* envSchema = std::getenv("SCHEMA_PATH")) cfg.schemaPath = envSchema;
 
     // Parse Worker configurations

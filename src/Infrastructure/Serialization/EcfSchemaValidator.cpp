@@ -167,11 +167,13 @@ domain::SchemaValidationResult EcfSchemaValidator::validate(const std::string& x
 domain::SchemaValidationResult EcfSchemaValidator::validate(const std::string& xmlContent) {
     if (!xsdDirectoryPath_.has_value() || xsdDirectoryPath_->empty()) {
         domain::SchemaValidationResult r;
+        r.addError("Directorio de esquemas XSD no configurado. Validación local fallida por diseño (fail-closed).");
         return r;
     }
     std::string xsdFileName = EcfXsdFileNameResolver::resolve(xmlContent);
     if (xsdFileName.empty()) {
         domain::SchemaValidationResult r;
+        r.addError("No se pudo determinar el esquema XSD correspondiente para el documento XML (fail-closed).");
         return r;
     }
     std::string xsdPath = *xsdDirectoryPath_ + "/" + xsdFileName;

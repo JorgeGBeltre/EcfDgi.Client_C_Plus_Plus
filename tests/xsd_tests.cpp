@@ -111,6 +111,20 @@ int main() {
         CHECK(!res.errors.empty(), "XSD validation failure provides error descriptions");
     }
 
+    // Test 9b: Schema Validator Fail-Closed behavior (BUG-077)
+    {
+        ecf::infra::EcfSchemaValidator emptyValidator("");
+        auto res1 = emptyValidator.validate("<ECF><Encabezado><IdDoc><TipoeCF>31</TipoeCF></IdDoc></Encabezado></ECF>");
+        CHECK(!res1.isValid, "Schema validation without configured XSD directory must fail-closed");
+        CHECK(!res1.errors.empty(), "Fail-closed validation provides error description");
+
+        std::string xsdDir = resolveXsdDir();
+        ecf::infra::EcfSchemaValidator validator(xsdDir);
+        auto res2 = validator.validate("<UnknownRoot><Invalid/></UnknownRoot>");
+        CHECK(!res2.isValid, "Unresolved XML schema file name must fail-closed");
+        CHECK(!res2.errors.empty(), "Unresolved schema provides error description");
+    }
+
     // Test 10: Timbre URL Spelling Parity (codigoseguridad, not codigoseuridad)
     {
         ecf::domain::TimbreEcfRequest ecfReq;

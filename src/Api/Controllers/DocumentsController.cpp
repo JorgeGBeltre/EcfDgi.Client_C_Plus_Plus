@@ -237,22 +237,18 @@ HttpResponsePtr signAndSend(domain::EcfDocument& doc, AppServices::Scope& scope,
     }
 
     const auto& ecfOpts = services.ecfClientOptions();
-    if (ecfOpts.validateSchemasLocal && ecfOpts.xsdDirectoryPath.has_value() && !ecfOpts.xsdDirectoryPath->empty()) {
-        std::string xsdFileName = EcfXsdFileNameResolver::resolve(signedXml);
-        if (!xsdFileName.empty()) {
-            std::string xsdPath = *ecfOpts.xsdDirectoryPath + "/" + xsdFileName;
-            auto xsdResult = services.schemaValidator()->validate(signedXml, xsdPath);
-            if (!xsdResult.isValid) {
-                doc.state = "SchemaInvalid";
-                scope.docs->update(doc);
-                scope.uow->saveChanges();
-                Json::Value details(Json::arrayValue);
-                for (const auto& error : xsdResult.errors) details.append(error);
-                Json::Value responseObj;
-                responseObj["error"] = "El XML firmado no es válido contra el esquema DGII (validación local, antes de enviar a DGII).";
-                responseObj["details"] = details;
-                return json(responseObj, k400BadRequest);
-            }
+    if (ecfOpts.validateSchemasLocal) {
+        auto xsdResult = services.schemaValidator()->validate(signedXml);
+        if (!xsdResult.isValid) {
+            doc.state = "SchemaInvalid";
+            scope.docs->update(doc);
+            scope.uow->saveChanges();
+            Json::Value details(Json::arrayValue);
+            for (const auto& error : xsdResult.errors) details.append(error);
+            Json::Value responseObj;
+            responseObj["error"] = "El XML firmado no es válido contra el esquema DGII (validación local, antes de enviar a DGII).";
+            responseObj["details"] = details;
+            return json(responseObj, k400BadRequest);
         }
     }
 
