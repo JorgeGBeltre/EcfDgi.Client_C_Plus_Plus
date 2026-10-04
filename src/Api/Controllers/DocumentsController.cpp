@@ -913,11 +913,34 @@ void DocumentsController::getBySourceTxnId(const HttpRequestPtr& req,
         if (!hTenant.empty()) tenantId = hTenant;
     }
 
+    std::string envHeader = req->getHeader("X-Environment");
+    std::optional<std::string> ambOpt = std::nullopt;
+    if (!envHeader.empty()) {
+        ambOpt = envHeader;
+    }
+
     try {
         auto& services = AppServices::instance();
         auto scope = services.makeScope(mapping::currentUserFrom(req));
 
-        auto doc = scope.docs->getBySourceTxnId(tenantId, txnId);
+        auto doc = scope.docs->getBySourceTxnId(tenantId, txnId, ambOpt);
+        if (!doc.has_value()) {
+            auto byTrack = scope.docs->getByTrackId(txnId);
+            if (byTrack.has_value() && (isWorkerOrSuperAdmin || byTrack->tenantId == tenantId)) {
+                if (!ambOpt.has_value() || !byTrack->ambiente.has_value() || byTrack->ambiente == ambOpt) {
+                    doc = byTrack;
+                }
+            }
+        }
+        if (!doc.has_value()) {
+            auto byNcf = scope.docs->getByENcf(txnId);
+            if (byNcf.has_value() && (isWorkerOrSuperAdmin || byNcf->tenantId == tenantId)) {
+                if (!ambOpt.has_value() || !byNcf->ambiente.has_value() || byNcf->ambiente == ambOpt) {
+                    doc = byNcf;
+                }
+            }
+        }
+
         if (!doc.has_value() || (!isWorkerOrSuperAdmin && doc->tenantId != tenantId)) {
             Json::Value errBody;
             errBody["error"] = "Document with source TxnId '" + txnId + "' not found.";
@@ -1040,11 +1063,34 @@ void DocumentsController::getXmlBySourceTxnId(const HttpRequestPtr& req,
         if (!hTenant.empty()) tenantId = hTenant;
     }
 
+    std::string envHeader = req->getHeader("X-Environment");
+    std::optional<std::string> ambOpt = std::nullopt;
+    if (!envHeader.empty()) {
+        ambOpt = envHeader;
+    }
+
     try {
         auto& services = AppServices::instance();
         auto scope = services.makeScope(mapping::currentUserFrom(req));
 
-        auto doc = scope.docs->getBySourceTxnId(tenantId, txnId);
+        auto doc = scope.docs->getBySourceTxnId(tenantId, txnId, ambOpt);
+        if (!doc.has_value()) {
+            auto byTrack = scope.docs->getByTrackId(txnId);
+            if (byTrack.has_value() && (isWorkerOrSuperAdmin || byTrack->tenantId == tenantId)) {
+                if (!ambOpt.has_value() || !byTrack->ambiente.has_value() || byTrack->ambiente == ambOpt) {
+                    doc = byTrack;
+                }
+            }
+        }
+        if (!doc.has_value()) {
+            auto byNcf = scope.docs->getByENcf(txnId);
+            if (byNcf.has_value() && (isWorkerOrSuperAdmin || byNcf->tenantId == tenantId)) {
+                if (!ambOpt.has_value() || !byNcf->ambiente.has_value() || byNcf->ambiente == ambOpt) {
+                    doc = byNcf;
+                }
+            }
+        }
+
         if (!doc.has_value() || !doc->signedXmlContent.has_value() || doc->signedXmlContent->empty()) {
             Json::Value errBody;
             errBody["error"] = "Document with source TxnId '" + txnId + "' not found or has no XML.";

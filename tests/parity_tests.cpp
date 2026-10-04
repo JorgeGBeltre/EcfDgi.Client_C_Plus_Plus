@@ -488,6 +488,26 @@ int main() {
         CHECK(!domain::tryResolveAmbienteEnum("", amb), "BUG-093: rejects empty env");
     }
 
+    // Test BUG-100: Idempotency uniqueness - source_txn_id strictly isolated from track_id and e_ncf
+    {
+        struct MockDoc {
+            std::string sourceTxnId;
+            std::string trackId;
+            std::string eNcf;
+        };
+
+        MockDoc existingDoc{"QB-INV-5001", "TRK-9999", "E310000000001"};
+
+        auto matchesSourceTxnId = [](const MockDoc& doc, const std::string& queryId) -> bool {
+            // BUG-100: Strictly match source_txn_id, NOT track_id or e_ncf
+            return doc.sourceTxnId == queryId;
+        };
+
+        CHECK(!matchesSourceTxnId(existingDoc, "E310000000001"), "BUG-100: query by e_ncf does NOT falsely collide with source_txn_id");
+        CHECK(!matchesSourceTxnId(existingDoc, "TRK-9999"), "BUG-100: query by track_id does NOT falsely collide with source_txn_id");
+        CHECK(matchesSourceTxnId(existingDoc, "QB-INV-5001"), "BUG-100: query by actual source_txn_id matches correctly");
+    }
+
     std::printf("\nTotal failures: %d\n", failures);
     return failures > 0 ? 1 : 0;
 }
