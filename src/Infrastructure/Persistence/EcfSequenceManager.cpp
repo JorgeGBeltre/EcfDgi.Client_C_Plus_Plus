@@ -69,7 +69,10 @@ std::string EcfSequenceManager::getNextEncf(const std::string& tenantId, const s
         throw std::runtime_error("La secuencia eNCF para el tipo '" + tipoComprobante + "' no tiene fecha de vencimiento configurada.");
     }
 
-    if (seq.fechaVencimiento.value() < sys::utcNowIso()) {
+    std::string expDate = seq.fechaVencimiento.value();
+    if (expDate.size() >= 10) expDate = expDate.substr(0, 10);
+    std::string todayDate = sys::utcNowIso().substr(0, 10);
+    if (expDate < todayDate) {
         throw std::runtime_error("El rango autorizado eNCF para el tipo '" + tipoComprobante + "' ha expirado el " + seq.fechaVencimiento.value() + ".");
     }
 
