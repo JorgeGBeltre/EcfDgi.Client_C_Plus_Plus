@@ -155,9 +155,9 @@ int main() {
             Json::Value body;
             bool dbOk = false;
             try {
-                auto conn = services.dbContext().createConnection();
-                if (conn && conn->is_open()) {
-                    pqxx::work w(*conn);
+                auto scope = services.makeScope(nullptr);
+                if (scope.db && scope.db->connection().is_open()) {
+                    pqxx::work w(scope.db->connection());
                     pqxx::result r = w.exec("SELECT 1");
                     dbOk = !r.empty();
                 }

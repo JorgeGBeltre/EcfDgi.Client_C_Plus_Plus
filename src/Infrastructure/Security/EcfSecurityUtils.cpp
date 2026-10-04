@@ -16,6 +16,8 @@
 
 namespace ecf::infra::EcfSecurityUtils {
 
+namespace {
+
 using domain::EcfException;
 
 std::string money(double v) {

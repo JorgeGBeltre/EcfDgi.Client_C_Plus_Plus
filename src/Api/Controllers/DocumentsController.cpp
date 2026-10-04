@@ -371,7 +371,7 @@ HttpResponsePtr signAndSend(domain::EcfDocument& doc, AppServices::Scope& scope,
     } catch (...) {
         // Fallback: If DB connection dropped during DGII transmission, retry with a fresh scope
         try {
-            auto retryScope = services.makeScope(domain::User{"system", "Worker"});
+            auto retryScope = services.makeScope(nullptr);
             retryScope.docs->update(doc);
             retryScope.uow->saveChanges();
         } catch (...) {
