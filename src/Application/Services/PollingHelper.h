@@ -30,6 +30,7 @@ public:
             if (retries >= options.maxRetries)
                 throw domain::PollingMaxRetriesException(options.maxRetries);
 
+            int sleepTime = delay;
             if (options.timeoutMs.has_value()) {
                 const auto elapsed =
                     std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -37,9 +38,13 @@ public:
                         .count();
                 if (elapsed >= *options.timeoutMs)
                     throw domain::PollingTimeoutException();
+                sleepTime = static_cast<int>(
+                    std::min<int64_t>(sleepTime, *options.timeoutMs - elapsed));
             }
 
-            std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+            if (sleepTime > 0) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(sleepTime));
+            }
             delay = static_cast<int>(
                 std::min(delay * options.backoffMultiplier,
                          static_cast<double>(options.maxDelayMs)));

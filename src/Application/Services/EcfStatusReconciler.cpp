@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cctype>
 #include <string>
+#include <unordered_map>
 #include <spdlog/spdlog.h>
 
 #include "Infrastructure/EcfClient.h"
@@ -42,6 +43,7 @@ int EcfStatusReconciler::reconcile() {
 
     int processed = 0;
     std::string nowIso = sys::toIsoUtc(now);
+    std::unordered_map<std::string, std::shared_ptr<domain::IEcfClient>> clientCache;
 
     for (auto& doc : due) {
         processed++;
@@ -67,25 +69,35 @@ int EcfStatusReconciler::reconcile() {
             }
         }
 
+        domain::EcfEnvironment envToUse = domain::EcfEnvironment::Cert;
+        if (doc.ambiente.has_value()) {
+            std::string ambLower = *doc.ambiente;
+            std::transform(ambLower.begin(), ambLower.end(), ambLower.begin(), ::tolower);
+            if (ambLower == "produccion" || ambLower == "ecf" || ambLower == "prod" || ambLower == "3") {
+                envToUse = domain::EcfEnvironment::Prod;
+            } else if (ambLower == "precertificacion" || ambLower == "testecf" || ambLower == "test" || ambLower == "1") {
+                envToUse = domain::EcfEnvironment::Test;
+            } else {
+                envToUse = domain::EcfEnvironment::Cert;
+            }
+        }
+
+        std::string cacheKey = doc.rncEmisor + "_" + std::to_string(static_cast<int>(envToUse));
         auto clientToUse = ecfClient_;
-        if (signerResolver_ && !doc.rncEmisor.empty()) {
+        auto cachedIt = clientCache.find(cacheKey);
+        if (cachedIt != clientCache.end()) {
+            clientToUse = cachedIt->second;
+        } else if (signerResolver_ && !doc.rncEmisor.empty()) {
             try {
                 auto dynamicSigner = signerResolver_->resolveSigner(doc.rncEmisor);
                 if (dynamicSigner) {
-                    bool isProd = false;
-                    if (doc.ambiente.has_value()) {
-                        std::string ambLower = *doc.ambiente;
-                        std::transform(ambLower.begin(), ambLower.end(), ambLower.begin(), ::tolower);
-                        if (ambLower == "produccion" || ambLower == "ecf" || ambLower == "prod") {
-                            isProd = true;
-                        }
-                    }
                     domain::EcfClientOptions clientOpts;
                     clientOpts.rncEmisor = doc.rncEmisor;
-                    clientOpts.environment = isProd ? domain::EcfEnvironment::Prod : domain::EcfEnvironment::Cert;
+                    clientOpts.environment = envToUse;
                     clientOpts.mode = domain::IntegrationMode::DgiiDirect;
                     clientOpts.validateSchemasLocal = false;
                     clientToUse = std::make_shared<infra::EcfClient>(clientOpts, nullptr, nullptr, nullptr, dynamicSigner);
+                    clientCache[cacheKey] = clientToUse;
                 }
             } catch (const std::exception& ex) {
                 spdlog::debug("[EcfStatusReconciler] No se pudo resolver signer dinámico para {}: {}", doc.rncEmisor, ex.what());

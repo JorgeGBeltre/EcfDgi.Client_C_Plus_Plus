@@ -19,6 +19,8 @@ public:
         const std::string& key, 
         const domain::IdempotentResult& result) override;
 
+    void release(const std::string& key) override;
+
 private:
     std::string connectionString_;
 };

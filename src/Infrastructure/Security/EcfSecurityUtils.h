@@ -15,6 +15,8 @@ std::string extractSignatureValue(const std::string& signedXml);
 // Extracts the <FechaHoraFirma> inner text from the signed XML, if present.
 std::optional<std::string> extractFechaHoraFirma(const std::string& signedXml);
 
+std::string urlEncode(const std::string& value);
+
 std::string buildTimbreUrl(const std::string& baseUrl,
                            const domain::TimbreEcfRequest& req);
 std::string buildTimbreFcUrl(const std::string& baseUrl,

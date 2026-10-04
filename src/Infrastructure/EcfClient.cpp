@@ -79,38 +79,44 @@ EcfRecepcionResponse EcfClient::sendEcf(const std::string& xmlContent,
 }
 
 RfceRecepcionResponse EcfClient::sendRfce(Rfce& rfce) {
-    auto validation = validator_.validateRfce(rfce);
-    if (!validation.isValid())
-        throw EcfValidationException(validation.errors());
+    int retries = 0;
+    const int maxRetries = 2;
 
-    const std::string xml = serializer_.serialize(rfce);
-    const std::string fileName =
-        serializer_.getFileName(rfce.encabezado.emisor.rncEmisor, rfce.encabezado.idDoc.eNcf);
+    while (true) {
+        auto validation = validator_.validateRfce(rfce);
+        if (!validation.isValid())
+            throw EcfValidationException(validation.errors());
 
-    // BUG-051: Sign RFCE XML before schema validation and transmission
-    std::string signedXml = xml;
-    if (signer_) {
-        signedXml = signer_->signXml(xml, rfce.encabezado.emisor.rncEmisor);
-    }
+        const std::string xml = serializer_.serialize(rfce);
+        const std::string fileName =
+            serializer_.getFileName(rfce.encabezado.emisor.rncEmisor, rfce.encabezado.idDoc.eNcf);
 
-    if (options_.validateSchemasLocal && schemaValidator_ != nullptr) {
-        auto result = schemaValidator_->validate(signedXml);
-        if (!result.isValid) {
-            throw EcfValidationException(result.errors);
+        // BUG-051: Sign RFCE XML before schema validation and transmission
+        std::string signedXml = xml;
+        if (signer_) {
+            signedXml = signer_->signXml(xml, rfce.encabezado.emisor.rncEmisor);
         }
+
+        if (options_.validateSchemasLocal && schemaValidator_ != nullptr) {
+            auto result = schemaValidator_->validate(signedXml);
+            if (!result.isValid) {
+                throw EcfValidationException(result.errors);
+            }
+        }
+
+        auto response = transport_->sendRfce(signedXml, fileName);
+
+        if (options_.autoRetryOnReuseableSequence && response.estado == "Rechazado" &&
+            !response.secuenciaUtilizada && retries < maxRetries && sequenceProvider_ != nullptr) {
+            ++retries;
+            const std::string newENcf =
+                sequenceProvider_->getNext(rfce.encabezado.emisor.rncEmisor);
+            rfce.encabezado.idDoc.eNcf = newENcf;
+            continue;
+        }
+
+        return response;
     }
-
-    auto response = transport_->sendRfce(signedXml, fileName);
-
-    if (options_.autoRetryOnReuseableSequence && response.estado == "Rechazado" &&
-        !response.secuenciaUtilizada) {
-        const std::string newENcf =
-            sequenceProvider_->getNext(rfce.encabezado.emisor.rncEmisor);
-        rfce.encabezado.idDoc.eNcf = newENcf;
-        return sendRfce(rfce);
-    }
-
-    return response;
 }
 
 RfceRecepcionResponse EcfClient::sendRfce(const std::string& xmlContent,

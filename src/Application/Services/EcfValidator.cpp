@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <initializer_list>
 #include <cstdio>
 #include <ctime>
 
@@ -12,13 +13,33 @@ using namespace ecf::domain;
 
 namespace {
 
+bool isLeapYear(int y) {
+    return (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0);
+}
+
+int daysInMonth(int m, int y) {
+    switch (m) {
+        case 1: case 3: case 5: case 7: case 8: case 10: case 12: return 31;
+        case 4: case 6: case 9: case 11: return 30;
+        case 2: return isLeapYear(y) ? 29 : 28;
+        default: return 0;
+    }
+}
+
 bool tryParseDate(const std::string& s, const char* fmt) {
-    std::tm tm{};
-    // Portable check for the "dd-MM-yyyy" format via sscanf.
     (void)fmt;
-    int d, m, y;
-    if (std::sscanf(s.c_str(), "%2d-%2d-%4d", &d, &m, &y) != 3) return false;
-    if (m < 1 || m > 12 || d < 1 || d > 31) return false;
+    if (s.size() != 10) return false;
+    if (s[2] != '-' || s[5] != '-') return false;
+    for (size_t i = 0; i < 10; ++i) {
+        if (i == 2 || i == 5) continue;
+        if (!std::isdigit(static_cast<unsigned char>(s[i]))) return false;
+    }
+    int d = std::stoi(s.substr(0, 2));
+    int m = std::stoi(s.substr(3, 2));
+    int y = std::stoi(s.substr(6, 4));
+    if (y < 1900 || y > 2100) return false;
+    if (m < 1 || m > 12) return false;
+    if (d < 1 || d > daysInMonth(m, y)) return false;
     return true;
 }
 
@@ -39,6 +60,17 @@ bool EcfValidator::isValidRnc(const std::string& rnc) {
 
 void EcfValidator::validateTotalesConsistency(const RfceTotales& t,
                                               std::vector<std::string>& errors) {
+    // BUG-111: Fundamental consistency: MontoTotal must equal MontoGravadoTotal + TotalITBIS + MontoExento (+ MontoImpuestoAdicional)
+    if (t.montoGravadoTotal.has_value() || t.totalITBIS.has_value() || t.montoExento.has_value()) {
+        double expectedTotal = t.montoGravadoTotal.value_or(0.0) +
+                               t.totalITBIS.value_or(0.0) +
+                               t.montoExento.value_or(0.0) +
+                               t.montoImpuestoAdicional.value_or(0.0);
+        if (std::fabs(t.montoTotal - expectedTotal) > 0.01) {
+            errors.push_back("MontoTotal no coincide con la suma de MontoGravadoTotal + TotalITBIS + MontoExento.");
+        }
+    }
+
     // The per-rate breakdown fields are optional. Only cross-check the aggregate
     // against the breakdown when at least one breakdown component is provided;
     // a document that carries only the aggregate total is valid on its own.

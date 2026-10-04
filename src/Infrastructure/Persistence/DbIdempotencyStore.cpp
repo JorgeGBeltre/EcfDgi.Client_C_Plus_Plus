@@ -21,7 +21,7 @@ IdempotencyReservationResult DbIdempotencyStore::reserveOrGet(
     pqxx::result r = w.exec_params(
         "SELECT key, created_by_worker_key_id, payload_hash, status, status_code, "
         "       content_type, response_body, created_at::text, updated_at::text, expires_at::text, "
-        "       (created_at < NOW() - INTERVAL '5 minutes') as is_lease_expired "
+        "       (created_at < NOW() - INTERVAL '5 minutes' OR (expires_at IS NOT NULL AND expires_at < NOW())) as is_lease_expired "
         "FROM ecf_idempotency_records WHERE key = $1",
         key
     );
@@ -97,10 +97,22 @@ void DbIdempotencyStore::complete(
         "    content_type = $3, "
         "    response_body = $4, "
         "    updated_at = NOW() "
-        "WHERE key = $1",
+        "WHERE key = $1 AND status = 'Processing'",
         key, result.statusCode, result.contentType, result.body
     );
     w.commit();
+}
+
+void DbIdempotencyStore::release(const std::string& key) {
+    try {
+        pqxx::connection conn(connectionString_);
+        pqxx::work w(conn);
+        w.exec_params(
+            "DELETE FROM ecf_idempotency_records WHERE key = $1 AND status = 'Processing'",
+            key
+        );
+        w.commit();
+    } catch (...) {}
 }
 
 } // namespace ecf::infra

@@ -75,10 +75,13 @@ public:
                     result.contentType = resp->contentTypeString();
                     result.body = std::string(resp->body().data(), resp->body().size());
                     store->complete(scopedKey, result);
+                } else {
+                    store->release(scopedKey);
                 }
                 callback(resp);
             });
         } catch (const std::exception& ex) {
+            store->release(scopedKey);
             Json::Value err;
             err["error"] = std::string("Operation error: ") + ex.what();
             auto res = drogon::HttpResponse::newHttpJsonResponse(err);

@@ -69,6 +69,18 @@ std::string cleanDigits(const std::string& s) {
     return out;
 }
 
+bool isValidUuid(const std::string& s) {
+    if (s.size() != 36) return false;
+    for (size_t i = 0; i < 36; ++i) {
+        if (i == 8 || i == 13 || i == 18 || i == 23) {
+            if (s[i] != '-') return false;
+        } else {
+            if (!std::isxdigit(static_cast<unsigned char>(s[i]))) return false;
+        }
+    }
+    return true;
+}
+
 bool hasAlpha(const std::string& s) {
     for (char c : s) {
         if (std::isalpha(static_cast<unsigned char>(c))) return true;
@@ -1117,6 +1129,12 @@ void DocumentsController::getXmlBySourceTxnId(const HttpRequestPtr& req,
 void DocumentsController::getXmlById(const HttpRequestPtr& req,
                                     std::function<void(const HttpResponsePtr&)>&& callback,
                                     std::string id) {
+    if (!isValidUuid(id)) {
+        Json::Value errBody;
+        errBody["error"] = "El identificador proporcionado no es un UUID válido.";
+        callback(json(errBody, k400BadRequest));
+        return;
+    }
     std::string role;
     if (req->attributes()->find("role")) role = req->attributes()->get<std::string>("role");
     std::string clientType;
@@ -1162,6 +1180,12 @@ void DocumentsController::getXmlById(const HttpRequestPtr& req,
 void DocumentsController::getById(const HttpRequestPtr& req,
                                   std::function<void(const HttpResponsePtr&)>&& callback,
                                   std::string id) {
+    if (!isValidUuid(id)) {
+        Json::Value errBody;
+        errBody["error"] = "El identificador proporcionado no es un UUID válido.";
+        callback(json(errBody, k400BadRequest));
+        return;
+    }
     std::string role;
     if (req->attributes()->find("role")) role = req->attributes()->get<std::string>("role");
     std::string clientType;
@@ -1204,7 +1228,7 @@ void DocumentsController::getById(const HttpRequestPtr& req,
         callback(json(out, k200OK));
     } catch (const std::exception& ex) {
         Json::Value errBody;
-        errBody["error"] = ex.what();
+        errBody["error"] = "Ha ocurrido un error al obtener el documento.";
         callback(json(errBody, k500InternalServerError));
     }
 }

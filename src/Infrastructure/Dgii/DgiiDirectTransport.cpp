@@ -220,7 +220,7 @@ ConsultaEstadoResponse DgiiDirectTransport::consultarEstado(const ConsultaEstado
     if (req.rncComprador && !req.rncComprador->empty())
         url += "&rnccomprador=" + *req.rncComprador;
     if (req.codigoSeguridad && !req.codigoSeguridad->empty())
-        url += "&codigoseguridad=" + *req.codigoSeguridad;
+        url += "&codigoseguridad=" + EcfSecurityUtils::urlEncode(*req.codigoSeguridad);
 
     auto resp = sendWithReactiveAuth([&](const std::string& token) {
         return cpr::Get(cpr::Url{url}, cpr::Bearer{token},

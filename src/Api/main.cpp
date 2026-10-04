@@ -148,15 +148,28 @@ int main() {
                           "https://tools.ietf.org/html/rfc9457#section-6.6"));
     });
 
-    // Health check.
+    // Health check (INF-013).
     app().registerHandler(
         "/health",
-        [](const HttpRequestPtr&, std::function<void(const HttpResponsePtr&)>&& cb) {
+        [&services](const HttpRequestPtr&, std::function<void(const HttpResponsePtr&)>&& cb) {
             Json::Value body;
-            body["status"] = "Healthy";
-            body["database"] = "Healthy";
+            bool dbOk = false;
+            try {
+                auto conn = services.dbContext().createConnection();
+                if (conn && conn->is_open()) {
+                    pqxx::work w(*conn);
+                    pqxx::result r = w.exec("SELECT 1");
+                    dbOk = !r.empty();
+                }
+            } catch (...) {
+                dbOk = false;
+            }
+            body["status"] = dbOk ? "Healthy" : "Degraded";
+            body["database"] = dbOk ? "Healthy" : "Unhealthy";
             body["redis"] = "Healthy";
-            cb(HttpResponse::newHttpJsonResponse(body));
+            auto resp = HttpResponse::newHttpJsonResponse(body);
+            if (!dbOk) resp->setStatusCode(k503ServiceUnavailable);
+            cb(resp);
         },
         {Get});
 
@@ -381,7 +394,6 @@ int main() {
     app()
         .addListener(config.serverHost, static_cast<uint16_t>(config.serverPort))
         .setThreadNum(static_cast<size_t>(threads > 0 ? threads : 1))
-        .setDocumentRoot("./")
         .run();
 
     return 0;

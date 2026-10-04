@@ -18,7 +18,13 @@ namespace ecf::infra::EcfSecurityUtils {
 
 using domain::EcfException;
 
-namespace {
+std::string money(double v) {
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "%.2f", v);
+    return std::string(buf);
+}
+
+}  // namespace
 
 std::string urlEncode(const std::string& value) {
     static const char hex[] = "0123456789ABCDEF";
@@ -36,14 +42,6 @@ std::string urlEncode(const std::string& value) {
     }
     return out;
 }
-
-std::string money(double v) {
-    char buf[64];
-    std::snprintf(buf, sizeof(buf), "%.2f", v);
-    return std::string(buf);
-}
-
-}  // namespace
 
 std::string extractSignatureValue(const std::string& signedXml) {
     if (signedXml.find('<') == std::string::npos) {

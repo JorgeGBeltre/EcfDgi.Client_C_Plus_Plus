@@ -33,19 +33,49 @@ std::string childText(xmlNode* parent, const char* name) {
     return {};
 }
 
-// Parses ISO timestamps with optional fractional seconds / milliseconds into a UTC time_point.
+// Parses ISO timestamps with optional fractional seconds / milliseconds and timezone offset into a UTC time_point.
 bool parseExpiry(const std::string& s, std::chrono::system_clock::time_point& out) {
+    if (s.empty()) return false;
     std::tm tm{};
     int y = 0, mo = 0, d = 0, h = 0, mi = 0, se = 0;
-    int ms = 0;
     char sep = 'T';
-    if (std::sscanf(s.c_str(), "%d-%d-%d%c%d:%d:%d.%d", &y, &mo, &d, &sep, &h, &mi, &se, &ms) >= 7) {
-        // Parsed with fractional seconds
-    } else if (std::sscanf(s.c_str(), "%d-%d-%d%c%d:%d:%d", &y, &mo, &d, &sep, &h, &mi, &se) >= 7) {
-        // Parsed without fractional seconds
+    int n = std::sscanf(s.c_str(), "%d-%d-%d%c%d:%d:%d", &y, &mo, &d, &sep, &h, &mi, &se);
+    if (n < 7) return false;
+
+    int ms = 0;
+    size_t dotPos = s.find('.', 19);
+    size_t tzPos = std::string::npos;
+    if (dotPos != std::string::npos) {
+        size_t endDigits = dotPos + 1;
+        while (endDigits < s.size() && std::isdigit(static_cast<unsigned char>(s[endDigits]))) {
+            ++endDigits;
+        }
+        std::string fracStr = s.substr(dotPos + 1, endDigits - (dotPos + 1));
+        if (!fracStr.empty()) {
+            while (fracStr.size() < 3) fracStr += '0';
+            ms = std::stoi(fracStr.substr(0, 3));
+        }
+        tzPos = endDigits;
     } else {
-        return false;
+        tzPos = 19;
     }
+
+    int tzOffsetSec = 0;
+    if (tzPos < s.size()) {
+        std::string tzPart = s.substr(tzPos);
+        if (!tzPart.empty()) {
+            if (tzPart[0] == 'Z' || tzPart[0] == 'z') {
+                tzOffsetSec = 0;
+            } else if (tzPart[0] == '+' || tzPart[0] == '-') {
+                int sign = (tzPart[0] == '-') ? -1 : 1;
+                int tzH = 0, tzM = 0;
+                if (std::sscanf(tzPart.c_str() + 1, "%d:%d", &tzH, &tzM) >= 1) {
+                    tzOffsetSec = sign * (tzH * 3600 + tzM * 60);
+                }
+            }
+        }
+    }
+
     tm.tm_year = y - 1900;
     tm.tm_mon = mo - 1;
     tm.tm_mday = d;
@@ -58,6 +88,8 @@ bool parseExpiry(const std::string& s, std::chrono::system_clock::time_point& ou
     std::time_t tt = timegm(&tm);
 #endif
     if (tt == static_cast<std::time_t>(-1)) return false;
+
+    tt -= tzOffsetSec;
     out = std::chrono::system_clock::from_time_t(tt) + std::chrono::milliseconds(ms);
     return true;
 }

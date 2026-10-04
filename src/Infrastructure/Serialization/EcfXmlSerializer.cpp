@@ -18,20 +18,30 @@ namespace {
 std::string xmlEscape(const std::string& value) {
     std::string out;
     out.reserve(value.size());
-    for (char c : value) {
+    for (unsigned char c : value) {
+        // Strip illegal XML 1.0 control characters and null bytes (BUG-149)
+        if (c < 0x20 && c != 0x09 && c != 0x0A && c != 0x0D) {
+            continue;
+        }
+        if (c == 0x7F) {
+            continue;
+        }
         switch (c) {
             case '&': out += "&amp;"; break;
             case '<': out += "&lt;"; break;
             case '>': out += "&gt;"; break;
             case '"': out += "&quot;"; break;
             case '\'': out += "&apos;"; break;
-            default: out += c;
+            default: out += static_cast<char>(c);
         }
     }
     return out;
 }
 
 std::string money(double v) {
+    if (!std::isfinite(v) || v < 0.0) {
+        v = 0.0;
+    }
     char buf[64];
     std::snprintf(buf, sizeof(buf), "%.2f", v);
     return std::string(buf);
@@ -130,9 +140,10 @@ std::string EcfXmlSerializer::serialize(const Rfce& model) {
     os << "<IdDoc>";
     el(os, "TipoeCF", e.idDoc.tipoeCF);
     el(os, "eNCF", e.idDoc.eNcf);
-    std::string tipoIngresosStr = (e.idDoc.tipoIngresos > 0 && e.idDoc.tipoIngresos < 10)
-                                      ? "0" + std::to_string(e.idDoc.tipoIngresos)
-                                      : std::to_string(e.idDoc.tipoIngresos);
+    int validTipoIngresos = e.idDoc.tipoIngresos > 0 ? e.idDoc.tipoIngresos : 1;
+    std::string tipoIngresosStr = (validTipoIngresos < 10)
+                                      ? "0" + std::to_string(validTipoIngresos)
+                                      : std::to_string(validTipoIngresos);
     el(os, "TipoIngresos", tipoIngresosStr);
     el(os, "TipoPago", std::to_string(e.idDoc.tipoPago));
     if (!e.idDoc.tablaFormasPago.empty()) {

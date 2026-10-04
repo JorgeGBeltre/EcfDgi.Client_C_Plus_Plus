@@ -36,6 +36,8 @@ public:
     virtual void complete(
         const std::string& key, 
         const IdempotentResult& result) = 0;
+
+    virtual void release(const std::string& key) { (void)key; }
 };
 
 } // namespace ecf::domain

@@ -36,7 +36,11 @@ public:
         const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                             std::chrono::steady_clock::now() - start_)
                             .count();
-        spdlog::info("Completed request {} in {}ms", requestName_, ms);
+        if (std::uncaught_exceptions() > 0) {
+            spdlog::error("Failed request {} in {}ms (exception thrown)", requestName_, ms);
+        } else {
+            spdlog::info("Completed request {} in {}ms", requestName_, ms);
+        }
     }
 
 private:

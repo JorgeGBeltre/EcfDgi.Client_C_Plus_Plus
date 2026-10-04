@@ -25,6 +25,19 @@ Json::Value err(const std::string& message) {
     v["error"] = message;
     return v;
 }
+
+bool isValidUuid(const std::string& s) {
+    if (s.size() != 36) return false;
+    for (size_t i = 0; i < 36; ++i) {
+        if (i == 8 || i == 13 || i == 18 || i == 23) {
+            if (s[i] != '-') return false;
+        } else {
+            if (!std::isxdigit(static_cast<unsigned char>(s[i]))) return false;
+        }
+    }
+    return true;
+}
+
 }  // namespace
 
 void CustomersController::getAll(const HttpRequestPtr& req,
@@ -41,6 +54,10 @@ void CustomersController::getAll(const HttpRequestPtr& req,
 void CustomersController::getById(const HttpRequestPtr& req,
                                   std::function<void(const HttpResponsePtr&)>&& callback,
                                   std::string id) {
+    if (!isValidUuid(id)) {
+        callback(json(err("El ID proporcionado no es un UUID válido."), k400BadRequest));
+        return;
+    }
     auto scope = AppServices::instance().makeScope(mapping::currentUserFrom(req));
     app::GetCustomerByIdQueryHandler handler(scope.customers);
     auto result = handler.handle(app::GetCustomerByIdQuery{id});
@@ -89,6 +106,10 @@ void CustomersController::create(const HttpRequestPtr& req,
 void CustomersController::update(const HttpRequestPtr& req,
                                  std::function<void(const HttpResponsePtr&)>&& callback,
                                  std::string id) {
+    if (!isValidUuid(id)) {
+        callback(json(err("El ID proporcionado no es un UUID válido."), k400BadRequest));
+        return;
+    }
     auto body = req->getJsonObject();
     if (!body || !body->isObject()) { callback(json(err("Invalid JSON body."), k400BadRequest)); return; }
 
@@ -136,6 +157,10 @@ void CustomersController::update(const HttpRequestPtr& req,
 void CustomersController::remove(const HttpRequestPtr& req,
                                  std::function<void(const HttpResponsePtr&)>&& callback,
                                  std::string id) {
+    if (!isValidUuid(id)) {
+        callback(json(err("El ID proporcionado no es un UUID válido."), k400BadRequest));
+        return;
+    }
     auto scope = AppServices::instance().makeScope(mapping::currentUserFrom(req));
     app::DeleteCustomerCommandHandler handler(scope.customers, scope.uow);
     auto result = handler.handle(app::DeleteCustomerCommand{id});

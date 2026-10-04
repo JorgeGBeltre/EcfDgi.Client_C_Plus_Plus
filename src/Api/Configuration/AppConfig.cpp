@@ -46,7 +46,9 @@ static std::string normalizePostgresConnectionString(const std::string& input) {
         else if (lowerKey == "database" || lowerKey == "initial catalog") key = "dbname";
         else if (lowerKey == "username" || lowerKey == "user id" || lowerKey == "user") key = "user";
         else if (lowerKey == "password") key = "password";
-        else continue;
+        else if (lowerKey == "sslmode" || lowerKey == "ssl mode") key = "sslmode";
+        else if (lowerKey == "timeout" || lowerKey == "connection timeout" || lowerKey == "connect timeout") key = "connect_timeout";
+        else key = lowerKey;
 
         if (!out.empty()) out += " ";
         out += key + "=" + val;
@@ -147,7 +149,7 @@ AppConfig AppConfig::load(const std::string& path) {
         cfg.emisorOptions.razonSocial = getStr(s, "RazonSocial");
     } else if (cfg.ecfOptions.rncEmisor.has_value() && !cfg.ecfOptions.rncEmisor->empty()) {
         cfg.emisorOptions.rnc = *cfg.ecfOptions.rncEmisor;
-        cfg.emisorOptions.razonSocial = "WILLY CHIC DOMINICANA SRL";
+        cfg.emisorOptions.razonSocial = "";
     }
 
     if (j.contains("EcfStatusPolling")) {
