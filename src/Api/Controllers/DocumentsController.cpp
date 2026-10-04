@@ -92,19 +92,33 @@ void applyCanonicalContent(domain::EcfDocument& doc,
     doc.state = "SequenceAllocated";
 }
 
-domain::AmbienteEnum resolveAmbienteEnum(const std::string& rawEnv, domain::AmbienteEnum defaultAmbiente) {
-    if (rawEnv.empty()) return defaultAmbiente;
+bool tryResolveAmbienteEnum(const std::string& rawEnv, domain::AmbienteEnum& outAmb) {
+    if (rawEnv.empty()) return false;
     std::string lower = rawEnv;
     std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
-    if (lower == "test" || lower == "testecf" || lower.find("precert") != std::string::npos)
-        return domain::AmbienteEnum::PreCertificacion;
-    if (lower == "cert" || lower == "certecf" || lower.find("certific") != std::string::npos || lower.find("homolog") != std::string::npos)
-        return domain::AmbienteEnum::Certificacion;
-    if (lower == "prod" || lower == "ecf" || lower.find("producc") != std::string::npos)
-        return domain::AmbienteEnum::Produccion;
-    if (lower == "1" || lower == "precertificacion") return domain::AmbienteEnum::PreCertificacion;
-    if (lower == "2" || lower == "produccion") return domain::AmbienteEnum::Produccion;
-    if (lower == "3" || lower == "certificacion") return domain::AmbienteEnum::Certificacion;
+    while (!lower.empty() && std::isspace(static_cast<unsigned char>(lower.front()))) lower.erase(lower.begin());
+    while (!lower.empty() && std::isspace(static_cast<unsigned char>(lower.back()))) lower.pop_back();
+
+    if (lower == "test" || lower == "testecf" || lower.find("precert") != std::string::npos || lower == "1") {
+        outAmb = domain::AmbienteEnum::PreCertificacion;
+        return true;
+    }
+    if (lower == "cert" || lower == "certecf" || lower.find("certific") != std::string::npos || lower.find("homolog") != std::string::npos || lower == "3") {
+        outAmb = domain::AmbienteEnum::Certificacion;
+        return true;
+    }
+    if (lower == "prod" || lower == "prd" || lower == "production" || lower == "ecf" || lower.find("producc") != std::string::npos || lower == "2") {
+        outAmb = domain::AmbienteEnum::Produccion;
+        return true;
+    }
+    return false;
+}
+
+domain::AmbienteEnum resolveAmbienteEnum(const std::string& rawEnv, domain::AmbienteEnum defaultAmbiente) {
+    domain::AmbienteEnum resolved;
+    if (tryResolveAmbienteEnum(rawEnv, resolved)) {
+        return resolved;
+    }
     return defaultAmbiente;
 }
 
@@ -650,14 +664,53 @@ void DocumentsController::submit(const HttpRequestPtr& req,
                 cb(json(err("El documento debe contener al menos una línea de detalle."), k400BadRequest));
                 return;
             }
-
-            if (dto.totals.montoTotal < 0.0) {
-                cb(json(err("El MontoTotal no puede ser negativo."), k400BadRequest));
+            if (dto.lines.size() > 1000) {
+                cb(json(err("El documento no puede contener más de 1,000 líneas de detalle."), k400BadRequest));
                 return;
+            }
+
+            for (const auto& line : dto.lines) {
+                if (line.quantity <= 0.0) {
+                    cb(json(err("La cantidad de cada línea debe ser mayor a cero (Ítem: '" + line.name + "')."), k400BadRequest));
+                    return;
+                }
+                if (line.unitPrice < 0.0 || line.discountAmount < 0.0 || line.montoItem < 0.0) {
+                    cb(json(err("El precio unitario, descuento y monto de cada línea no pueden ser negativos (Ítem: '" + line.name + "')."), k400BadRequest));
+                    return;
+                }
+            }
+
+            if (dto.totals.montoSubtotal.value_or(0.0) < 0.0 || dto.totals.montoItbis < 0.0 || dto.totals.montoTotal < 0.0) {
+                cb(json(err("Subtotal, ITBIS y MontoTotal no pueden ser negativos."), k400BadRequest));
+                return;
+            }
+
+            if (!dto.header.rncEmisor.empty()) {
+                std::string cleanRnc = cleanDigits(dto.header.rncEmisor);
+                if (cleanRnc.length() != 9 && cleanRnc.length() != 11) {
+                    cb(json(err("Header.RncEmisor '" + dto.header.rncEmisor + "' es inválido. Debe tener exactamente 9 dígitos (RNC) u 11 dígitos (Cédula)."), k400BadRequest));
+                    return;
+                }
             }
 
             std::string tipoComprobante = dto.tipoComprobante;
             std::transform(tipoComprobante.begin(), tipoComprobante.end(), tipoComprobante.begin(), ::toupper);
+            while (!tipoComprobante.empty() && std::isspace(static_cast<unsigned char>(tipoComprobante.front()))) tipoComprobante.erase(tipoComprobante.begin());
+            while (!tipoComprobante.empty() && std::isspace(static_cast<unsigned char>(tipoComprobante.back()))) tipoComprobante.pop_back();
+
+            if (!tipoComprobante.empty() && tipoComprobante.front() != 'E' && std::isdigit(static_cast<unsigned char>(tipoComprobante.front()))) {
+                tipoComprobante = "E" + tipoComprobante;
+            }
+
+            static const std::unordered_set<std::string> ValidTipoEcfSet = {
+                "E31", "E32", "E33", "E34", "E41", "E43", "E44", "E45", "E46", "E47"
+            };
+
+            if (tipoComprobante.empty() || ValidTipoEcfSet.find(tipoComprobante) == ValidTipoEcfSet.end()) {
+                cb(json(err("TipoComprobante '" + dto.tipoComprobante + "' es inválido o no está soportado. Valores válidos: E31, E32, E33, E34, E41, E43, E44, E45, E46, E47."), k400BadRequest));
+                return;
+            }
+            dto.tipoComprobante = tipoComprobante;
 
             // Pre-allocation type-specific validations
             if (tipoComprobante == "E34" || tipoComprobante == "E33") {
@@ -753,7 +806,13 @@ void DocumentsController::submit(const HttpRequestPtr& req,
                 rawEnv = *dto.environment;
             }
             auto defaultAmbiente = services.ecfClientOptions().toAmbiente(services.ecfClientOptions().environment);
-            auto ambiente = resolveAmbienteEnum(rawEnv, defaultAmbiente);
+            domain::AmbienteEnum ambiente = defaultAmbiente;
+            if (!rawEnv.empty()) {
+                if (!tryResolveAmbienteEnum(rawEnv, ambiente)) {
+                    cb(json(err("Ambiente fiscal '" + rawEnv + "' desconocido o inválido. Valores válidos: PreCertificacion (o Test/TestEcf), Certificacion (o Cert/CertEcf), Produccion (o Prod)."), k400BadRequest));
+                    return;
+                }
+            }
 
             bool isDefaultFallback = (effectiveTenantId == "default-tenant" && rawEnv.empty() &&
                                       req->getHeader("X-Tenant-Id").empty() &&

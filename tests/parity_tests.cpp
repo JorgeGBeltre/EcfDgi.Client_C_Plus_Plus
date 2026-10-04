@@ -9,6 +9,7 @@
 #include "Domain/Entities/EcfClientOptions.h"
 #include "Infrastructure/Security/EcfSecurityUtils.h"
 #include "Infrastructure/Dgii/EcfEnvironmentConfig.h"
+#include "Domain/Enums/AmbienteEnum.h"
 #include "Infrastructure/Dgii/DgiiDirectTransport.h"
 #include "Shared/Common/Sys.h"
 
@@ -461,6 +462,30 @@ int main() {
         CHECK(escaped.find('\x1b') == std::string::npos, "BUG-092: escapeXml strips ESC 0x1b");
         CHECK(escaped.find('\t') != std::string::npos, "BUG-092: escapeXml preserves tab 0x09");
         CHECK(escaped.find('\n') != std::string::npos, "BUG-092: escapeXml preserves newline 0x0A");
+    }
+
+    // Test BUG-093: Ambiente resolution whitelist & rejection of invalid/unknown environments
+    {
+        domain::AmbienteEnum amb;
+        CHECK(domain::tryResolveAmbienteEnum("Test", amb) && amb == domain::AmbienteEnum::PreCertificacion, "BUG-093: recognizes Test");
+        CHECK(domain::tryResolveAmbienteEnum("TestEcf", amb) && amb == domain::AmbienteEnum::PreCertificacion, "BUG-093: recognizes TestEcf");
+        CHECK(domain::tryResolveAmbienteEnum("PreCertificacion", amb) && amb == domain::AmbienteEnum::PreCertificacion, "BUG-093: recognizes PreCertificacion");
+        CHECK(domain::tryResolveAmbienteEnum("1", amb) && amb == domain::AmbienteEnum::PreCertificacion, "BUG-093: recognizes 1");
+        CHECK(domain::tryResolveAmbienteEnum("Cert", amb) && amb == domain::AmbienteEnum::Certificacion, "BUG-093: recognizes Cert");
+        CHECK(domain::tryResolveAmbienteEnum("CertEcf", amb) && amb == domain::AmbienteEnum::Certificacion, "BUG-093: recognizes CertEcf");
+        CHECK(domain::tryResolveAmbienteEnum("Homologacion", amb) && amb == domain::AmbienteEnum::Certificacion, "BUG-093: recognizes Homologacion");
+        CHECK(domain::tryResolveAmbienteEnum("3", amb) && amb == domain::AmbienteEnum::Certificacion, "BUG-093: recognizes 3");
+        CHECK(domain::tryResolveAmbienteEnum("Prod", amb) && amb == domain::AmbienteEnum::Produccion, "BUG-093: recognizes Prod");
+        CHECK(domain::tryResolveAmbienteEnum("prd", amb) && amb == domain::AmbienteEnum::Produccion, "BUG-093: recognizes prd");
+        CHECK(domain::tryResolveAmbienteEnum("Production", amb) && amb == domain::AmbienteEnum::Produccion, "BUG-093: recognizes Production");
+        CHECK(domain::tryResolveAmbienteEnum("Produccion", amb) && amb == domain::AmbienteEnum::Produccion, "BUG-093: recognizes Produccion");
+        CHECK(domain::tryResolveAmbienteEnum("2", amb) && amb == domain::AmbienteEnum::Produccion, "BUG-093: recognizes 2");
+
+        // Unrecognized values must return false (preventing silent fallback to default)
+        CHECK(!domain::tryResolveAmbienteEnum("invalid_env", amb), "BUG-093: rejects invalid_env");
+        CHECK(!domain::tryResolveAmbienteEnum("dev", amb), "BUG-093: rejects dev");
+        CHECK(!domain::tryResolveAmbienteEnum("staging", amb), "BUG-093: rejects staging");
+        CHECK(!domain::tryResolveAmbienteEnum("", amb), "BUG-093: rejects empty env");
     }
 
     std::printf("\nTotal failures: %d\n", failures);

@@ -1,8 +1,12 @@
 #pragma once
 
 #include <drogon/HttpController.h>
+#include "Domain/Entities/EcfClientOptions.h"
 
 namespace ecf::api {
+
+bool tryResolveAmbienteEnum(const std::string& rawEnv, domain::AmbienteEnum& outAmb);
+domain::AmbienteEnum resolveAmbienteEnum(const std::string& rawEnv, domain::AmbienteEnum defaultAmbiente);
 
 class DocumentsController : public drogon::HttpController<DocumentsController> {
 public:
