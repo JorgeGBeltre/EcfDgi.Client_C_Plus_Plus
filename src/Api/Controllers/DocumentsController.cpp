@@ -367,8 +367,19 @@ HttpResponsePtr signAndSend(domain::EcfDocument& doc, AppServices::Scope& scope,
         doc.state = "Uncertain";
     }
 
-    scope.docs->update(doc);
-    scope.uow->saveChanges();
+    try {
+        scope.docs->update(doc);
+        scope.uow->saveChanges();
+    } catch (...) {
+        // Fallback: If DB connection dropped during DGII transmission, retry with a fresh scope
+        try {
+            auto retryScope = services.makeScope(domain::User{"system", "Worker"});
+            retryScope.docs->update(doc);
+            retryScope.uow->saveChanges();
+        } catch (...) {
+            // Retain doc in memory so response still carries trackId and status to caller
+        }
+    }
 
     Json::Value out;
     out["documentId"] = doc.id;
@@ -855,41 +866,77 @@ void DocumentsController::getBySourceTxnId(const HttpRequestPtr& req,
             return;
         }
 
-        // Si el comprobante sigue en estado no terminal con TrackId, verificar dinámicamente con DGII
-        if ((doc->state == "Signed" || doc->state == "SentToDgii" || doc->state == "Processing" || doc->state == "Uncertain" || doc->state == "AwaitingTransmission") && doc->trackId.has_value() && !doc->trackId->empty()) {
+        // Si el comprobante sigue en estado no terminal, verificar dinámicamente con DGII
+        if (doc->state == "Signed" || doc->state == "SentToDgii" || doc->state == "Processing" || doc->state == "Uncertain" || doc->state == "AwaitingTransmission") {
             try {
                 auto effectiveSigner = resolveSigner(doc->tenantId, doc->rncEmisor, std::nullopt, false, services);
                 auto defaultAmbiente = services.ecfClientOptions().toAmbiente(services.ecfClientOptions().environment);
                 auto amb = resolveAmbienteEnum(doc->ambiente.value_or(""), defaultAmbiente);
                 auto client = resolveEcfClient(doc->rncEmisor, effectiveSigner, amb, false, services);
-                auto resultado = client->consultarResultado(*doc->trackId);
-                if (!resultado.estado.empty()) {
-                    std::string estado = resultado.estado;
-                    while (!estado.empty() && std::isspace(static_cast<unsigned char>(estado.front()))) estado.erase(estado.begin());
-                    while (!estado.empty() && std::isspace(static_cast<unsigned char>(estado.back()))) estado.pop_back();
 
-                    std::string lowerEstado = estado;
-                    std::transform(lowerEstado.begin(), lowerEstado.end(), lowerEstado.begin(), ::tolower);
+                if (doc->trackId.has_value() && !doc->trackId->empty()) {
+                    auto resultado = client->consultarResultado(*doc->trackId);
+                    if (!resultado.estado.empty()) {
+                        std::string estado = resultado.estado;
+                        while (!estado.empty() && std::isspace(static_cast<unsigned char>(estado.front()))) estado.erase(estado.begin());
+                        while (!estado.empty() && std::isspace(static_cast<unsigned char>(estado.back()))) estado.pop_back();
 
-                    if (lowerEstado == "aceptado" || lowerEstado == "aceptado condicional") {
-                        doc->state = "AcceptedByDgii";
-                        doc->dgiiResponseXml = "Aceptado por DGII: " + estado;
-                        scope.docs->update(*doc);
-                        scope.uow->saveChanges();
-                    } else if (lowerEstado == "rechazado") {
-                        doc->state = "RejectedByDgii";
-                        std::string errors = "Rechazado por DGII";
-                        if (!resultado.mensajes.empty()) {
-                            errors = "";
-                            for (size_t i = 0; i < resultado.mensajes.size(); ++i) {
-                                if (i > 0) errors += "; ";
-                                errors += "[" + resultado.mensajes[i].codigo + "] " + resultado.mensajes[i].valor;
+                        std::string lowerEstado = estado;
+                        std::transform(lowerEstado.begin(), lowerEstado.end(), lowerEstado.begin(), ::tolower);
+
+                        if (lowerEstado == "aceptado" || lowerEstado == "aceptado condicional") {
+                            doc->state = "AcceptedByDgii";
+                            doc->dgiiResponseXml = "Aceptado por DGII: " + estado;
+                            scope.docs->update(*doc);
+                            scope.uow->saveChanges();
+                        } else if (lowerEstado == "rechazado") {
+                            doc->state = "RejectedByDgii";
+                            std::string errors = "Rechazado por DGII";
+                            if (!resultado.mensajes.empty()) {
+                                errors = "";
+                                for (size_t i = 0; i < resultado.mensajes.size(); ++i) {
+                                    if (i > 0) errors += "; ";
+                                    errors += "[" + resultado.mensajes[i].codigo + "] " + resultado.mensajes[i].valor;
+                                }
                             }
+                            doc->dgiiResponseXml = errors;
+                            scope.docs->update(*doc);
+                            scope.uow->saveChanges();
                         }
-                        doc->dgiiResponseXml = errors;
-                        scope.docs->update(*doc);
-                        scope.uow->saveChanges();
                     }
+                } else if (!doc->eNcf.empty()) {
+                    // BUG-087: Reconciliar documentos sin TrackId (p. ej. falla de BD pos-transmisión)
+                    try {
+                        auto status = client->consultarEstado(doc->rncEmisor, doc->eNcf);
+                        std::string estadoTrim = status.estado;
+                        while (!estadoTrim.empty() && std::isspace(static_cast<unsigned char>(estadoTrim.front()))) estadoTrim.erase(estadoTrim.begin());
+                        while (!estadoTrim.empty() && std::isspace(static_cast<unsigned char>(estadoTrim.back()))) estadoTrim.pop_back();
+
+                        if (!estadoTrim.empty() && estadoTrim != "No encontrado" && estadoTrim != "no encontrado") {
+                            std::string lower = estadoTrim;
+                            std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+
+                            try {
+                                auto trackDetails = client->consultarTrackIds(doc->rncEmisor, doc->eNcf);
+                                if (!trackDetails.empty() && !trackDetails.front().trackId.empty()) {
+                                    doc->trackId = trackDetails.front().trackId;
+                                }
+                            } catch (...) {}
+
+                            if (lower == "aceptado" || lower == "aceptado condicional") {
+                                doc->state = "AcceptedByDgii";
+                                doc->dgiiResponseXml = "Aceptado por DGII (Reconciliado): " + estadoTrim;
+                            } else if (lower == "rechazado") {
+                                doc->state = "RejectedByDgii";
+                                doc->dgiiResponseXml = "Rechazado por DGII (Reconciliado): " + estadoTrim;
+                            } else {
+                                doc->state = "Signed";
+                                doc->dgiiResponseXml = "En proceso en DGII: " + estadoTrim;
+                            }
+                            scope.docs->update(*doc);
+                            scope.uow->saveChanges();
+                        }
+                    } catch (...) {}
                 }
             } catch (const std::exception& ex) {
                 // Log and continue, return current DB state
