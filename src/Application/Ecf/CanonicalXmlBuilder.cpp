@@ -88,6 +88,12 @@ std::string escapeXml(const std::string& value) {
     out.reserve(value.size());
     for (size_t i = 0; i < value.size(); ++i) {
         unsigned char c = static_cast<unsigned char>(value[i]);
+        
+        // Strip illegal XML 1.0 control characters (BUG-092)
+        if (c < 0x20 && c != 0x09 && c != 0x0A && c != 0x0D) {
+            continue;
+        }
+
         if (c == '&') {
             out += "&amp;";
         } else if (c == '<') {
@@ -112,6 +118,56 @@ std::string escapeXml(const std::string& value) {
         }
     }
     return out;
+}
+
+std::string truncateUtf8(const std::string& str, size_t maxChars) {
+    if (str.empty() || maxChars == 0) return "";
+    
+    size_t charCount = 0;
+    size_t byteIndex = 0;
+    
+    while (byteIndex < str.size() && charCount < maxChars) {
+        unsigned char c = static_cast<unsigned char>(str[byteIndex]);
+        size_t charLen = 1;
+        if ((c & 0x80) == 0) {
+            charLen = 1;
+        } else if ((c & 0xE0) == 0xC0) {
+            charLen = 2;
+        } else if ((c & 0xF0) == 0xE0) {
+            charLen = 3;
+        } else if ((c & 0xF8) == 0xF0) {
+            charLen = 4;
+        } else {
+            // Continuation byte or invalid leading byte without header; step 1 byte
+            byteIndex += 1;
+            charCount++;
+            continue;
+        }
+        
+        if (byteIndex + charLen > str.size()) {
+            // Incomplete multi-byte sequence at string boundary; stop before splitting (BUG-092)
+            break;
+        }
+        
+        bool validContinuation = true;
+        for (size_t k = 1; k < charLen; ++k) {
+            unsigned char cont = static_cast<unsigned char>(str[byteIndex + k]);
+            if ((cont & 0xC0) != 0x80) {
+                validContinuation = false;
+                break;
+            }
+        }
+        if (!validContinuation) {
+            byteIndex += 1;
+            charCount++;
+            continue;
+        }
+        
+        byteIndex += charLen;
+        charCount++;
+    }
+    
+    return str.substr(0, byteIndex);
 }
 
 std::string normalizeFechaDgii(const std::string& value) {
@@ -226,10 +282,10 @@ std::vector<ProcessedLineItem> normalizeCanonicalLines(const std::vector<Canonic
             safeAmount = calculatedAmount;
         }
 
-        std::string shortName = rawName.length() > 80 ? rawName.substr(0, 80) : rawName;
+        std::string shortName = truncateUtf8(rawName, 80);
         std::string extendedDesc;
         if (rawName.length() > 80) {
-            extendedDesc = rawName.length() > 1000 ? rawName.substr(0, 1000) : rawName;
+            extendedDesc = truncateUtf8(rawName, 1000);
         }
 
         ProcessedLineItem pi;
@@ -438,14 +494,14 @@ std::string buildXmlFromCanonical(const CanonicalDocumentDto& dto,
 
     ss << "    <Emisor>\n"
        << "      <RNCEmisor>" << emisorRnc << "</RNCEmisor>\n";
-    std::string safeEmisorName = emisorRazonSocial.length() > 150 ? emisorRazonSocial.substr(0, 150) : emisorRazonSocial;
+    std::string safeEmisorName = truncateUtf8(emisorRazonSocial, 150);
     ss << "      <RazonSocialEmisor>" << escapeXml(safeEmisorName) << "</RazonSocialEmisor>\n";
 
     std::string direccionEmisor = "Distrito Nacional, SD";
     if (dto.header.direccionEmisor.has_value() && !dto.header.direccionEmisor->empty()) {
         direccionEmisor = *dto.header.direccionEmisor;
     }
-    std::string safeDireccion = direccionEmisor.length() > 100 ? direccionEmisor.substr(0, 100) : direccionEmisor;
+    std::string safeDireccion = truncateUtf8(direccionEmisor, 100);
     ss << "      <DireccionEmisor>" << escapeXml(safeDireccion) << "</DireccionEmisor>\n";
 
     std::string fechaEmision = normalizeFechaDgii(dto.header.fechaEmision);
@@ -456,20 +512,20 @@ std::string buildXmlFromCanonical(const CanonicalDocumentDto& dto,
         ss << "    <Comprador>\n";
         if (tipoEcf == "47") {
             if (!dto.header.rncComprador.empty()) {
-                std::string foreignId = dto.header.rncComprador.length() > 20 ? dto.header.rncComprador.substr(0, 20) : dto.header.rncComprador;
+                std::string foreignId = truncateUtf8(dto.header.rncComprador, 20);
                 ss << "      <IdentificadorExtranjero>" << escapeXml(foreignId) << "</IdentificadorExtranjero>\n";
             }
         } else if (tipoEcf == "46") {
             if (!dto.header.rncComprador.empty()) {
                 if (hasAlpha(dto.header.rncComprador)) {
-                    std::string foreignId = dto.header.rncComprador.length() > 20 ? dto.header.rncComprador.substr(0, 20) : dto.header.rncComprador;
+                    std::string foreignId = truncateUtf8(dto.header.rncComprador, 20);
                     ss << "      <IdentificadorExtranjero>" << escapeXml(foreignId) << "</IdentificadorExtranjero>\n";
                 } else {
                     std::string clean = cleanDigits(dto.header.rncComprador);
                     if (clean.length() == 9 || clean.length() == 11) {
                         ss << "      <RNCComprador>" << clean << "</RNCComprador>\n";
                     } else {
-                        std::string foreignId = dto.header.rncComprador.length() > 20 ? dto.header.rncComprador.substr(0, 20) : dto.header.rncComprador;
+                        std::string foreignId = truncateUtf8(dto.header.rncComprador, 20);
                         ss << "      <IdentificadorExtranjero>" << escapeXml(foreignId) << "</IdentificadorExtranjero>\n";
                     }
                 }
@@ -480,7 +536,7 @@ std::string buildXmlFromCanonical(const CanonicalDocumentDto& dto,
         } else {
             if (!dto.header.rncComprador.empty()) {
                 if (hasAlpha(dto.header.rncComprador) && (tipoEcf == "32" || tipoEcf == "33" || tipoEcf == "34" || tipoEcf == "44")) {
-                    std::string foreignId = dto.header.rncComprador.length() > 20 ? dto.header.rncComprador.substr(0, 20) : dto.header.rncComprador;
+                    std::string foreignId = truncateUtf8(dto.header.rncComprador, 20);
                     ss << "      <IdentificadorExtranjero>" << escapeXml(foreignId) << "</IdentificadorExtranjero>\n";
                 } else {
                     std::string clean = cleanDigits(dto.header.rncComprador);
@@ -493,7 +549,7 @@ std::string buildXmlFromCanonical(const CanonicalDocumentDto& dto,
         std::string rawComprador = dto.header.razonSocialComprador.empty()
             ? (tipoEcf == "47" ? "Beneficiario del Exterior" : (tipoEcf == "46" ? "Comprador Internacional" : "Consumidor Final"))
             : dto.header.razonSocialComprador;
-        std::string safeComprador = rawComprador.length() > 150 ? rawComprador.substr(0, 150) : rawComprador;
+        std::string safeComprador = truncateUtf8(rawComprador, 150);
         ss << "      <RazonSocialComprador>" << escapeXml(safeComprador) << "</RazonSocialComprador>\n";
         if (tipoEcf != "47" && dto.header.correoComprador.has_value() && !dto.header.correoComprador->empty()) {
             std::string rawEmail = *dto.header.correoComprador;
@@ -501,7 +557,7 @@ std::string buildXmlFromCanonical(const CanonicalDocumentDto& dto,
             std::string primaryEmail = (delimPos != std::string::npos) ? rawEmail.substr(0, delimPos) : rawEmail;
             while (!primaryEmail.empty() && std::isspace(static_cast<unsigned char>(primaryEmail.front()))) primaryEmail.erase(primaryEmail.begin());
             while (!primaryEmail.empty() && std::isspace(static_cast<unsigned char>(primaryEmail.back()))) primaryEmail.pop_back();
-            if (primaryEmail.length() > 80) primaryEmail = primaryEmail.substr(0, 80);
+            if (primaryEmail.length() > 80) primaryEmail = truncateUtf8(primaryEmail, 80);
             static const std::regex emailRegex(R"(^\w+([-+.]\w+)*@\w+([-.]\w+)*\.\w+([-.]\w+)*$)");
             if (std::regex_match(primaryEmail, emailRegex)) {
                 ss << "      <CorreoComprador>" << escapeXml(primaryEmail) << "</CorreoComprador>\n";
@@ -721,7 +777,7 @@ std::string buildXmlFromCanonical(const CanonicalDocumentDto& dto,
             ss << "    <CodigoModificacion>1</CodigoModificacion>\n";
         }
         if ((tipoEcf == "33" || tipoEcf == "34") && dto.references.razonModificacion.has_value() && !dto.references.razonModificacion->empty()) {
-            std::string safeRazon = dto.references.razonModificacion->length() > 90 ? dto.references.razonModificacion->substr(0, 90) : *dto.references.razonModificacion;
+            std::string safeRazon = truncateUtf8(*dto.references.razonModificacion, 90);
             ss << "    <RazonModificacion>" << escapeXml(safeRazon) << "</RazonModificacion>\n";
         }
         ss << "  </InformacionReferencia>\n";
@@ -764,7 +820,7 @@ std::string buildRfceXml(const domain::EcfDocument& doc,
        << "    <Emisor>\n"
        << "      <RNCEmisor>" << doc.rncEmisor << "</RNCEmisor>\n";
 
-    std::string safeEmisorName = emisorRazonSocial.length() > 150 ? emisorRazonSocial.substr(0, 150) : emisorRazonSocial;
+    std::string safeEmisorName = truncateUtf8(emisorRazonSocial, 150);
     ss << "      <RazonSocialEmisor>" << escapeXml(safeEmisorName) << "</RazonSocialEmisor>\n";
 
     std::string rawFechaEmision = (dto && !dto->header.fechaEmision.empty()) ? dto->header.fechaEmision : "";
@@ -783,7 +839,7 @@ std::string buildRfceXml(const domain::EcfDocument& doc,
     std::string compradorName = (dto && !dto->header.razonSocialComprador.empty())
         ? dto->header.razonSocialComprador
         : "CONSUMIDOR FINAL";
-    std::string safeCompradorName = compradorName.length() > 150 ? compradorName.substr(0, 150) : compradorName;
+    std::string safeCompradorName = truncateUtf8(compradorName, 150);
     ss << "      <RazonSocialComprador>" << escapeXml(safeCompradorName) << "</RazonSocialComprador>\n"
        << "    </Comprador>\n"
        << "    <Totales>\n";

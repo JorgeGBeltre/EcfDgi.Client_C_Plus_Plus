@@ -25,6 +25,8 @@ struct ProcessedLineItem {
 
 std::string escapeXml(const std::string& value);
 
+std::string truncateUtf8(const std::string& str, size_t maxChars);
+
 std::string normalizeFechaDgii(const std::string& value);
 
 std::vector<ProcessedLineItem> normalizeCanonicalLines(const std::vector<CanonicalLineDto>& lines, double defaultTotal = 0.0);

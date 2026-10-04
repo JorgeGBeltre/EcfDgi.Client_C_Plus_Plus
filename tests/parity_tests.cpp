@@ -447,6 +447,22 @@ int main() {
         CHECK(noThrow, "BUG-014: validateDgiiResponse allows HTTP 200 OK to pass");
     }
 
+    // Test BUG-092: UTF-8 safe truncation and XML control character sanitization
+    {
+        std::string spanishText = "Construcción y Reparación";
+        // 11 codepoints is "Construcció" (ends right at ó, which is 2 bytes)
+        std::string trunc11 = app::truncateUtf8(spanishText, 11);
+        CHECK(trunc11 == "Construcció", "BUG-092: truncateUtf8 preserves multi-byte accent character boundary");
+        CHECK(trunc11.size() == 12, "BUG-092: 11 codepoints with 1 multi-byte char yields 12 bytes");
+
+        std::string withControlChars = "Producto\x01 con\x1b control\tchars\n";
+        std::string escaped = app::escapeXml(withControlChars);
+        CHECK(escaped.find('\x01') == std::string::npos, "BUG-092: escapeXml strips SOH 0x01");
+        CHECK(escaped.find('\x1b') == std::string::npos, "BUG-092: escapeXml strips ESC 0x1b");
+        CHECK(escaped.find('\t') != std::string::npos, "BUG-092: escapeXml preserves tab 0x09");
+        CHECK(escaped.find('\n') != std::string::npos, "BUG-092: escapeXml preserves newline 0x0A");
+    }
+
     std::printf("\nTotal failures: %d\n", failures);
     return failures > 0 ? 1 : 0;
 }
