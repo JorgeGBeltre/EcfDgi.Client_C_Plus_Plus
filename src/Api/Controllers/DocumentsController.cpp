@@ -1266,11 +1266,16 @@ void DocumentsController::reconcileBySourceTxnId(const HttpRequestPtr& req,
         if (!doc.has_value()) {
             auto byTrack = scope.docs->getByTrackId(txnId);
             if (byTrack.has_value() && (isWorkerOrSuperAdmin || byTrack->tenantId == tenantId)) {
-                doc = byTrack;
-            } else {
-                auto byEncf = scope.docs->getByEncf(tenantId, txnId);
-                if (byEncf.has_value()) {
-                    doc = byEncf;
+                if (!ambOpt.has_value() || !byTrack->ambiente.has_value() || byTrack->ambiente == ambOpt) {
+                    doc = byTrack;
+                }
+            }
+        }
+        if (!doc.has_value()) {
+            auto byNcf = scope.docs->getByENcf(txnId);
+            if (byNcf.has_value() && (isWorkerOrSuperAdmin || byNcf->tenantId == tenantId)) {
+                if (!ambOpt.has_value() || !byNcf->ambiente.has_value() || byNcf->ambiente == ambOpt) {
+                    doc = byNcf;
                 }
             }
         }
