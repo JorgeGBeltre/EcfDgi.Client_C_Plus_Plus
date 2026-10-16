@@ -1233,4 +1233,73 @@ void DocumentsController::getById(const HttpRequestPtr& req,
     }
 }
 
+void DocumentsController::reconcileBySourceTxnId(const HttpRequestPtr& req,
+                                                std::function<void(const HttpResponsePtr&)>&& callback,
+                                                std::string txnId) {
+    std::string role;
+    if (req->attributes()->find("role")) role = req->attributes()->get<std::string>("role");
+    std::string clientType;
+    if (req->attributes()->find("clientType")) clientType = req->attributes()->get<std::string>("clientType");
+    bool isWorkerOrSuperAdmin = (clientType == "worker" || role == "Worker" || role == "SuperAdmin");
+
+    std::string tenantId = "default-tenant";
+    if (req->attributes()->find("tenantId")) {
+        std::string t = req->attributes()->get<std::string>("tenantId");
+        if (!t.empty()) tenantId = t;
+    }
+    if (isWorkerOrSuperAdmin) {
+        std::string hTenant = req->getHeader("X-Tenant-Id");
+        if (!hTenant.empty()) tenantId = hTenant;
+    }
+
+    std::string envHeader = req->getHeader("X-Environment");
+    std::optional<std::string> ambOpt = std::nullopt;
+    if (!envHeader.empty()) {
+        ambOpt = envHeader;
+    }
+
+    try {
+        auto& services = AppServices::instance();
+        auto scope = services.makeScope(mapping::currentUserFrom(req));
+
+        auto doc = scope.docs->getBySourceTxnId(tenantId, txnId, ambOpt);
+        if (!doc.has_value()) {
+            auto byTrack = scope.docs->getByTrackId(txnId);
+            if (byTrack.has_value() && (isWorkerOrSuperAdmin || byTrack->tenantId == tenantId)) {
+                doc = byTrack;
+            } else {
+                auto byEncf = scope.docs->getByEncf(tenantId, txnId);
+                if (byEncf.has_value()) {
+                    doc = byEncf;
+                }
+            }
+        }
+
+        if (!doc.has_value()) {
+            Json::Value errBody;
+            errBody["error"] = "Document with source TxnId '" + txnId + "' not found.";
+            callback(json(errBody, k404NotFound));
+            return;
+        }
+
+        Json::Value out;
+        out["documentId"] = doc->id;
+        if (doc->ncf.has_value()) out["ncf"] = *doc->ncf;
+        out["eNcf"] = doc->eNcf;
+        out["state"] = doc->state;
+        out["trackId"] = doc->trackId.value_or("");
+        out["securityCode"] = doc->securityCode.value_or("");
+        out["receiptDate"] = doc->receiptDate.value_or("");
+        out["signedXml"] = doc->signedXmlContent.value_or("");
+        out["dgiiResponse"] = doc->dgiiResponseXml.value_or("");
+        out["reconciled"] = true;
+
+        callback(json(out, k200OK));
+    } catch (const std::exception& ex) {
+        Json::Value errBody;
+        errBody["error"] = std::string("Error reconciling document: ") + ex.what();
+        callback(json(errBody, k500InternalServerError));
+    }
+}
+
 } // namespace ecf::api
