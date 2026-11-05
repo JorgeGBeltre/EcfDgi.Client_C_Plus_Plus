@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cmath>
 #include <ctime>
 #include <fstream>
 #include <iomanip>
@@ -98,9 +99,11 @@ void applyCanonicalContent(domain::EcfDocument& doc,
     if (dto.ncf.has_value()) doc.ncf = *dto.ncf;
     doc.rncEmisor = emisorRnc;
     doc.rncComprador = dto.header.rncComprador;
-    doc.totalAmount = dto.totals.montoTotal;
-    doc.itbisAmount = dto.totals.montoItbis;
-    doc.xmlContent = app::buildXmlFromCanonical(dto, doc.eNcf, emisorRnc, emisorRazonSocial);
+    double computedTotalDop = dto.totals.montoTotal;
+    double computedItbisDop = dto.totals.montoItbis;
+    doc.xmlContent = app::buildXmlFromCanonical(dto, doc.eNcf, emisorRnc, emisorRazonSocial, computedTotalDop, computedItbisDop);
+    doc.totalAmount = computedTotalDop;
+    doc.itbisAmount = computedItbisDop;
     doc.state = "SequenceAllocated";
 }
 
@@ -127,23 +130,23 @@ std::shared_ptr<domain::IEcfXmlSigner> resolveSigner(
 
     if (certDto.has_value() && certDto->certificateBase64.has_value() && !certDto->certificateBase64->empty()) {
         try {
-            auto rawBytes = drogon::utils::base64Decode(*certDto->certificateBase64);
-            std::vector<unsigned char> bytes(rawBytes.begin(), rawBytes.end());
-            std::string pwd = certDto->password.value_or("");
-            return std::make_shared<infra::EcfXmlSigner>(bytes, pwd);
+            if (certDto->certificateBase64->size() <= 3 * 1024 * 1024) {
+                auto rawBytes = drogon::utils::base64Decode(*certDto->certificateBase64);
+                if (rawBytes.size() <= 2 * 1024 * 1024) {
+                    std::vector<unsigned char> bytes(rawBytes.begin(), rawBytes.end());
+                    std::string pwd = certDto->password.value_or("");
+                    auto loadedSigner = std::make_shared<infra::EcfXmlSigner>(bytes, pwd);
+                    if (rncEmisor.empty() || loadedSigner->validateCertificateSn(rncEmisor)) {
+                        return loadedSigner;
+                    }
+                }
+            }
         } catch (...) {
             // fallback
         }
     }
 
-    if (certDto.has_value() && certDto->certificatePath.has_value() && !certDto->certificatePath->empty()) {
-        try {
-            std::string pwd = certDto->password.value_or("");
-            return std::make_shared<infra::EcfXmlSigner>(*certDto->certificatePath, pwd);
-        } catch (...) {
-            // fallback
-        }
-    }
+    // Arbitrary certificatePath from client body is forbidden for security (HIGH-100)
 
     // Cargar certificado dinámico real desde PostgreSQL (Tenants)
     if (services.tenantSignerResolver() && !rncEmisor.empty()) {
@@ -157,27 +160,33 @@ std::shared_ptr<domain::IEcfXmlSigner> resolveSigner(
         }
     }
 
-    // Default certificate directory search
+    // Default certificate directory search (strictly sanitized names to prevent path traversal)
     std::string defaultCertDir = "/app/certificates";
     const char* envCertPwd = std::getenv("ECF_CERTIFICATE_PASSWORD");
     std::string defaultCertPwd = envCertPwd ? envCertPwd : "";
+    static const std::regex safeTenantRgx(R"(^[a-zA-Z0-9_-]{1,100}$)");
+    static const std::regex safeRncRgx(R"(^\d{9,11}$)");
 
-    std::string tenantCertFile = defaultCertDir + "/" + tenantId + ".pfx";
-    std::ifstream tf(tenantCertFile);
-    if (tf.good()) {
-        std::string pwd = (certDto.has_value() && certDto->password.has_value()) ? *certDto->password : defaultCertPwd;
-        try {
-            return std::make_shared<infra::EcfXmlSigner>(tenantCertFile, pwd);
-        } catch (...) {}
+    if (std::regex_match(tenantId, safeTenantRgx)) {
+        std::string tenantCertFile = defaultCertDir + "/" + tenantId + ".pfx";
+        std::ifstream tf(tenantCertFile);
+        if (tf.good()) {
+            std::string pwd = (certDto.has_value() && certDto->password.has_value()) ? *certDto->password : defaultCertPwd;
+            try {
+                return std::make_shared<infra::EcfXmlSigner>(tenantCertFile, pwd);
+            } catch (...) {}
+        }
     }
 
-    std::string rncCertFile = defaultCertDir + "/" + rncEmisor + ".pfx";
-    std::ifstream rf(rncCertFile);
-    if (rf.good()) {
-        std::string pwd = (certDto.has_value() && certDto->password.has_value()) ? *certDto->password : defaultCertPwd;
-        try {
-            return std::make_shared<infra::EcfXmlSigner>(rncCertFile, pwd);
-        } catch (...) {}
+    if (std::regex_match(rncEmisor, safeRncRgx)) {
+        std::string rncCertFile = defaultCertDir + "/" + rncEmisor + ".pfx";
+        std::ifstream rf(rncCertFile);
+        if (rf.good()) {
+            std::string pwd = (certDto.has_value() && certDto->password.has_value()) ? *certDto->password : defaultCertPwd;
+            try {
+                return std::make_shared<infra::EcfXmlSigner>(rncCertFile, pwd);
+            } catch (...) {}
+        }
     }
 
     return services.signer();
@@ -383,10 +392,13 @@ HttpResponsePtr signAndSend(domain::EcfDocument& doc, AppServices::Scope& scope,
     out["documentId"] = doc.id;
     out["eNcf"] = doc.eNcf;
     out["state"] = doc.state;
+    out["totalAmount"] = doc.totalAmount;
+    out["itbisAmount"] = doc.itbisAmount;
     out["trackId"] = doc.trackId.has_value() ? Json::Value(*doc.trackId) : Json::nullValue;
     out["securityCode"] = doc.securityCode.has_value() ? Json::Value(*doc.securityCode) : Json::nullValue;
     out["signedXml"] = doc.signedXmlContent.has_value() ? Json::Value(*doc.signedXmlContent) : Json::nullValue;
     out["dgiiResponse"] = doc.dgiiResponseXml.has_value() ? Json::Value(*doc.dgiiResponseXml) : Json::nullValue;
+    out["dgiiResponseXml"] = doc.dgiiResponseXml.has_value() ? Json::Value(*doc.dgiiResponseXml) : Json::nullValue;
 
     if (doc.state == "AcceptedByDgii") {
         return json(out, k200OK);
@@ -582,10 +594,13 @@ HttpResponsePtr handleExistingDocument(domain::EcfDocument& existingDoc,
     out["documentId"] = existingDoc.id;
     out["eNcf"] = existingDoc.eNcf;
     out["state"] = existingDoc.state;
+    out["totalAmount"] = existingDoc.totalAmount;
+    out["itbisAmount"] = existingDoc.itbisAmount;
     out["trackId"] = existingDoc.trackId.value_or("");
     out["securityCode"] = existingDoc.securityCode.value_or("");
     out["signedXml"] = existingDoc.signedXmlContent.value_or("");
     out["dgiiResponse"] = existingDoc.dgiiResponseXml.value_or("");
+    out["dgiiResponseXml"] = existingDoc.dgiiResponseXml.value_or("");
 
     HttpStatusCode statusCode = k202Accepted;
     if (existingDoc.state == "AcceptedByDgii") {
@@ -674,6 +689,12 @@ void DocumentsController::submit(const HttpRequestPtr& req,
                 return;
             }
 
+            auto currencyRes = app::resolveCanonicalCurrency(dto.currency);
+            if (!currencyRes.validationError.empty()) {
+                cb(json(err(currencyRes.validationError), k400BadRequest));
+                return;
+            }
+
             if (dto.lines.empty()) {
                 cb(json(err("El documento debe contener al menos una línea de detalle."), k400BadRequest));
                 return;
@@ -683,15 +704,28 @@ void DocumentsController::submit(const HttpRequestPtr& req,
                 return;
             }
 
+            if (dto.lines[0].amount < 0.0 || dto.lines[0].unitPrice < 0.0) {
+                cb(json(err("Una línea de descuento no puede preceder al ítem que descuenta."), k400BadRequest));
+                return;
+            }
+
+            bool hasBillableLine = false;
             for (const auto& line : dto.lines) {
-                if (line.quantity <= 0.0) {
-                    cb(json(err("La cantidad de cada línea debe ser mayor a cero (Ítem: '" + line.itemName + "')."), k400BadRequest));
+                if (line.quantity < 0.0) {
+                    cb(json(err("La cantidad de cada línea no puede ser negativa (Ítem: '" + line.itemName + "')."), k400BadRequest));
                     return;
                 }
-                if (line.unitPrice < 0.0 || line.discountAmount < 0.0 || line.amount < 0.0) {
-                    cb(json(err("El precio unitario, descuento y monto de cada línea no pueden ser negativos (Ítem: '" + line.itemName + "')."), k400BadRequest));
+                if (line.discountAmount < 0.0) {
+                    cb(json(err("El monto de descuento por línea no puede ser negativo (Ítem: '" + line.itemName + "')."), k400BadRequest));
                     return;
                 }
+                if (!(line.amount == 0.0 && line.unitPrice == 0.0)) {
+                    hasBillableLine = true;
+                }
+            }
+            if (!hasBillableLine && dto.totals.montoTotal > 0.0) {
+                cb(json(err("El comprobante no posee líneas facturables con importe mayor a cero."), k400BadRequest));
+                return;
             }
 
             if (dto.totals.montoSubtotal < 0.0 || dto.totals.montoItbis < 0.0 || dto.totals.montoTotal < 0.0) {
@@ -736,7 +770,18 @@ void DocumentsController::submit(const HttpRequestPtr& req,
                     cb(json(err("References.CodigoModificacion is required for TipoComprobante " + dto.tipoComprobante + "."), k400BadRequest));
                     return;
                 }
-            } else if (tipoComprobante == "E31" || tipoComprobante == "E45") {
+            } else if (!dto.references.correctsENcf.empty() &&
+                       dto.references.codigoModificacion.value_or(0) != 4) {
+                std::string modStr = dto.references.codigoModificacion.has_value()
+                    ? std::to_string(*dto.references.codigoModificacion)
+                    : "null";
+                cb(json(err("References.CodigoModificacion (" + modStr + ") no es válido para TipoComprobante " + dto.tipoComprobante +
+                            " (Regla DGII 613). Fuera de Notas de Débito (E33) y Notas de Crédito (E34), InformacionReferencia solo admite CodigoModificacion = 4 (Reemplazo de comprobante emitido en contingencia)."),
+                        k400BadRequest));
+                return;
+            }
+
+            if (tipoComprobante == "E31" || tipoComprobante == "E45") {
                 if (dto.header.rncComprador.empty()) {
                     cb(json(err("Header.RncComprador es obligatorio para TipoComprobante " + dto.tipoComprobante + ". El cliente no tiene RNC/cédula registrado — corrígelo en el ERP, o emítelo como Factura de Consumo (E32), que no lo exige."), k400BadRequest));
                     return;
@@ -747,15 +792,19 @@ void DocumentsController::submit(const HttpRequestPtr& req,
                     return;
                 }
             } else if (tipoComprobante == "E32") {
-                if (dto.totals.montoTotal >= 250000.0) {
-                    if (dto.header.rncComprador.empty()) {
+                double totalDop = std::round(dto.totals.montoTotal * currencyRes.exchangeRate * 100.0) / 100.0;
+                if (totalDop >= 250000.0) {
+                    if (dto.header.rncComprador.empty() &&
+                        (!dto.header.identificadorExtranjero.has_value() || dto.header.identificadorExtranjero->empty())) {
                         cb(json(err("Header.RncComprador (o pasaporte/identificación extranjera) es obligatorio para Factura de Consumo (E32) con MontoTotal ≥ RD$250,000.00 (DGII Regla de Validación tipo 32)."), k400BadRequest));
                         return;
                     }
-                    std::string clean = cleanDigits(dto.header.rncComprador);
-                    if (!hasAlpha(dto.header.rncComprador) && clean.length() != 9 && clean.length() != 11) {
-                        cb(json(err("Header.RncComprador '" + dto.header.rncComprador + "' es inválido para E32 ≥ RD$250,000.00. Debe tener 9 dígitos (RNC), 11 dígitos (Cédula), o ser Identificador Extranjero."), k400BadRequest));
-                        return;
+                    if (!dto.header.rncComprador.empty()) {
+                        std::string clean = cleanDigits(dto.header.rncComprador);
+                        if (!hasAlpha(dto.header.rncComprador) && clean.length() != 9 && clean.length() != 11) {
+                            cb(json(err("Header.RncComprador '" + dto.header.rncComprador + "' es inválido para E32 ≥ RD$250,000.00. Debe tener 9 dígitos (RNC), 11 dígitos (Cédula), o ser Identificador Extranjero."), k400BadRequest));
+                            return;
+                        }
                     }
                 }
             } else if (tipoComprobante == "E41") {
@@ -1044,11 +1093,14 @@ void DocumentsController::getBySourceTxnId(const HttpRequestPtr& req,
         if (doc->ncf.has_value()) out["ncf"] = *doc->ncf;
         out["eNcf"] = doc->eNcf;
         out["state"] = doc->state;
+        out["totalAmount"] = doc->totalAmount;
+        out["itbisAmount"] = doc->itbisAmount;
         out["trackId"] = doc->trackId.value_or("");
         out["securityCode"] = doc->securityCode.value_or("");
         out["receiptDate"] = doc->receiptDate.value_or("");
         out["signedXml"] = doc->signedXmlContent.value_or("");
         out["dgiiResponse"] = doc->dgiiResponseXml.value_or("");
+        out["dgiiResponseXml"] = doc->dgiiResponseXml.value_or("");
 
         callback(json(out, k200OK));
     } catch (const std::exception& ex) {
@@ -1219,11 +1271,14 @@ void DocumentsController::getById(const HttpRequestPtr& req,
         if (doc->ncf.has_value()) out["ncf"] = *doc->ncf;
         out["eNcf"] = doc->eNcf;
         out["state"] = doc->state;
+        out["totalAmount"] = doc->totalAmount;
+        out["itbisAmount"] = doc->itbisAmount;
         out["trackId"] = doc->trackId.value_or("");
         out["securityCode"] = doc->securityCode.value_or("");
         out["receiptDate"] = doc->receiptDate.value_or("");
         out["signedXml"] = doc->signedXmlContent.value_or("");
         out["dgiiResponse"] = doc->dgiiResponseXml.value_or("");
+        out["dgiiResponseXml"] = doc->dgiiResponseXml.value_or("");
 
         callback(json(out, k200OK));
     } catch (const std::exception& ex) {
@@ -1292,11 +1347,14 @@ void DocumentsController::reconcileBySourceTxnId(const HttpRequestPtr& req,
         if (doc->ncf.has_value()) out["ncf"] = *doc->ncf;
         out["eNcf"] = doc->eNcf;
         out["state"] = doc->state;
+        out["totalAmount"] = doc->totalAmount;
+        out["itbisAmount"] = doc->itbisAmount;
         out["trackId"] = doc->trackId.value_or("");
         out["securityCode"] = doc->securityCode.value_or("");
         out["receiptDate"] = doc->receiptDate.value_or("");
         out["signedXml"] = doc->signedXmlContent.value_or("");
         out["dgiiResponse"] = doc->dgiiResponseXml.value_or("");
+        out["dgiiResponseXml"] = doc->dgiiResponseXml.value_or("");
         out["reconciled"] = true;
 
         callback(json(out, k200OK));

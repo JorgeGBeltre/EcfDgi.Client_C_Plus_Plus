@@ -19,9 +19,27 @@ struct ProcessedLineItem {
     double discountAmount = 0.0;
     double montoItem = 0.0;
     int indicadorFacturacion = 1;
+    bool hasExplicitIndicador = false;
+    double unitPriceDop = 0.0;
+    double discountDop = 0.0;
+    double montoItemDop = 0.0;
+    double precioOtraMoneda = 0.0;
+    double discountOtraMoneda = 0.0;
+    double montoItemOtraMoneda = 0.0;
     std::optional<double> montoItbisRetenido;
     std::optional<double> montoIsrRetenido;
 };
+
+struct CanonicalCurrencyResolution {
+    bool isForeign = false;
+    std::string code = "DOP";
+    double exchangeRate = 1.0;
+    std::string validationError;
+};
+
+CanonicalCurrencyResolution resolveCanonicalCurrency(const std::optional<CanonicalCurrencyDto>& currency);
+
+std::string normalizeNcfReference(const std::string& raw);
 
 std::string escapeXml(const std::string& value);
 
@@ -37,6 +55,13 @@ std::string buildXmlFromCanonical(const CanonicalDocumentDto& dto,
                                   const std::string& eNcf,
                                   const std::string& emisorRnc,
                                   const std::string& emisorRazonSocial);
+
+std::string buildXmlFromCanonical(const CanonicalDocumentDto& dto,
+                                  const std::string& eNcf,
+                                  const std::string& emisorRnc,
+                                  const std::string& emisorRazonSocial,
+                                  double& computedTotalDop,
+                                  double& computedItbisDop);
 
 std::string buildRfceXml(const domain::EcfDocument& doc,
                          const CanonicalDocumentDto* dto,

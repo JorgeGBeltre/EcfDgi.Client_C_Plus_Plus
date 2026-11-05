@@ -508,6 +508,82 @@ int main() {
         CHECK(matchesSourceTxnId(existingDoc, "QB-INV-5001"), "BUG-100: query by actual source_txn_id matches correctly");
     }
 
+    // Test 20: Serie B NCF reference normalization (B03, B15, B16, B17 & legacy numeric strings)
+    {
+        CHECK(app::normalizeNcfReference("0300000012") == "B0300000012", "10-digit 03... normalizes to B03");
+        CHECK(app::normalizeNcfReference("1500000045") == "B1500000045", "10-digit 15... normalizes to B15");
+        CHECK(app::normalizeNcfReference("1600000099") == "B1600000099", "10-digit 16... normalizes to B16");
+        CHECK(app::normalizeNcfReference("1700000007") == "B1700000007", "10-digit 17... normalizes to B17");
+        CHECK(app::normalizeNcfReference("500000008") == "B1500000008", "9-digit 5... normalizes to B15");
+        CHECK(app::normalizeNcfReference("600000008") == "B1600000008", "9-digit 6... normalizes to B16");
+        CHECK(app::normalizeNcfReference("700000008") == "B1700000008", "9-digit 7... normalizes to B17");
+        CHECK(app::normalizeNcfReference("b1300000001") == "B1300000001", "lowercase b13 uppercases cleanly");
+    }
+
+    // Test 21: buildTimbreUrl omits rnccomprador on E43 and empty-buyer E34/E47
+    {
+        domain::TimbreEcfRequest req43;
+        req43.rncEmisor = "101672919";
+        req43.rncComprador = "101672919"; // Even if accidentally populated, E43 has no buyer in DGII QR
+        req43.eNcf = "E430000000001";
+        req43.fechaEmision = "05-11-2026";
+        req43.montoTotal = 450.00;
+        req43.fechaFirma = "05-11-2026 10:00:00";
+        req43.codigoSeguridad = "Ab12Cd";
+
+        std::string url43 = infra::EcfSecurityUtils::buildTimbreUrl("https://ecf.dgii.gov.do/ecf/consultatimbre", req43);
+        CHECK(url43.find("rnccomprador=") == std::string::npos, "E43 QR Timbre URL strictly omits rnccomprador=");
+
+        domain::TimbreEcfRequest req34NoBuyer = req43;
+        req34NoBuyer.eNcf = "E340000000002";
+        req34NoBuyer.rncComprador = "";
+        std::string url34 = infra::EcfSecurityUtils::buildTimbreUrl("https://ecf.dgii.gov.do/ecf/consultatimbre", req34NoBuyer);
+        CHECK(url34.find("rnccomprador=") == std::string::npos, "Empty-buyer E34 QR Timbre URL omits rnccomprador=");
+    }
+
+    // Test 22: Foreign currency resolution & buildRfceXml DOP totals enforcement
+    {
+        app::CanonicalCurrencyDto cUsd{"US$", 60.0};
+        auto rUsd = app::resolveCanonicalCurrency(cUsd);
+        CHECK(rUsd.isForeign && rUsd.code == "USD" && rUsd.validationError.empty(), "US$ resolves to valid foreign USD");
+
+        app::CanonicalCurrencyDto cCny{"CNY", 8.45};
+        auto rCny = app::resolveCanonicalCurrency(cCny);
+        CHECK(rCny.isForeign && rCny.code == "CHY" && rCny.validationError.empty(), "CNY resolves to DGII CHY");
+
+        app::CanonicalCurrencyDto cDop{"RD$", 1.0};
+        auto rDop = app::resolveCanonicalCurrency(cDop);
+        CHECK(!rDop.isForeign && rDop.exchangeRate == 1.0, "RD$ resolves as domestic DOP");
+
+        app::CanonicalCurrencyDto cBad{"XYZ", 60.0};
+        auto rBad = app::resolveCanonicalCurrency(cBad);
+        CHECK(!rBad.validationError.empty(), "Unsupported ISO currency code produces validation error");
+
+        // RFCE for USD 100 + USD 18 ITBIS @ 60.0 => doc stores DOP 7,080.00 total and DOP 1,080.00 ITBIS
+        domain::EcfDocument doc;
+        doc.eNcf = "E320000000099";
+        doc.rncEmisor = "101672919";
+        doc.totalAmount = 7080.00;
+        doc.itbisAmount = 1080.00;
+        doc.securityCode = "UsdRfc";
+
+        app::CanonicalDocumentDto dto;
+        dto.tipoComprobante = "E32";
+        dto.currency = cUsd;
+        dto.totals.montoSubtotal = 100.0;
+        dto.totals.montoGravadoTotal = 100.0;
+        dto.totals.montoItbis = 18.0;
+        dto.totals.montoTotal = 118.0;
+
+        std::string rfceXml = app::buildRfceXml(doc, &dto, "WILLY CHIC DOMINICANA SRL");
+        CHECK(rfceXml.find("<MontoGravadoTotal>6000.00</MontoGravadoTotal>") != std::string::npos,
+              "Foreign-currency RFCE emits DOP MontoGravadoTotal (6000.00), not USD (100.00)");
+        CHECK(rfceXml.find("<TotalITBIS>1080.00</TotalITBIS>") != std::string::npos,
+              "Foreign-currency RFCE emits DOP TotalITBIS (1080.00), not USD (18.00)");
+        CHECK(rfceXml.find("<MontoTotal>7080.00</MontoTotal>") != std::string::npos,
+              "Foreign-currency RFCE emits DOP MontoTotal (7080.00), not USD (118.00)");
+    }
+
     std::printf("\nTotal failures: %d\n", failures);
     return failures > 0 ? 1 : 0;
 }

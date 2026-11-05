@@ -667,6 +667,200 @@ int main() {
         CHECK(errorRecepcion, "deserializeEcfRecepcion accepts XML with error field");
     }
 
+    // Test 28: OtraMoneda (USD) XSD validation across E31, E32, E34, E41, E43, E46, E47 & DOP computed totals
+    {
+        ecf::app::CanonicalCurrencyDto usd;
+        usd.code = "US$"; // Alias normalized to USD
+        usd.exchangeRate = 60.50;
+
+        // 28a: E31 in USD
+        {
+            ecf::app::CanonicalDocumentDto dto;
+            dto.tipoComprobante = "E31";
+            dto.currency = usd;
+            dto.header.rncEmisor = "101889063";
+            dto.header.razonSocialEmisor = "Willy Chic";
+            dto.header.rncComprador = "130000000";
+            dto.header.razonSocialComprador = "Cliente USD SRL";
+            dto.totals.montoSubtotal = 100.0;
+            dto.totals.montoGravadoTotal = 100.0;
+            dto.totals.montoItbis = 18.0;
+            dto.totals.montoTotal = 118.0;
+            ecf::app::CanonicalLineDto l1;
+            l1.lineNumber = 1;
+            l1.itemName = "Consultoria Cloud USD";
+            l1.quantity = 2.0;
+            l1.unitPrice = 50.0;
+            l1.amount = 100.0;
+            dto.lines.push_back(l1);
+
+            double totalDop = 0.0, itbisDop = 0.0;
+            std::string xml = ecf::app::buildXmlFromCanonical(dto, "E310000000901", "101889063", "Willy Chic", totalDop, itbisDop);
+            CHECK(xml.find("<TipoMoneda>USD</TipoMoneda>") != std::string::npos, "E31 USD has TipoMoneda USD");
+            CHECK(xml.find("<TipoCambio>60.50</TipoCambio>") != std::string::npos, "E31 USD has TipoCambio 60.50");
+            CHECK(xml.find("<OtraMonedaDetalle>") != std::string::npos, "E31 USD has OtraMonedaDetalle");
+            CHECK(xml.find("<PrecioOtraMoneda>50.00</PrecioOtraMoneda>") != std::string::npos, "E31 USD has PrecioOtraMoneda 50.00");
+            CHECK(xml.find("<MontoItemOtraMoneda>100.00</MontoItemOtraMoneda>") != std::string::npos, "E31 USD has MontoItemOtraMoneda 100.00");
+            CHECK(xml.find("<MontoTotalOtraMoneda>118.00</MontoTotalOtraMoneda>") != std::string::npos, "E31 USD has MontoTotalOtraMoneda 118.00");
+            CHECK(totalDop == 7139.00 && itbisDop == 1089.00, "E31 USD computes exact DOP total (7139.00) and ITBIS (1089.00)");
+            signAndCheck(xml, "101889063", "e-CF 31 v.1.0.xsd", "E31 USD passes DGII XSD validation");
+        }
+
+        // 28b: E32, E34, E41, E43, E46, E47 in USD
+        {
+            ecf::app::CanonicalDocumentDto dto32;
+            dto32.tipoComprobante = "E32";
+            dto32.currency = usd;
+            dto32.totals.montoSubtotal = 50.0;
+            dto32.totals.montoItbis = 9.0;
+            dto32.totals.montoTotal = 59.0;
+            ecf::app::CanonicalLineDto l;
+            l.lineNumber = 1; l.itemName = "Prod USD"; l.quantity = 1.0; l.unitPrice = 50.0; l.amount = 50.0;
+            dto32.lines.push_back(l);
+            signAndCheck(ecf::app::buildXmlFromCanonical(dto32, "E320000000901", "101889063", "Willy Chic"),
+                         "101889063", "e-CF 32 v.1.0.xsd", "E32 USD passes DGII XSD validation");
+
+            ecf::app::CanonicalDocumentDto dto34 = dto32;
+            dto34.tipoComprobante = "E34";
+            dto34.header.rncComprador = "130000000";
+            dto34.header.razonSocialComprador = "Cliente USD";
+            dto34.references.correctsENcf = "E310000000901";
+            dto34.references.codigoModificacion = 1;
+            dto34.references.fechaNcfModificado = "2026-08-06";
+            signAndCheck(ecf::app::buildXmlFromCanonical(dto34, "E340000000901", "101889063", "Willy Chic"),
+                         "101889063", "e-CF 34 v.1.0.xsd", "E34 USD passes DGII XSD validation");
+
+            ecf::app::CanonicalDocumentDto dto41 = dto32;
+            dto41.tipoComprobante = "E41";
+            dto41.header.rncComprador = "130000000";
+            dto41.header.razonSocialComprador = "Proveedor USD";
+            ecf::app::CanonicalRetentionDto ret41;
+            ret41.indicadorAgenteRetencionoPercepcion = 1;
+            ret41.montoItbisRetenido = 9.0;
+            ret41.montoIsrRetenido = 5.0;
+            dto41.retention = ret41;
+            signAndCheck(ecf::app::buildXmlFromCanonical(dto41, "E410000000901", "101889063", "Willy Chic"),
+                         "101889063", "e-CF 41 v.1.0.xsd", "E41 USD passes DGII XSD validation");
+
+            ecf::app::CanonicalDocumentDto dto43;
+            dto43.tipoComprobante = "E43";
+            dto43.currency = usd;
+            dto43.totals.montoSubtotal = 20.0;
+            dto43.totals.montoTotal = 20.0;
+            dto43.lines.push_back(l);
+            dto43.lines[0].unitPrice = 20.0;
+            dto43.lines[0].amount = 20.0;
+            signAndCheck(ecf::app::buildXmlFromCanonical(dto43, "E430000000901", "101889063", "Willy Chic"),
+                         "101889063", "e-CF 43 v.1.0.xsd", "E43 USD passes DGII XSD validation");
+
+            ecf::app::CanonicalDocumentDto dto46;
+            dto46.tipoComprobante = "E46";
+            dto46.currency = usd;
+            dto46.header.razonSocialComprador = "Foreign Buyer Inc";
+            dto46.totals.montoSubtotal = 500.0;
+            dto46.totals.montoTotal = 500.0;
+            dto46.lines.push_back(l);
+            dto46.lines[0].unitPrice = 500.0;
+            dto46.lines[0].amount = 500.0;
+            signAndCheck(ecf::app::buildXmlFromCanonical(dto46, "E460000000901", "101889063", "Willy Chic"),
+                         "101889063", "e-CF 46 v.1.0.xsd", "E46 USD passes DGII XSD validation");
+
+            ecf::app::CanonicalDocumentDto dto47 = dto46;
+            dto47.tipoComprobante = "E47";
+            ecf::app::CanonicalRetentionDto ret47;
+            ret47.indicadorAgenteRetencionoPercepcion = 1;
+            ret47.montoIsrRetenido = 135.0;
+            dto47.retention = ret47;
+            signAndCheck(ecf::app::buildXmlFromCanonical(dto47, "E470000000901", "101889063", "Willy Chic"),
+                         "101889063", "e-CF 47 v.1.0.xsd", "E47 USD passes DGII XSD validation");
+        }
+    }
+
+    // Test 29: E34 modifying E43/B13 (Gastos Menores), E46/B16 (Exportación), and 100% exempt E31
+    {
+        // 29a: E34 modifying B13 (Serie B Gastos Menores)
+        ecf::app::CanonicalDocumentDto dtoB13;
+        dtoB13.tipoComprobante = "E34";
+        dtoB13.totals.montoSubtotal = 300.0;
+        dtoB13.totals.montoExento = 300.0;
+        dtoB13.totals.montoItbis = 0.0;
+        dtoB13.totals.montoTotal = 300.0;
+        dtoB13.references.correctsENcf = "B1300000005";
+        dtoB13.references.codigoModificacion = 1;
+        dtoB13.references.fechaNcfModificado = "2026-08-01";
+        ecf::app::CanonicalLineDto l;
+        l.lineNumber = 1; l.itemName = "Anulacion gasto menor"; l.quantity = 1.0; l.unitPrice = 300.0; l.amount = 300.0;
+        dtoB13.lines.push_back(l);
+
+        std::string xmlB13 = ecf::app::buildXmlFromCanonical(dtoB13, "E340000000910", "101889063", "Willy Chic");
+        CHECK(xmlB13.find("<Comprador>") == std::string::npos, "E34 modifying B13 omits <Comprador>");
+        CHECK(xmlB13.find("<TipoIngresos>") == std::string::npos, "E34 modifying B13 omits <TipoIngresos>");
+        CHECK(xmlB13.find("<IndicadorMontoGravado>") == std::string::npos, "E34 modifying B13 omits <IndicadorMontoGravado>");
+        CHECK(xmlB13.find("<MontoExento>300.00</MontoExento>") != std::string::npos, "E34 modifying B13 emits MontoExento");
+        signAndCheck(xmlB13, "101889063", "e-CF 34 v.1.0.xsd", "E34 modifying B13 passes DGII XSD validation");
+
+        // 29b: E34 modifying E46 (Exportaciones)
+        ecf::app::CanonicalDocumentDto dtoE46;
+        dtoE46.tipoComprobante = "E34";
+        dtoE46.header.razonSocialComprador = "Foreign Export Client";
+        dtoE46.totals.montoSubtotal = 1000.0;
+        dtoE46.totals.montoTotal = 1000.0;
+        dtoE46.references.correctsENcf = "E460000000801";
+        dtoE46.references.codigoModificacion = 1;
+        dtoE46.references.fechaNcfModificado = "2026-08-01";
+        l.unitPrice = 1000.0; l.amount = 1000.0;
+        dtoE46.lines.push_back(l);
+
+        std::string xmlE46 = ecf::app::buildXmlFromCanonical(dtoE46, "E340000000911", "101889063", "Willy Chic");
+        CHECK(xmlE46.find("<IdentificadorExtranjero>EXTRANJERO</IdentificadorExtranjero>") != std::string::npos,
+              "E34 modifying E46 emits EXTRANJERO fallback when foreign buyer has no RNC");
+        CHECK(xmlE46.find("<IndicadorFacturacion>3</IndicadorFacturacion>") != std::string::npos,
+              "E34 modifying E46 uses IndicadorFacturacion 3 (0% export)");
+        signAndCheck(xmlE46, "101889063", "e-CF 34 v.1.0.xsd", "E34 modifying E46 passes DGII XSD validation");
+    }
+
+    // Test 30: Pre-folded 4-decimal gross UnitPrice cuadratura & Rule [613] reference stripping
+    {
+        ecf::app::CanonicalDocumentDto dto;
+        dto.tipoComprobante = "E31";
+        dto.header.rncComprador = "130000000";
+        dto.header.razonSocialComprador = "Cliente Descuento Plegado";
+        dto.totals.montoSubtotal = 90.0;
+        dto.totals.montoGravadoTotal = 90.0;
+        dto.totals.montoItbis = 16.20;
+        dto.totals.montoTotal = 106.20;
+        // Accidental non-contingency reference on E31 must be stripped per Rule [613]
+        dto.references.correctsENcf = "E310000000001";
+        dto.references.codigoModificacion = 1;
+
+        ecf::app::CanonicalLineDto l;
+        l.lineNumber = 1;
+        l.itemName = "Lote 3 unidades con descuento plegado";
+        l.quantity = 3.0;
+        l.unitPrice = 30.0;     // Net price after folding 10.00 discount into 100.00 gross -> gross price 33.3333
+        l.discountAmount = 10.0;
+        l.amount = 90.0;
+        dto.lines.push_back(l);
+
+        std::string xml = ecf::app::buildXmlFromCanonical(dto, "E310000000920", "101889063", "Willy Chic");
+        CHECK(xml.find("<PrecioUnitarioItem>33.3333</PrecioUnitarioItem>") != std::string::npos,
+              "Pre-folded line reconstructs 4-decimal gross PrecioUnitarioItem 33.3333");
+        CHECK(xml.find("<DescuentoMonto>10.00</DescuentoMonto>") != std::string::npos,
+              "Pre-folded line emits DescuentoMonto 10.00");
+        CHECK(xml.find("<InformacionReferencia>") == std::string::npos,
+              "Rule [613]: E31 with CodigoModificacion=1 strips InformacionReferencia");
+        signAndCheck(xml, "101889063", "e-CF 31 v.1.0.xsd", "Pre-folded 4-decimal discount E31 passes DGII XSD validation");
+
+        // Contingency replacement (CodigoModificacion = 4) on E31 MUST emit InformacionReferencia
+        dto.references.correctsENcf = "0100000009"; // 10-digit legacy normalized to B0100000009
+        dto.references.codigoModificacion = 4;
+        dto.references.fechaNcfModificado = "2026-08-05";
+        std::string xmlContingency = ecf::app::buildXmlFromCanonical(dto, "E310000000921", "101889063", "Willy Chic");
+        CHECK(xmlContingency.find("<NCFModificado>B0100000009</NCFModificado>") != std::string::npos,
+              "Rule [613]: E31 with CodigoModificacion=4 preserves normalized Serie B NCFModificado");
+        signAndCheck(xmlContingency, "101889063", "e-CF 31 v.1.0.xsd", "Contingency replacement E31 passes DGII XSD validation");
+    }
+
     if (failures == 0) {
         std::printf("All XSD, multi-tenant, and security tests passed successfully!\n");
     } else {

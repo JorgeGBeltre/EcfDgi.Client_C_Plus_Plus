@@ -41,7 +41,7 @@ RUN --mount=type=cache,id=ecfdgii-vcpkg-bincache,target=/vcpkg-bincache \
     --mount=type=cache,id=ecfdgii-vcpkg-downloads,target=/opt/vcpkg/downloads \
     cmake --preset default \
  && cmake --build build --target ecfdgii_api --parallel \
- && strip build/ecfdgii_api || true
+ && (strip build/ecfdgii_api || true)
 
 # ---------------------------------------------------------------------------
 # Runtime image

@@ -7,6 +7,7 @@
 
 #include <openssl/pkcs12.h>
 #include <openssl/x509.h>
+#include <openssl/x509v3.h>
 #include <openssl/evp.h>
 #include <openssl/bio.h>
 #include <openssl/err.h>
@@ -25,6 +26,7 @@
 #include <cstring>
 #include <fstream>
 #include <mutex>
+#include <regex>
 #include <stdexcept>
 
 #include "Domain/Exceptions/EcfException.h"
@@ -80,10 +82,33 @@ static std::chrono::system_clock::time_point asn1ToTimePoint(const ASN1_TIME* aT
 struct CertInfo {
     std::string subject;
     std::string issuer;
+    std::string san;
     bool isSelfSigned = false;
     std::chrono::system_clock::time_point notBefore = std::chrono::system_clock::time_point::min();
     std::chrono::system_clock::time_point notAfter = std::chrono::system_clock::time_point::min();
 };
+
+std::string formatX509NameFull(X509_NAME* name) {
+    if (!name) return "";
+    std::string out;
+    char buf[1024];
+    if (X509_NAME_oneline(name, buf, sizeof(buf))) {
+        out = buf;
+    }
+    BIO* bio = BIO_new(BIO_s_mem());
+    if (bio) {
+        if (X509_NAME_print_ex(bio, name, 0, XN_FLAG_RFC2253 & ~ASN1_STRFLGS_ESC_MSB) > 0) {
+            char* data = nullptr;
+            long len = BIO_get_mem_data(bio, &data);
+            if (len > 0 && data) {
+                if (!out.empty()) out += " | ";
+                out.append(data, static_cast<size_t>(len));
+            }
+        }
+        BIO_free(bio);
+    }
+    return out;
+}
 
 CertInfo parseCertInfo(const std::vector<unsigned char>& pfx,
                        const std::string& password) {
@@ -96,12 +121,21 @@ CertInfo parseCertInfo(const std::vector<unsigned char>& pfx,
     STACK_OF(X509)* ca = nullptr;
     CertInfo info;
     if (PKCS12_parse(p12, password.c_str(), &pkey, &cert, &ca) && cert) {
-        char buf[512];
-        if (X509_NAME_oneline(X509_get_subject_name(cert), buf, sizeof(buf))) {
-            info.subject = buf;
-        }
-        if (X509_NAME_oneline(X509_get_issuer_name(cert), buf, sizeof(buf))) {
-            info.issuer = buf;
+        info.subject = formatX509NameFull(X509_get_subject_name(cert));
+        info.issuer = formatX509NameFull(X509_get_issuer_name(cert));
+        int sanIdx = X509_get_ext_by_NID(cert, NID_subject_alt_name, -1);
+        if (sanIdx >= 0) {
+            BIO* sanBio = BIO_new(BIO_s_mem());
+            if (sanBio) {
+                if (X509V3_EXT_print(sanBio, X509_get_ext(cert, sanIdx), 0, 0) == 1) {
+                    char* data = nullptr;
+                    long len = BIO_get_mem_data(sanBio, &data);
+                    if (len > 0 && data) {
+                        info.san.assign(data, static_cast<size_t>(len));
+                    }
+                }
+                BIO_free(sanBio);
+            }
         }
         info.isSelfSigned = (X509_NAME_cmp(X509_get_subject_name(cert),
                                            X509_get_issuer_name(cert)) == 0);
@@ -215,6 +249,7 @@ EcfXmlSigner::EcfXmlSigner(const std::vector<unsigned char>& pfxBytes, const std
     auto info = parseCertInfo(pfxBytes_, pfxPassword_);
     certSubject_ = info.subject;
     certIssuer_ = info.issuer;
+    certSan_ = info.san;
     isSelfSigned_ = info.isSelfSigned;
     notBefore_ = info.notBefore;
     notAfter_ = info.notAfter;
@@ -245,6 +280,7 @@ EcfXmlSigner::EcfXmlSigner(const std::string& pfxPath, const std::string& pfxPas
     auto info = parseCertInfo(pfxBytes_, pfxPassword_);
     certSubject_ = info.subject;
     certIssuer_ = info.issuer;
+    certSan_ = info.san;
     isSelfSigned_ = info.isSelfSigned;
     notBefore_ = info.notBefore;
     notAfter_ = info.notAfter;
@@ -252,56 +288,68 @@ EcfXmlSigner::EcfXmlSigner(const std::string& pfxPath, const std::string& pfxPas
 
 bool EcfXmlSigner::validateCertificateSn(const std::string& rncOCedula) const {
     if (rncOCedula.empty()) return false;
-    if (usesFallbackCertificate_ || isSelfSigned_) {
-        return true;
-    }
 
     std::string cleanSn;
     for (char c : rncOCedula) {
         if (std::isdigit(static_cast<unsigned char>(c))) cleanSn.push_back(c);
     }
+    if (cleanSn.empty()) return false;
 
-    auto toLower = [](std::string s) {
-        std::transform(s.begin(), s.end(), s.begin(), ::tolower);
-        return s;
-    };
-    auto toUpper = [](std::string s) {
-        std::transform(s.begin(), s.end(), s.begin(), ::toupper);
-        return s;
-    };
-
-    std::string sSub = toLower(certSubject_);
-    std::string sIss = toLower(certIssuer_);
-    std::string sRnc = toLower(rncOCedula);
-    std::string sClean = toLower(cleanSn);
-
-    // 2. Direct match on Subject (exact or clean digits)
-    // NOTE: We NEVER match against Issuer because Issuer is the CA, not the taxpayer.
-    if (sSub.find(sRnc) != std::string::npos ||
-        (!sClean.empty() && sSub.find(sClean) != std::string::npos)) {
+    if (usesFallbackCertificate_ || isSelfSigned_) {
         return true;
     }
 
-    // 3. Dominican Authorized CAs & Tax Procedures / Natural Person delegation
+    auto toUpper = [](std::string s) {
+        std::transform(s.begin(), s.end(), s.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+        return s;
+    };
+
     std::string subjectUpper = toUpper(certSubject_);
     std::string issuerUpper = toUpper(certIssuer_);
 
+    // 2. Exact 9-11 digit identifier match in Subject or SAN (never Issuer)
+    static const std::regex kDigitRunRegex(R"((\d{9,11}))");
+    for (std::sregex_iterator it(certSubject_.begin(), certSubject_.end(), kDigitRunRegex), end; it != end; ++it) {
+        if ((*it)[1].str() == cleanSn) {
+            return true;
+        }
+    }
+    if (!certSan_.empty()) {
+        for (std::sregex_iterator it(certSan_.begin(), certSan_.end(), kDigitRunRegex), end; it != end; ++it) {
+            if ((*it)[1].str() == cleanSn) {
+                return true;
+            }
+        }
+    }
+
+    // 3. Qualified Natural Person / Tax Procedures delegation under Dominican CA (Norma 06-2018 / Ley 32-23)
+    bool isTaxProcedures = (subjectUpper.find("TAX PROCEDURES") != std::string::npos ||
+                            subjectUpper.find("PROCEDIMIENTOS TRIBUTARIOS") != std::string::npos);
+    bool isNaturalPerson = (subjectUpper.find("NATURAL PERSON") != std::string::npos ||
+                            subjectUpper.find("PERSONA FISICA") != std::string::npos);
     bool isDominicanCa = (issuerUpper.find("VIAFIRMA") != std::string::npos ||
                           issuerUpper.find("AVANSI") != std::string::npos ||
                           issuerUpper.find("CAMARA") != std::string::npos ||
                           issuerUpper.find("DIGIFIRMA") != std::string::npos ||
-                          issuerUpper.find("DOMINICANA") != std::string::npos ||
-                          issuerUpper.find("C=DO") != std::string::npos ||
-                          issuerUpper.find("VATDO-") != std::string::npos);
+                          issuerUpper.find("INDOTEL") != std::string::npos ||
+                          issuerUpper.find("OPTIC") != std::string::npos);
 
-    bool isTaxProcedureOrNaturalPerson = (subjectUpper.find("TAX PROCEDURES") != std::string::npos ||
-                                          subjectUpper.find("PROCEDIMIENTOS TRIBUTARIOS") != std::string::npos ||
-                                          subjectUpper.find("PERSONA FISICA") != std::string::npos ||
-                                          subjectUpper.find("NATURAL PERSON") != std::string::npos ||
-                                          subjectUpper.find("IDCDO-") != std::string::npos);
+    if ((isTaxProcedures || isNaturalPerson) && isDominicanCa) {
+        // Reject if Subject carries an explicit corporate 9-digit RNC belonging to a DIFFERENT company
+        static const std::regex kCorpRncRegex(R"((?:VATDO|RNC)[-:\s=]?(\d{9})(?!\d))");
+        bool hasExplicitOtherCorporateRnc = false;
+        for (std::sregex_iterator it(subjectUpper.begin(), subjectUpper.end(), kCorpRncRegex), end; it != end; ++it) {
+            if ((*it)[1].str() == cleanSn) {
+                return true;
+            }
+            hasExplicitOtherCorporateRnc = true;
+        }
 
-    if (isDominicanCa && isTaxProcedureOrNaturalPerson && !sClean.empty() && sSub.find(sClean) != std::string::npos) {
-        return true;
+        static const std::regex kPersonalCedulaRegex(R"((?:IDCDO|SERIALNUMBER|2\.5\.4\.5|CEDULA)[-:\s=]?(\d{11})(?!\d))");
+        if (!hasExplicitOtherCorporateRnc && std::regex_search(subjectUpper, kPersonalCedulaRegex)) {
+            return true;
+        }
     }
 
     return false;

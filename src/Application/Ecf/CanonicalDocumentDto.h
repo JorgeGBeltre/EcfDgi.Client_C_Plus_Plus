@@ -16,6 +16,7 @@ struct CanonicalHeaderDto {
     std::string rncEmisor;
     std::string razonSocialEmisor;
     std::string rncComprador;
+    std::optional<std::string> identificadorExtranjero;
     std::string razonSocialComprador;
     std::optional<std::string> correoComprador;
     // ISO 8601 (yyyy-MM-dd) or DGII format (dd-MM-yyyy)
@@ -25,6 +26,11 @@ struct CanonicalHeaderDto {
     std::optional<int> tipoPago;
     std::optional<std::string> fechaLimitePago;
     std::optional<std::string> tipoIngresos;
+};
+
+struct CanonicalCurrencyDto {
+    std::string code = "DOP";
+    double exchangeRate = 1.0;
 };
 
 struct CanonicalLineDto {
@@ -87,6 +93,7 @@ struct CanonicalDocumentDto {
     std::string documentKind = "Invoice"; // Invoice, CreditNote, DebitNote, Bill
     std::string tipoComprobante = "E31"; // Default Factura de Crédito Fiscal
     CanonicalHeaderDto header;
+    std::optional<CanonicalCurrencyDto> currency;
     std::vector<CanonicalLineDto> lines;
     CanonicalTotalsDto totals;
     CanonicalReferencesDto references;

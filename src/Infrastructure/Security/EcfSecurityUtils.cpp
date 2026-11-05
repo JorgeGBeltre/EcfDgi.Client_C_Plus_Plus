@@ -134,11 +134,19 @@ std::optional<std::string> extractFechaHoraFirma(const std::string& signedXml) {
 
 std::string buildTimbreUrl(const std::string& baseUrl,
                            const domain::TimbreEcfRequest& req) {
+    bool isE43 = req.eNcf.rfind("E43", 0) == 0 || req.eNcf.rfind("e43", 0) == 0;
+    bool omitEmptyBuyer = isE43 || (req.rncComprador.empty() && (
+        req.eNcf.rfind("E33", 0) == 0 || req.eNcf.rfind("e33", 0) == 0 ||
+        req.eNcf.rfind("E34", 0) == 0 || req.eNcf.rfind("e34", 0) == 0 ||
+        req.eNcf.rfind("E47", 0) == 0 || req.eNcf.rfind("e47", 0) == 0));
+
     std::ostringstream os;
     os << baseUrl
-       << "?rncemisor=" << urlEncode(req.rncEmisor)
-       << "&rnccomprador=" << urlEncode(req.rncComprador)
-       << "&encf=" << urlEncode(req.eNcf)
+       << "?rncemisor=" << urlEncode(req.rncEmisor);
+    if (!omitEmptyBuyer) {
+        os << "&rnccomprador=" << urlEncode(req.rncComprador);
+    }
+    os << "&encf=" << urlEncode(req.eNcf)
        << "&fechaemision=" << urlEncode(req.fechaEmision)
        << "&montototal=" << urlEncode(money(req.montoTotal))
        << "&fechafirma=" << urlEncode(req.fechaFirma)

@@ -131,6 +131,7 @@ Json::Value toJson(const app::CanonicalDocumentDto& d) {
     h["rncEmisor"] = d.header.rncEmisor;
     h["razonSocialEmisor"] = d.header.razonSocialEmisor;
     h["rncComprador"] = d.header.rncComprador;
+    if (d.header.identificadorExtranjero.has_value()) h["identificadorExtranjero"] = *d.header.identificadorExtranjero;
     h["razonSocialComprador"] = d.header.razonSocialComprador;
     if (d.header.correoComprador.has_value()) h["correoComprador"] = *d.header.correoComprador;
     h["fechaEmision"] = d.header.fechaEmision;
@@ -140,6 +141,13 @@ Json::Value toJson(const app::CanonicalDocumentDto& d) {
     if (d.header.fechaLimitePago.has_value()) h["fechaLimitePago"] = *d.header.fechaLimitePago;
     if (d.header.tipoIngresos.has_value()) h["tipoIngresos"] = *d.header.tipoIngresos;
     j["header"] = h;
+
+    if (d.currency.has_value()) {
+        Json::Value cur;
+        cur["code"] = d.currency->code;
+        cur["exchangeRate"] = d.currency->exchangeRate;
+        j["currency"] = cur;
+    }
 
     Json::Value lines(Json::arrayValue);
     for (const auto& l : d.lines) {
@@ -309,6 +317,7 @@ app::CanonicalDocumentDto canonicalDocumentFromJson(const Json::Value& j) {
         d.header.rncEmisor = jstr(h, "rncEmisor");
         d.header.razonSocialEmisor = jstr(h, "razonSocialEmisor");
         d.header.rncComprador = jstr(h, "rncComprador");
+        d.header.identificadorExtranjero = optStr(h, "identificadorExtranjero");
         d.header.razonSocialComprador = jstr(h, "razonSocialComprador");
         d.header.correoComprador = optStr(h, "correoComprador");
         d.header.fechaEmision = jstr(h, "fechaEmision");
@@ -317,6 +326,14 @@ app::CanonicalDocumentDto canonicalDocumentFromJson(const Json::Value& j) {
         d.header.tipoPago = optInt(h, "tipoPago");
         d.header.fechaLimitePago = optStr(h, "fechaLimitePago");
         d.header.tipoIngresos = optStr(h, "tipoIngresos");
+    }
+
+    if (has(j, "currency") && j["currency"].isObject()) {
+        const auto& c = j["currency"];
+        app::CanonicalCurrencyDto cur;
+        cur.code = jstr(c, "code", "DOP");
+        cur.exchangeRate = optDbl(c, "exchangeRate").value_or(1.0);
+        d.currency = cur;
     }
 
     if (!d.header.direccionEmisor.has_value()) d.header.direccionEmisor = optStr(j, "direccionEmisor");
@@ -336,6 +353,11 @@ app::CanonicalDocumentDto canonicalDocumentFromJson(const Json::Value& j) {
             line.amount = jdbl(l, "amount");
             line.discountAmount = optDbl(l, "discountAmount").value_or(0.0);
             line.indicadorFacturacion = optInt(l, "indicadorFacturacion");
+            if (!line.indicadorFacturacion.has_value() && has(l, "indicadorFacturacion") && l["indicadorFacturacion"].isString()) {
+                try {
+                    line.indicadorFacturacion = std::stoi(l["indicadorFacturacion"].asString());
+                } catch (...) {}
+            }
             line.taxRate = optDbl(l, "taxRate");
             line.taxAmount = optDbl(l, "taxAmount");
             line.montoItbisRetenido = optDbl(l, "montoItbisRetenido");

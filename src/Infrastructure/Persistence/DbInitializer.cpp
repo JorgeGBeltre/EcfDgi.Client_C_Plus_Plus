@@ -2,9 +2,12 @@
 
 #include <pqxx/pqxx>
 
+#include <chrono>
 #include <fstream>
+#include <memory>
 #include <sstream>
 #include <stdexcept>
+#include <thread>
 
 #include "Shared/Common/Sys.h"
 
@@ -23,7 +26,19 @@ std::string readAll(const std::string& path) {
 void DbInitializer::initialize(const std::string& connectionString,
                                const std::string& schemaPath,
                                domain::IPasswordHasher& hasher) {
-    pqxx::connection conn(connectionString);
+    (void)hasher;
+    std::unique_ptr<pqxx::connection> connPtr;
+    const int maxAttempts = 6;
+    for (int attempt = 1; attempt <= maxAttempts; ++attempt) {
+        try {
+            connPtr = std::make_unique<pqxx::connection>(connectionString);
+            if (connPtr->is_open()) break;
+        } catch (const std::exception&) {
+            if (attempt == maxAttempts) throw;
+            std::this_thread::sleep_for(std::chrono::seconds(attempt));
+        }
+    }
+    pqxx::connection& conn = *connPtr;
 
     // 1. Apply schema (idempotent CREATE TABLE IF NOT EXISTS ...).
     {

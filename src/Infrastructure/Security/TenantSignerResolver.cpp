@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <openssl/evp.h>
+#include <openssl/kdf.h>
 #include <openssl/sha.h>
 #include <pqxx/pqxx>
 #include <spdlog/spdlog.h>
@@ -26,113 +27,199 @@ std::string extractDigits(const std::string& s) {
     return out;
 }
 
+std::string trimWhitespace(const std::string& s) {
+    size_t start = 0;
+    while (start < s.size() && std::isspace(static_cast<unsigned char>(s[start]))) ++start;
+    size_t end = s.size();
+    while (end > start && std::isspace(static_cast<unsigned char>(s[end - 1]))) --end;
+    return s.substr(start, end - start);
+}
+
+bool deriveHkdfSha256(const std::string& secret, const std::string& info, unsigned char outKey[32]) {
+    EVP_PKEY_CTX* pctx = EVP_PKEY_CTX_new_id(EVP_PKEY_HKDF, nullptr);
+    if (!pctx) return false;
+    size_t outLen = 32;
+    bool ok = (EVP_PKEY_derive_init(pctx) > 0 &&
+               EVP_PKEY_CTX_set_hkdf_md(pctx, EVP_sha256()) > 0 &&
+               EVP_PKEY_CTX_set1_hkdf_salt(pctx, reinterpret_cast<const unsigned char*>(""), 0) > 0 &&
+               EVP_PKEY_CTX_set1_hkdf_key(pctx, reinterpret_cast<const unsigned char*>(secret.data()), static_cast<int>(secret.size())) > 0 &&
+               EVP_PKEY_CTX_add1_hkdf_info(pctx, reinterpret_cast<const unsigned char*>(info.data()), static_cast<int>(info.size())) > 0 &&
+               EVP_PKEY_derive(pctx, outKey, &outLen) > 0 &&
+               outLen == 32);
+    EVP_PKEY_CTX_free(pctx);
+    return ok;
+}
+
+bool aes256GcmDecrypt(const unsigned char key[32],
+                      const std::string& nonce,
+                      const std::string& cipherBytes,
+                      const std::string& tag,
+                      const std::string& aad,
+                      std::string& outPlain) {
+    if (nonce.size() != 12 || tag.size() != 16) return false;
+    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+    if (!ctx) return false;
+
+    outPlain.assign(cipherBytes.size(), '\0');
+    int len = 0;
+    int plainLen = 0;
+    bool ok = false;
+
+    do {
+        if (EVP_DecryptInit_ex(ctx, EVP_aes_256_gcm(), nullptr, nullptr, nullptr) != 1) break;
+        if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN, static_cast<int>(nonce.size()), nullptr) != 1) break;
+        if (EVP_DecryptInit_ex(ctx, nullptr, nullptr, key, reinterpret_cast<const unsigned char*>(nonce.data())) != 1) break;
+        if (!aad.empty()) {
+            int aadLen = 0;
+            if (EVP_DecryptUpdate(ctx, nullptr, &aadLen,
+                                  reinterpret_cast<const unsigned char*>(aad.data()),
+                                  static_cast<int>(aad.size())) != 1) {
+                break;
+            }
+        }
+        if (!cipherBytes.empty()) {
+            if (EVP_DecryptUpdate(ctx, reinterpret_cast<unsigned char*>(&outPlain[0]), &len,
+                                  reinterpret_cast<const unsigned char*>(cipherBytes.data()),
+                                  static_cast<int>(cipherBytes.size())) != 1) {
+                break;
+            }
+            plainLen = len;
+        }
+        if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_TAG, static_cast<int>(tag.size()), const_cast<char*>(tag.data())) != 1) break;
+        if (EVP_DecryptFinal_ex(ctx, reinterpret_cast<unsigned char*>(&outPlain[0]) + plainLen, &len) != 1) break;
+        plainLen += len;
+        outPlain.resize(plainLen);
+        ok = true;
+    } while (false);
+
+    EVP_CIPHER_CTX_free(ctx);
+    return ok;
+}
+
 } // namespace
 
-std::string TenantSignerResolver::decryptPasswordIfEncrypted(const std::string& encryptedText, const std::string& masterKey) {
+std::string TenantSignerResolver::decryptPasswordIfEncrypted(const std::string& encryptedText,
+                                                             const std::string& masterKey,
+                                                             const std::string& tenantCode) {
     if (encryptedText.empty()) {
         return "";
     }
 
     bool isV1 = encryptedText.rfind("enc:v1:", 0) == 0;
     bool isV2 = encryptedText.rfind("enc:v2:", 0) == 0;
-    if (!isV1 && !isV2) {
+    bool isV3 = encryptedText.rfind("enc:v3:", 0) == 0;
+    if (!isV1 && !isV2 && !isV3) {
         return encryptedText; // Legacy plaintext
     }
 
     try {
-        std::string nonceB64, cipherB64, tagB64;
-        if (isV1) {
-            std::string payload = encryptedText.substr(7); // skip "enc:v1:"
-            size_t pos1 = payload.find(':');
-            if (pos1 == std::string::npos) return "";
-            size_t pos2 = payload.find(':', pos1 + 1);
-            if (pos2 == std::string::npos) return "";
-            if (payload.find(':', pos2 + 1) != std::string::npos) return "";
-
-            nonceB64 = payload.substr(0, pos1);
-            cipherB64 = payload.substr(pos1 + 1, pos2 - pos1 - 1);
-            tagB64 = payload.substr(pos2 + 1);
-        } else {
-            // enc:v2:{keyId}:{nonce}:{cipher}:{tag}
-            std::string payload = encryptedText.substr(7); // skip "enc:v2:"
-            size_t pos1 = payload.find(':'); // after keyId
-            if (pos1 == std::string::npos) return "";
-            size_t pos2 = payload.find(':', pos1 + 1); // after nonce
-            if (pos2 == std::string::npos) return "";
-            size_t pos3 = payload.find(':', pos2 + 1); // after cipher
-            if (pos3 == std::string::npos) return "";
-            if (payload.find(':', pos3 + 1) != std::string::npos) return "";
-
-            nonceB64 = payload.substr(pos1 + 1, pos2 - pos1 - 1);
-            cipherB64 = payload.substr(pos2 + 1, pos3 - pos2 - 1);
-            tagB64 = payload.substr(pos3 + 1);
+        std::string payload = encryptedText.substr(7); // skip "enc:vX:"
+        std::vector<std::string> parts;
+        size_t start = 0;
+        while (true) {
+            size_t pos = payload.find(':', start);
+            if (pos == std::string::npos) {
+                parts.push_back(payload.substr(start));
+                break;
+            }
+            parts.push_back(payload.substr(start, pos - start));
+            start = pos + 1;
         }
 
-        std::string nonce = drogon::utils::base64Decode(nonceB64);
-        std::string cipherBytes = drogon::utils::base64Decode(cipherB64);
-        std::string tag = drogon::utils::base64Decode(tagB64);
+        std::string nonce, cipherBytes, tag;
+        bool useHkdfCandidate = (isV2 || isV3);
+
+        if ((isV1 && parts.size() == 3) || (isV2 && parts.size() == 4)) {
+            // SaaS-Ecf CryptoEncryptionHelper format:
+            // enc:v1:{nonce}:{cipher}:{tag} or enc:v2:{keyId}:{nonce}:{cipher}:{tag}
+            size_t offset = isV2 ? 1 : 0;
+            nonce = drogon::utils::base64Decode(parts[offset]);
+            cipherBytes = drogon::utils::base64Decode(parts[offset + 1]);
+            tag = drogon::utils::base64Decode(parts[offset + 2]);
+        } else if (parts.size() == 1 || (isV2 && parts.size() == 2)) {
+            // Combined envelope format (nonce[12] || tag[16] || cipher[N]):
+            // enc:v1:{combinedB64}, enc:v2:{combinedB64} (or enc:v2:{keyId}:{combinedB64}), enc:v3:{combinedB64}
+            const std::string& combinedB64 = parts.back();
+            std::string combined = drogon::utils::base64Decode(combinedB64);
+            if (combined.size() < 28) {
+                spdlog::warn("[TenantSignerResolver] Envelope cifrado combinado demasiado corto: {}B", combined.size());
+                return "";
+            }
+            nonce = combined.substr(0, 12);
+            tag = combined.substr(12, 16);
+            cipherBytes = combined.substr(28);
+        } else {
+            return "";
+        }
 
         if (nonce.size() != 12 || tag.size() != 16) {
             spdlog::warn("[TenantSignerResolver] Formato de payload cifrado inválido: nonce={}B, tag={}B", nonce.size(), tag.size());
             return "";
         }
 
-        std::string rawKey = !masterKey.empty() ? masterKey : "";
-        if (rawKey.empty()) {
-            const char* envCert = std::getenv("CERT_ENCRYPTION_KEY");
-            if (envCert && std::strlen(envCert) > 0) {
-                rawKey = envCert;
+        std::vector<std::string> candidateSecrets;
+        auto pushSecret = [&](const std::string& s) {
+            std::string trimmed = trimWhitespace(s);
+            if (!trimmed.empty() && std::find(candidateSecrets.begin(), candidateSecrets.end(), trimmed) == candidateSecrets.end()) {
+                candidateSecrets.push_back(trimmed);
             }
+        };
+
+        if (!masterKey.empty()) pushSecret(masterKey);
+        const char* envNames[] = {
+            "CERT_ENCRYPTION_KEY",
+            "STORAGE_ENCRYPTION_KEY",
+            "Security__CertificateEncryptionKey",
+            "JWT_SECRET",
+            "JWT_SECRET_KEY",
+            "JWT__SecretKey",
+            "JwtSettings__Secret",
+            "WORKER_SECRET_KEY",
+            "WorkerSecretKey"
+        };
+        for (const char* name : envNames) {
+            const char* v = std::getenv(name);
+            if (v && std::strlen(v) > 0) pushSecret(v);
         }
-        if (rawKey.empty()) {
-            const char* envJwt = std::getenv("JWT_SECRET");
-            if (envJwt && std::strlen(envJwt) > 0) {
-                rawKey = envJwt;
-            }
-        }
-        if (rawKey.empty()) {
-            spdlog::error("[TenantSignerResolver] Clave de cifrado no configurada (CERT_ENCRYPTION_KEY o JWT_SECRET requeridos) (SEC-025)");
+
+        if (candidateSecrets.empty()) {
+            spdlog::error("[TenantSignerResolver] Clave de cifrado no configurada (CERT_ENCRYPTION_KEY / STORAGE_ENCRYPTION_KEY / JWT_SECRET requeridos) (SEC-025)");
             return "";
         }
 
-        unsigned char key[SHA256_DIGEST_LENGTH];
-        SHA256(reinterpret_cast<const unsigned char*>(rawKey.data()), rawKey.size(), key);
+        std::string tenantTag = trimWhitespace(tenantCode);
+        if (tenantTag.empty()) tenantTag = "default";
+        std::transform(tenantTag.begin(), tenantTag.end(), tenantTag.begin(), ::tolower);
+        std::string aadV3 = isV3 ? ("tenant:" + tenantTag + "|field:CertificatePassword|v3") : "";
 
-        EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
-        if (!ctx) return "";
-
-        std::string plainText;
-        plainText.resize(cipherBytes.size());
-        int len = 0;
-        int plainLen = 0;
-        bool ok = false;
-
-        do {
-            if (EVP_DecryptInit_ex(ctx, EVP_aes_256_gcm(), nullptr, nullptr, nullptr) != 1) break;
-            if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN, static_cast<int>(nonce.size()), nullptr) != 1) break;
-            if (EVP_DecryptInit_ex(ctx, nullptr, nullptr, key, reinterpret_cast<const unsigned char*>(nonce.data())) != 1) break;
-            if (!cipherBytes.empty()) {
-                if (EVP_DecryptUpdate(ctx, reinterpret_cast<unsigned char*>(&plainText[0]), &len,
-                                      reinterpret_cast<const unsigned char*>(cipherBytes.data()), static_cast<int>(cipherBytes.size())) != 1) {
-                    break;
+        for (const auto& secret : candidateSecrets) {
+            std::string plainText;
+            if (useHkdfCandidate) {
+                unsigned char hkdfKey[32];
+                if (deriveHkdfSha256(secret, "ecf:certificate-password:v1", hkdfKey)) {
+                    if (aes256GcmDecrypt(hkdfKey, nonce, cipherBytes, tag, aadV3, plainText)) {
+                        return plainText;
+                    }
+                    if (isV3 && tenantTag != "default") {
+                        std::string defaultAad = "tenant:default|field:CertificatePassword|v3";
+                        if (aes256GcmDecrypt(hkdfKey, nonce, cipherBytes, tag, defaultAad, plainText)) {
+                            return plainText;
+                        }
+                    }
                 }
-                plainLen = len;
             }
-            if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_TAG, static_cast<int>(tag.size()), const_cast<char*>(tag.data())) != 1) break;
-            if (EVP_DecryptFinal_ex(ctx, reinterpret_cast<unsigned char*>(&plainText[0]) + plainLen, &len) != 1) break;
-            plainLen += len;
-            plainText.resize(plainLen);
-            ok = true;
-        } while (false);
 
-        EVP_CIPHER_CTX_free(ctx);
-
-        if (ok) {
-            return plainText;
-        } else {
-            spdlog::warn("[TenantSignerResolver] Error de autenticación/integridad al descifrar contraseña (tag inválido o clave incorrecta) (SEC-026)");
-            return "";
+            if (!isV3) {
+                unsigned char shaKey[SHA256_DIGEST_LENGTH];
+                SHA256(reinterpret_cast<const unsigned char*>(secret.data()), secret.size(), shaKey);
+                if (aes256GcmDecrypt(shaKey, nonce, cipherBytes, tag, "", plainText)) {
+                    return plainText;
+                }
+            }
         }
+
+        spdlog::warn("[TenantSignerResolver] Error de autenticación/integridad al descifrar contraseña (tag inválido o clave incorrecta) (SEC-026)");
+        return "";
     } catch (const std::exception& ex) {
         spdlog::warn("[TenantSignerResolver] Excepción descifrando contraseña: {}", ex.what());
         return "";
@@ -204,7 +291,7 @@ std::shared_ptr<domain::IEcfXmlSigner> TenantSignerResolver::resolveTenantSigner
                 std::string code = r[0]["Code"].is_null() ? "" : r[0]["Code"].as<std::string>();
                 std::string companyName = r[0]["CompanyName"].is_null() ? code : r[0]["CompanyName"].as<std::string>();
                 std::string rawPassword = r[0]["CertificatePasswordEncrypted"].is_null() ? "" : r[0]["CertificatePasswordEncrypted"].as<std::string>();
-                std::string password = decryptPasswordIfEncrypted(rawPassword, masterKey_);
+                std::string password = decryptPasswordIfEncrypted(rawPassword, masterKey_, code);
 
                 if (!r[0]["CertificateRawData"].is_null()) {
                     auto rawData = conn.unesc_bin(r[0]["CertificateRawData"].as<std::string_view>());

@@ -36,6 +36,7 @@ private:
     std::string pfxPassword_;
     std::string certSubject_;              // parsed once via OpenSSL
     std::string certIssuer_;               // parsed once via OpenSSL
+    std::string certSan_;                  // Subject Alternative Name text, if present
     std::chrono::system_clock::time_point notBefore_{};
     std::chrono::system_clock::time_point notAfter_{};
     bool isSelfSigned_ = false;
