@@ -75,7 +75,7 @@ bool hasAlpha(const std::string& s) {
 }
 
 std::tm getDominicanTm(std::time_t tt) {
-    // Dominican Republic is UTC-4 year-round (no DST)
+
     std::time_t dom_tt = tt - (4 * 3600);
     std::tm tm{};
 #if defined(_WIN32)
@@ -119,7 +119,7 @@ std::string formatQty2(double val) {
     return s;
 }
 
-} // namespace
+}
 
 CanonicalCurrencyResolution resolveCanonicalCurrency(const std::optional<CanonicalCurrencyDto>& currency) {
     CanonicalCurrencyResolution res;
@@ -189,8 +189,7 @@ std::string escapeXml(const std::string& value) {
     out.reserve(value.size());
     for (size_t i = 0; i < value.size(); ++i) {
         unsigned char c = static_cast<unsigned char>(value[i]);
-        
-        // Strip illegal XML 1.0 control characters (BUG-092)
+
         if (c < 0x20 && c != 0x09 && c != 0x0A && c != 0x0D) {
             continue;
         }
@@ -223,10 +222,10 @@ std::string escapeXml(const std::string& value) {
 
 std::string truncateUtf8(const std::string& str, size_t maxChars) {
     if (str.empty() || maxChars == 0) return "";
-    
+
     size_t charCount = 0;
     size_t byteIndex = 0;
-    
+
     while (byteIndex < str.size() && charCount < maxChars) {
         unsigned char c = static_cast<unsigned char>(str[byteIndex]);
         size_t charLen = 1;
@@ -239,17 +238,17 @@ std::string truncateUtf8(const std::string& str, size_t maxChars) {
         } else if ((c & 0xF8) == 0xF0) {
             charLen = 4;
         } else {
-            // Continuation byte or invalid leading byte without header; step 1 byte
+
             byteIndex += 1;
             charCount++;
             continue;
         }
-        
+
         if (byteIndex + charLen > str.size()) {
-            // Incomplete multi-byte sequence at string boundary; stop before splitting (BUG-092)
+
             break;
         }
-        
+
         bool validContinuation = true;
         for (size_t k = 1; k < charLen; ++k) {
             unsigned char cont = static_cast<unsigned char>(str[byteIndex + k]);
@@ -263,11 +262,11 @@ std::string truncateUtf8(const std::string& str, size_t maxChars) {
             charCount++;
             continue;
         }
-        
+
         byteIndex += charLen;
         charCount++;
     }
-    
+
     return str.substr(0, byteIndex);
 }
 
@@ -285,26 +284,22 @@ std::string normalizeFechaDgii(const std::string& value) {
     while (!trimmed.empty() && std::isspace(static_cast<unsigned char>(trimmed.front()))) trimmed.erase(trimmed.begin());
     while (!trimmed.empty() && std::isspace(static_cast<unsigned char>(trimmed.back()))) trimmed.pop_back();
 
-    // If already dd-MM-yyyy
     static const std::regex rgx_ddmmyyyy(R"(^(\d{2})-(\d{2})-(\d{4})$)");
     std::smatch m;
     if (std::regex_match(trimmed, m, rgx_ddmmyyyy)) {
         return trimmed;
     }
 
-    // If yyyy-MM-dd or yyyy/MM/dd
     static const std::regex rgx_iso(R"(^(\d{4})[-/](\d{2})[-/](\d{2})$)");
     if (std::regex_match(trimmed, m, rgx_iso)) {
         return m[3].str() + "-" + m[2].str() + "-" + m[1].str();
     }
 
-    // If dd/MM/yyyy
     static const std::regex rgx_slash(R"(^(\d{2})/(\d{2})/(\d{4})$)");
     if (std::regex_match(trimmed, m, rgx_slash)) {
         return m[1].str() + "-" + m[2].str() + "-" + m[3].str();
     }
 
-    // If yyyyMMdd
     static const std::regex rgx_compact(R"(^(\d{4})(\d{2})(\d{2})$)");
     if (std::regex_match(trimmed, m, rgx_compact)) {
         return m[3].str() + "-" + m[2].str() + "-" + m[1].str();
@@ -345,7 +340,6 @@ std::vector<ProcessedLineItem> normalizeCanonicalLines(const std::vector<Canonic
         double rawAmount = line.amount;
         std::string rawName = !line.itemName.empty() ? line.itemName : "Item";
 
-        // Negative line (discount in QuickBooks)
         if (rawAmount < 0.0 || rawPrice < 0.0) {
             double absDiscount = std::abs(rawAmount != 0.0 ? rawAmount : rawPrice * rawQty);
             if (!result.empty()) {
@@ -356,14 +350,12 @@ std::vector<ProcessedLineItem> normalizeCanonicalLines(const std::vector<Canonic
             }
         }
 
-        // Derive price or amount if omitted
         if (rawAmount > 0.0 && rawPrice <= 0.0) {
             rawPrice = rawAmount / rawQty;
         } else if (rawAmount <= 0.0 && rawPrice > 0.0) {
             rawAmount = rawPrice * rawQty;
         }
 
-        // Regla DGII: Líneas con valor 0 y precio 0 no se agregan al XML
         if (rawAmount <= 0.0 && rawPrice <= 0.0) {
             continue;
         }
@@ -383,8 +375,7 @@ std::vector<ProcessedLineItem> normalizeCanonicalLines(const std::vector<Canonic
                 safeAmount = std::max(0.0, calcWithDiscount);
                 effectiveDiscount = incomingDiscount;
             } else if (std::abs(round2(safeQty * safePrice) - safeAmount) <= 0.05 && safeQty > 0.0) {
-                // Pre-folded net line (ERPConnector / SaaS-Ecf-Back folded discount into Amount & UnitPrice):
-                // Reconstruct gross UnitPrice so CantidadItem * PrecioUnitarioItem - DescuentoMonto == MontoItem holds.
+
                 double grossAmount = safeAmount + incomingDiscount;
                 double grossPrice2 = round2(grossAmount / safeQty);
                 if (std::abs(round2(safeQty * grossPrice2) - incomingDiscount - safeAmount) <= 0.01) {
@@ -422,7 +413,6 @@ std::vector<ProcessedLineItem> normalizeCanonicalLines(const std::vector<Canonic
         pi.discountAmount = effectiveDiscount;
         pi.montoItem = safeAmount;
 
-        // Line-level IndicadorFacturacion (BUG-049)
         if (line.indicadorFacturacion.has_value() && *line.indicadorFacturacion >= 0 && *line.indicadorFacturacion <= 4) {
             pi.indicadorFacturacion = *line.indicadorFacturacion;
             pi.hasExplicitIndicador = true;
@@ -705,7 +695,7 @@ std::string buildXmlFromCanonical(const CanonicalDocumentDto& dto,
                     }
                 }
             } else {
-                // Fallback obligatorio DGII para E46 cuando el cliente extranjero no posee RNC Dominicano
+
                 ss << "      <IdentificadorExtranjero>EXTRANJERO</IdentificadorExtranjero>\n";
             }
         } else {
@@ -841,7 +831,7 @@ std::string buildXmlFromCanonical(const CanonicalDocumentDto& dto,
             }
             effectiveRetention = r;
         } else if (tipoEcf == "41" || tipoEcf == "47") {
-            // DGII Rule 11160: <Retencion> is mandatory per line for E41 and E47
+
             CanonicalRetentionDto r;
             r.indicadorAgenteRetencionoPercepcion = 1;
             r.montoItbisRetenido = 0.0;
@@ -961,7 +951,7 @@ std::string buildXmlFromCanonical(const CanonicalDocumentDto& dto,
             computedItbisDop = isPurelyExemptOrNonTaxable ? 0.0 : itbis;
         }
     } else {
-        // Foreign currency (<OtraMoneda>): <Totales> in DOP (Moneda Nacional) and <OtraMoneda> in foreign currency
+
         emitOtraMoneda = true;
         otraMonedaSs << "    <OtraMoneda>\n"
                      << "      <TipoMoneda>" << escapeXml(currencyRes.code) << "</TipoMoneda>\n"
@@ -1183,7 +1173,6 @@ std::string buildXmlFromCanonical(const CanonicalDocumentDto& dto,
     }
     ss << "  </Encabezado>\n";
 
-    // Prorate document retentions across items if items lack individual retentions
     if (effectiveRetention.has_value()) {
         bool hasLineRetentions = false;
         for (const auto& pi : processedItems) {
@@ -1266,7 +1255,6 @@ std::string buildXmlFromCanonical(const CanonicalDocumentDto& dto,
     }
     ss << "  </DetallesItems>\n";
 
-    // DGII Rule [613]: <InformacionReferencia> is mandatory for 33/34; for other types, ONLY allowed when CodigoModificacion == 4
     bool allowReference = (tipoEcf == "33" || tipoEcf == "34" ||
                            (dto.references.codigoModificacion.has_value() && *dto.references.codigoModificacion == 4));
     if (allowReference && !normalizedRefEncf.empty()) {
@@ -1421,4 +1409,4 @@ std::string buildRfceXml(const domain::EcfDocument& doc,
     return result;
 }
 
-} // namespace ecf::app
+}

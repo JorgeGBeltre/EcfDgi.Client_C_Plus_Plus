@@ -57,17 +57,14 @@ int main() {
 
         std::printf("\n--- Running Vector %s ---\n", id.c_str());
 
-        // 1. Verify Body SHA256 Hash
         std::string actualBodyHashHex = CanonicalRequestHelper::computeSha256Hex(body);
         CHECK_EQUAL(actualBodyHashHex, expectedBodyHashHex, (id + " - Body Hash").c_str());
 
-        // 2. Verify Canonical String construction
         std::string actualCanonicalString = CanonicalRequestHelper::buildCanonicalString(
             method, rawTarget, timestamp, nonce, body
         );
         CHECK_EQUAL(actualCanonicalString, expectedCanonicalString, (id + " - Canonical String").c_str());
 
-        // 3. Verify HMAC SHA256 Signature
         std::string actualSignature = CanonicalRequestHelper::computeHmacSha256(secret, actualCanonicalString);
         CHECK_EQUAL(actualSignature, expectedSignature, (id + " - Signature").c_str());
     }

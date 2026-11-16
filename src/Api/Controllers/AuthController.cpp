@@ -23,18 +23,16 @@ Json::Value errorBody(const shared::Result& r) {
     v["errors"] = errs;
     return v;
 }
-}  // namespace
+}
 
 void AuthController::login(const HttpRequestPtr& req,
                            std::function<void(const HttpResponsePtr&)>&& callback) {
     (void)req;
-    // ARC-021: Interactive end-user authentication is disabled on the C++ fiscal engine.
-    // End users authenticate exclusively through SaaS-Ecf-Back (/api/v1/auth/login).
-    // The C++ engine operates as an internal subsystem using worker tokens and mutual HMAC.
+
     Json::Value resp;
     resp["error"] = "Interactive end-user login is disabled on the C++ fiscal engine. Please authenticate through SaaS-Ecf-Back at /api/v1/auth/login.";
     resp["status"] = 403;
     callback(json(resp, k403Forbidden));
 }
 
-}  // namespace ecf::api
+}

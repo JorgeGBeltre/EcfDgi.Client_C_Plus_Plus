@@ -7,30 +7,13 @@
 
 namespace ecf::domain {
 
-/// <summary>
-/// Resuelve dinámicamente el firmador XML (IEcfXmlSigner) correspondiente
-/// a un contribuyente / tenant a partir de su RNC o identificador.
-/// </summary>
 class ITenantSignerResolver {
 public:
     virtual ~ITenantSignerResolver() = default;
 
-    /// <summary>
-    /// Obtiene la instancia de IEcfXmlSigner configurada con el certificado digital activo
-    /// para el RNC especificado (buscando en base de datos de tenants o disco).
-    /// Si no se encuentra un certificado específico para el RNC o ante errores temporales,
-    /// retorna el firmador por defecto del sistema (fallback seguro).
-    /// </summary>
-    /// <param name="rnc">RNC o Cédula del contribuyente (con o sin guiones).</param>
-    /// <returns>Instancia de IEcfXmlSigner lista para firmar.</returns>
     virtual std::shared_ptr<IEcfXmlSigner> resolveSigner(const std::string& rnc) = 0;
 
-    /// <summary>
-    /// Obtiene la instancia de IEcfXmlSigner del contribuyente únicamente si posee
-    /// un certificado digital activo registrado en BD o disco. Retorna nullptr si no existe.
-    /// Valida que el RNC pertenezca al tenantId provisto si se especifica.
-    /// </summary>
     virtual std::shared_ptr<IEcfXmlSigner> resolveTenantSignerOnly(const std::string& rnc, const std::string& tenantId = "") = 0;
 };
 
-}  // namespace ecf::domain
+}

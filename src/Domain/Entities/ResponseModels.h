@@ -1,6 +1,4 @@
 #pragma once
-// DTOs for DGII responses and request payloads. Field names match the JSON
-// property names used by the DGII endpoints.
 
 #include <optional>
 #include <string>
@@ -156,4 +154,4 @@ struct ConsultaEstadoRequest {
           codigoSeguridad(std::move(codSeg)) {}
 };
 
-}  // namespace ecf::domain
+}

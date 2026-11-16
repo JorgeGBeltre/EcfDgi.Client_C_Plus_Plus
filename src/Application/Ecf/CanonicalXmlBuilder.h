@@ -67,4 +67,4 @@ std::string buildRfceXml(const domain::EcfDocument& doc,
                          const CanonicalDocumentDto* dto,
                          const std::string& emisorRazonSocial);
 
-} // namespace ecf::app
+}

@@ -48,8 +48,7 @@ void AppServices::configure(AppConfig config) {
 }
 
 std::shared_ptr<domain::IEcfClient> AppServices::ecfClient() {
-    // Built on first use: constructing DgiiDirectTransport loads the signing
-    // certificate, so failures surface at call time.
+
     std::call_once(ecfClientFlag_, [this] {
         try {
             auto baseClient = std::make_shared<infra::EcfClient>(config_.ecfOptions, nullptr, cacheService_, schemaValidator_);
@@ -75,4 +74,4 @@ AppServices::Scope AppServices::makeScope(
     return scope;
 }
 
-}  // namespace ecf::api
+}

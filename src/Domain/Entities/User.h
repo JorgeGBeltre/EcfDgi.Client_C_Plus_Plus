@@ -18,4 +18,4 @@ struct User : AuditableEntity {
         : username(std::move(u)), role(std::move(r)), tenantId(std::move(t)) {}
 };
 
-}  // namespace ecf::domain
+}

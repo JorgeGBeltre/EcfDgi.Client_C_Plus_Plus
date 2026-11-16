@@ -96,7 +96,7 @@ bool aes256GcmDecrypt(const unsigned char key[32],
     return ok;
 }
 
-} // namespace
+}
 
 std::string TenantSignerResolver::decryptPasswordIfEncrypted(const std::string& encryptedText,
                                                              const std::string& masterKey,
@@ -109,11 +109,11 @@ std::string TenantSignerResolver::decryptPasswordIfEncrypted(const std::string& 
     bool isV2 = encryptedText.rfind("enc:v2:", 0) == 0;
     bool isV3 = encryptedText.rfind("enc:v3:", 0) == 0;
     if (!isV1 && !isV2 && !isV3) {
-        return encryptedText; // Legacy plaintext
+        return encryptedText;
     }
 
     try {
-        std::string payload = encryptedText.substr(7); // skip "enc:vX:"
+        std::string payload = encryptedText.substr(7);
         std::vector<std::string> parts;
         size_t start = 0;
         while (true) {
@@ -130,15 +130,13 @@ std::string TenantSignerResolver::decryptPasswordIfEncrypted(const std::string& 
         bool useHkdfCandidate = (isV2 || isV3);
 
         if ((isV1 && parts.size() == 3) || (isV2 && parts.size() == 4)) {
-            // SaaS-Ecf CryptoEncryptionHelper format:
-            // enc:v1:{nonce}:{cipher}:{tag} or enc:v2:{keyId}:{nonce}:{cipher}:{tag}
+
             size_t offset = isV2 ? 1 : 0;
             nonce = drogon::utils::base64Decode(parts[offset]);
             cipherBytes = drogon::utils::base64Decode(parts[offset + 1]);
             tag = drogon::utils::base64Decode(parts[offset + 2]);
         } else if (parts.size() == 1 || (isV2 && parts.size() == 2)) {
-            // Combined envelope format (nonce[12] || tag[16] || cipher[N]):
-            // enc:v1:{combinedB64}, enc:v2:{combinedB64} (or enc:v2:{keyId}:{combinedB64}), enc:v3:{combinedB64}
+
             const std::string& combinedB64 = parts.back();
             std::string combined = drogon::utils::base64Decode(combinedB64);
             if (combined.size() < 28) {
@@ -249,7 +247,6 @@ std::shared_ptr<domain::IEcfXmlSigner> TenantSignerResolver::resolveTenantSigner
     std::string cacheKey = cleanRnc + ":" + tenantId;
     auto now = std::chrono::system_clock::now();
 
-    // 1. Check in-memory cache
     {
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = cache_.find(cacheKey);
@@ -258,17 +255,16 @@ std::shared_ptr<domain::IEcfXmlSigner> TenantSignerResolver::resolveTenantSigner
         }
     }
 
-    // 2. Try loading from database table "Tenants"
     if (!connectionString_.empty() &&
         connectionString_ != "InMemory" &&
         connectionString_ != "inmemory") {
         try {
             pqxx::connection conn(connectionString_);
             pqxx::nontransaction n(conn);
-            
+
             pqxx::result r;
             if (!tenantId.empty() && tenantId != "default" && tenantId != "default-tenant") {
-                // SEC-047: Restringir material criptográfico estrictamente a la empresa autenticada
+
                 r = n.exec_params(
                     "SELECT \"Code\", \"CompanyName\", \"CertificateRawData\", \"CertificatePasswordEncrypted\" "
                     "FROM \"Tenants\" "
@@ -317,8 +313,6 @@ std::shared_ptr<domain::IEcfXmlSigner> TenantSignerResolver::resolveTenantSigner
         }
     }
 
-    // 3. Check disk (/app/certificates or certificates)
-    // SEC-047: Si se indicó tenantId específico, no permitir cross-tenant en disco
     if (tenantId.empty() || tenantId == cleanRnc || tenantId == "default" || tenantId == "default-tenant") {
         const char* envPwd = std::getenv("ECF_CERTIFICATE_PASSWORD");
         std::string diskCertPassword = envPwd ? envPwd : "";
@@ -350,4 +344,4 @@ std::shared_ptr<domain::IEcfXmlSigner> TenantSignerResolver::resolveSigner(const
     return signer ? signer : defaultSigner_;
 }
 
-}  // namespace ecf::infra
+}

@@ -21,7 +21,7 @@ HttpResponsePtr unauthorized(const std::string& detail) {
     resp->setContentTypeString("application/problem+json");
     return resp;
 }
-}  // namespace
+}
 
 void JwtAuthFilter::doFilter(const HttpRequestPtr& req, FilterCallback&& fcb,
                              FilterChainCallback&& fccb) {
@@ -60,4 +60,4 @@ void JwtAuthFilter::doFilter(const HttpRequestPtr& req, FilterCallback&& fcb,
     fccb();
 }
 
-}  // namespace ecf::api
+}

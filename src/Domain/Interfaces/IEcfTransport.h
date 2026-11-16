@@ -1,6 +1,4 @@
 #pragma once
-// Read/write access to the DGII REST endpoints. Operations are exposed as
-// synchronous, blocking calls.
 
 #include <string>
 #include <vector>
@@ -37,4 +35,4 @@ public:
     virtual std::string verificarEstadoAmbiente(AmbienteEnum ambiente) = 0;
 };
 
-}  // namespace ecf::domain
+}

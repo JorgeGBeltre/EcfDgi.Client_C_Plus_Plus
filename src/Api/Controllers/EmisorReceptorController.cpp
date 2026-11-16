@@ -229,8 +229,7 @@ bool isValidRncOrCedula(const std::string& s) {
 }
 
 bool isValidEncf(const std::string& s) {
-    // Un e-NCF de la DGII consta exactamente de 13 caracteres:
-    // 'E' + 2 dígitos de tipo e-CF (31, 32, 33, 34, 41, 43, 44, 45, 46, 47) + 10 dígitos de secuencia
+
     if (s.size() != 13 || s[0] != 'E') return false;
 
     std::string type = s.substr(1, 2);
@@ -247,7 +246,7 @@ bool isValidEncf(const std::string& s) {
     return true;
 }
 
-}  // namespace
+}
 
 void EmisorReceptorController::recepcioneCF(const HttpRequestPtr& req,
                                             std::function<void(const HttpResponsePtr&)>&& callback) {
@@ -531,7 +530,7 @@ void EmisorReceptorController::validarSemilla(const HttpRequestPtr& req,
             callback(resp);
             return;
         }
-        g_issuedSeeds.erase(it); // Consume seed
+        g_issuedSeeds.erase(it);
     }
 
     std::string subject;
@@ -583,5 +582,4 @@ void EmisorReceptorController::validarSemilla(const HttpRequestPtr& req,
     callback(resp);
 }
 
-}  // namespace ecf::api
-
+}

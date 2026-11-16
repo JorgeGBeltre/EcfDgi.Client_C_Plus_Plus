@@ -23,4 +23,4 @@ std::string TokenService::generateToken(const domain::User& user) {
         .sign(jwt::algorithm::hs256{settings_.secret});
 }
 
-}  // namespace ecf::infra
+}

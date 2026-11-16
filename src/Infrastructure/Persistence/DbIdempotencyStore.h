@@ -11,12 +11,12 @@ public:
         : connectionString_(std::move(connectionString)) {}
 
     domain::IdempotencyReservationResult reserveOrGet(
-        const std::string& key, 
-        const std::string& payloadHash, 
+        const std::string& key,
+        const std::string& payloadHash,
         const std::string& workerKeyId) override;
 
     void complete(
-        const std::string& key, 
+        const std::string& key,
         const domain::IdempotentResult& result) override;
 
     void release(const std::string& key) override;
@@ -25,4 +25,4 @@ private:
     std::string connectionString_;
 };
 
-} // namespace ecf::infra
+}

@@ -18,4 +18,4 @@ public:
     virtual void update(const User& user) = 0;
 };
 
-}  // namespace ecf::domain
+}

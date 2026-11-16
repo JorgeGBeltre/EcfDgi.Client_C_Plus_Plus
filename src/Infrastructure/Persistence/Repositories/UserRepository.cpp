@@ -18,7 +18,7 @@ std::optional<User> queryOne(DbContext& db, const std::string& where,
     if (r.empty()) return std::nullopt;
     return mapUser(r[0]);
 }
-}  // namespace
+}
 
 std::optional<User> UserRepository::getById(const std::string& id) {
     return queryOne(*db_, "id = $1", id);
@@ -60,4 +60,4 @@ void UserRepository::update(const User& user) {
     });
 }
 
-}  // namespace ecf::infra
+}

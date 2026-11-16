@@ -33,7 +33,7 @@ std::optional<int> optInt(const Json::Value& j, const char* key) {
     return std::nullopt;
 }
 
-}  // namespace
+}
 
 Json::Value toJson(const EcfRecepcionResponse& r) {
     Json::Value v;
@@ -420,4 +420,4 @@ std::shared_ptr<domain::ICurrentUserService> currentUserFrom(
     return std::make_shared<CurrentUserService>(std::move(userId), std::move(username));
 }
 
-}  // namespace ecf::api::mapping
+}

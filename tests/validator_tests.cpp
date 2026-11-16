@@ -1,5 +1,4 @@
-// Minimal tests for EcfValidator.
-// No external test framework — returns non-zero on the first failure.
+
 
 #include <cstdio>
 #include <cstdlib>
@@ -37,10 +36,10 @@ static int failures = 0;
 static domain::Rfce makeValidRfce() {
     domain::Rfce r;
     r.encabezado.idDoc.tipoeCF = "32";
-    r.encabezado.idDoc.eNcf = "E320000000001";  // 13 chars
-    r.encabezado.emisor.rncEmisor = "101672919";  // 9 digits
+    r.encabezado.idDoc.eNcf = "E320000000001";
+    r.encabezado.emisor.rncEmisor = "101000021";
     r.encabezado.emisor.razonSocialEmisor = "ACME SRL";
-    r.encabezado.emisor.fechaEmision = "30-06-2026";  // dd-MM-yyyy
+    r.encabezado.emisor.fechaEmision = "30-06-2026";
     r.encabezado.totales.montoGravadoTotal = 1000.00;
     r.encabezado.totales.montoTotal = 1180.00;
     r.encabezado.totales.totalITBIS = 180.00;
@@ -58,40 +57,39 @@ int main() {
 
     {
         auto rfce = makeValidRfce();
-        rfce.encabezado.totales.montoTotal = 2000.00;  // 1000 + 180 != 2000 (BUG-111)
+        rfce.encabezado.totales.montoTotal = 2000.00;
         auto result = validator.validateRfce(rfce);
         CHECK(!result.isValid(), "inconsistent MontoTotal is rejected");
     }
 
     {
         auto rfce = makeValidRfce();
-        rfce.encabezado.emisor.fechaEmision = "31-02-2026";  // invalid calendar date (BUG-111)
+        rfce.encabezado.emisor.fechaEmision = "31-02-2026";
         auto result = validator.validateRfce(rfce);
         CHECK(!result.isValid(), "invalid calendar date (31-02-2026) is rejected");
     }
 
     {
         auto rfce = makeValidRfce();
-        rfce.encabezado.emisor.rncEmisor = "12A45";  // invalid
+        rfce.encabezado.emisor.rncEmisor = "12A45";
         auto result = validator.validateRfce(rfce);
         CHECK(!result.isValid(), "invalid RNC is rejected");
     }
 
     {
         auto rfce = makeValidRfce();
-        rfce.encabezado.idDoc.eNcf = "SHORT";  // not 13 chars
+        rfce.encabezado.idDoc.eNcf = "SHORT";
         auto result = validator.validateRfce(rfce);
         CHECK(!result.isValid(), "wrong-length eNCF is rejected");
     }
 
     {
         auto rfce = makeValidRfce();
-        rfce.encabezado.totales.montoTotal = 300000.0;  // >= 250k threshold
+        rfce.encabezado.totales.montoTotal = 300000.0;
         auto result = validator.validateRfce(rfce);
         CHECK(!result.isValid(), "amount over RFCE threshold is rejected");
     }
 
-    // CertificateExpiryPolicy tests
     {
         auto now = std::chrono::system_clock::now();
         auto okDate = now + std::chrono::hours(35 * 24);
@@ -111,7 +109,6 @@ int main() {
               "Certificate expiry <= 7 days is Critical");
     }
 
-    // TenantSignerResolver tests
     {
         auto defaultSigner = std::make_shared<infra::EcfXmlSigner>();
         infra::TenantSignerResolver resolver("", defaultSigner);
@@ -119,31 +116,27 @@ int main() {
         CHECK(resolver.resolveSigner("") == defaultSigner,
               "TenantSignerResolver falls back to default signer on empty RNC");
 
-        CHECK(resolver.resolveSigner("101672919") == defaultSigner,
+        CHECK(resolver.resolveSigner("101000021") == defaultSigner,
               "TenantSignerResolver falls back to default signer when RNC not found");
 
         CHECK(resolver.resolveTenantSignerOnly("") == nullptr,
               "TenantSignerResolver resolveTenantSignerOnly returns nullptr on empty RNC");
 
-        CHECK(resolver.resolveTenantSignerOnly("101672919") == nullptr,
+        CHECK(resolver.resolveTenantSignerOnly("101000021") == nullptr,
               "TenantSignerResolver resolveTenantSignerOnly returns nullptr when RNC not found");
     }
 
-    // TenantSignerResolver decryptPasswordIfEncrypted tests
     {
-        // 1. Plaintext returns unchanged
+
         CHECK(infra::TenantSignerResolver::decryptPasswordIfEncrypted("PlainTextPass123") == "PlainTextPass123",
               "decryptPasswordIfEncrypted preserves plaintext passwords");
 
-        // 2. Empty string returns empty
         CHECK(infra::TenantSignerResolver::decryptPasswordIfEncrypted("") == "",
               "decryptPasswordIfEncrypted handles empty string");
 
-        // 3. Corrupted enc:v1: does not crash and safely returns empty string
         CHECK(infra::TenantSignerResolver::decryptPasswordIfEncrypted("enc:v1:corrupt:bad") == "",
               "decryptPasswordIfEncrypted safely handles corrupted enc:v1 prefix by returning empty string without throwing");
 
-        // 4. enc:v3: HKDF-SHA256 + AES-256-GCM + AAD round-trip and tenant tamper rejection
 #if defined(_WIN32)
         _putenv_s("JWT_SECRET_KEY", "test-master-secret-key-for-hkdf-v3-validation-012345");
 #else
@@ -195,7 +188,6 @@ int main() {
         }
     }
 
-    // Dominican CA personal Tax-Procedures vs Corporate RNC certificate SN validation tests
     {
         auto buildTestPkcs12 = [](const std::string& issuerOrg,
                                   const std::string& subjectOu,
@@ -245,7 +237,6 @@ int main() {
             return der;
         };
 
-        // Case A: Viafirma / Camara Santo Domingo TAX PROCEDURES personal cedula (11 digits) signing for 9-digit company RNC -> ALLOWED
         auto personalTaxPfx = buildTestPkcs12(
             "CAMARA DE COMERCIO Y PRODUCCION DE SANTO DOMINGO",
             "TAX PROCEDURES",
@@ -255,7 +246,6 @@ int main() {
         CHECK(repSigner.validateCertificateSn("131234567"),
               "Dominican CA personal TAX PROCEDURES certificate (11-digit cedula) is authorized to sign for 9-digit corporate RNC");
 
-        // Case B: Corporate certificate (RNC-101999888) signing for different corporate RNC (131234567) -> REJECTED
         auto corpPfx = buildTestPkcs12(
             "CAMARA DE COMERCIO Y PRODUCCION DE SANTO DOMINGO",
             "PERSONA JURIDICA",
@@ -267,7 +257,6 @@ int main() {
         CHECK(corpSigner.validateCertificateSn("101999888"),
               "Corporate certificate for RNC 101999888 is accepted when signing for matching RNC 101999888");
 
-        // Case C: Non-Dominican CA certificate with 11-digit serial signing for unrelated 9-digit RNC -> REJECTED
         auto untrustedCaPfx = buildTestPkcs12(
             "UNTRUSTED FOREIGN CA INC",
             "TAX PROCEDURES",

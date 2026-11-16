@@ -29,4 +29,4 @@ int DbContext::saveChanges() {
     }
 }
 
-}  // namespace ecf::infra
+}

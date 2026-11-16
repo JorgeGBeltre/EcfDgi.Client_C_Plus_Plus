@@ -1,5 +1,4 @@
 #pragma once
-// Holds the per-environment DGII endpoint base URLs.
 
 #include <string>
 
@@ -26,4 +25,4 @@ struct EcfEnvironmentConfig {
     static EcfEnvironmentConfig getConfig(domain::AmbienteEnum ambiente);
 };
 
-}  // namespace ecf::infra
+}

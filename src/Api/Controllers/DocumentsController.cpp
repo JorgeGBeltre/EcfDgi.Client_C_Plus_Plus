@@ -8,8 +8,10 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <mutex>
 #include <regex>
 #include <sstream>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -107,8 +109,6 @@ void applyCanonicalContent(domain::EcfDocument& doc,
     doc.state = "SequenceAllocated";
 }
 
-
-
 std::string ambienteToString(domain::AmbienteEnum amb) {
     switch (amb) {
         case domain::AmbienteEnum::PreCertificacion: return "PreCertificacion";
@@ -131,24 +131,51 @@ std::shared_ptr<domain::IEcfXmlSigner> resolveSigner(
     if (certDto.has_value() && certDto->certificateBase64.has_value() && !certDto->certificateBase64->empty()) {
         try {
             if (certDto->certificateBase64->size() <= 3 * 1024 * 1024) {
+                std::string pwd = certDto->password.value_or("");
+                std::string fpKey = drogon::utils::getSha256(
+                    tenantId + ":" + rncEmisor + ":" + pwd + ":" + *certDto->certificateBase64);
+                static std::mutex cacheMtx;
+                struct CachedSignerEntry {
+                    std::shared_ptr<domain::IEcfXmlSigner> signer;
+                    std::chrono::steady_clock::time_point expiresAt;
+                };
+                static std::unordered_map<std::string, CachedSignerEntry> pkcs12Cache;
+                auto now = std::chrono::steady_clock::now();
+                {
+                    std::lock_guard<std::mutex> lk(cacheMtx);
+                    auto it = pkcs12Cache.find(fpKey);
+                    if (it != pkcs12Cache.end() && it->second.expiresAt > now) {
+                        return it->second.signer;
+                    }
+                }
+
                 auto rawBytes = drogon::utils::base64Decode(*certDto->certificateBase64);
                 if (rawBytes.size() <= 2 * 1024 * 1024) {
                     std::vector<unsigned char> bytes(rawBytes.begin(), rawBytes.end());
-                    std::string pwd = certDto->password.value_or("");
                     auto loadedSigner = std::make_shared<infra::EcfXmlSigner>(bytes, pwd);
                     if (rncEmisor.empty() || loadedSigner->validateCertificateSn(rncEmisor)) {
+                        std::lock_guard<std::mutex> lk(cacheMtx);
+                        if (pkcs12Cache.size() >= 128) {
+                            for (auto it = pkcs12Cache.begin(); it != pkcs12Cache.end();) {
+                                if (it->second.expiresAt <= now) {
+                                    it = pkcs12Cache.erase(it);
+                                } else {
+                                    ++it;
+                                }
+                            }
+                        }
+                        if (pkcs12Cache.size() < 128) {
+                            pkcs12Cache[fpKey] = CachedSignerEntry{
+                                loadedSigner, now + std::chrono::minutes(15)};
+                        }
                         return loadedSigner;
                     }
                 }
             }
         } catch (...) {
-            // fallback
         }
     }
 
-    // Arbitrary certificatePath from client body is forbidden for security (HIGH-100)
-
-    // Cargar certificado dinámico real desde PostgreSQL (Tenants)
     if (services.tenantSignerResolver() && !rncEmisor.empty()) {
         try {
             auto tenantSigner = services.tenantSignerResolver()->resolveTenantSignerOnly(rncEmisor, tenantId);
@@ -156,11 +183,10 @@ std::shared_ptr<domain::IEcfXmlSigner> resolveSigner(
                 return tenantSigner;
             }
         } catch (...) {
-            // fallback
+
         }
     }
 
-    // Default certificate directory search (strictly sanitized names to prevent path traversal)
     std::string defaultCertDir = "/app/certificates";
     const char* envCertPwd = std::getenv("ECF_CERTIFICATE_PASSWORD");
     std::string defaultCertPwd = envCertPwd ? envCertPwd : "";
@@ -329,9 +355,17 @@ HttpResponsePtr signAndSend(domain::EcfDocument& doc, AppServices::Scope& scope,
                 doc.state = "Signed";
                 doc.sentToDgiiAt = sys::utcNowIso();
 
-                // Status check with DGII in case it was processed synchronously
                 try {
                     auto resultado = client->consultarResultado(*doc.trackId);
+                    std::string estadoCheck = resultado.estado;
+                    while (!estadoCheck.empty() && std::isspace(static_cast<unsigned char>(estadoCheck.front()))) estadoCheck.erase(estadoCheck.begin());
+                    while (!estadoCheck.empty() && std::isspace(static_cast<unsigned char>(estadoCheck.back()))) estadoCheck.pop_back();
+                    std::string lowerCheck = estadoCheck;
+                    std::transform(lowerCheck.begin(), lowerCheck.end(), lowerCheck.begin(), ::tolower);
+                    if (lowerCheck == "en proceso") {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(350));
+                        resultado = client->consultarResultado(*doc.trackId);
+                    }
                     if (!resultado.estado.empty()) {
                         std::string estado = resultado.estado;
                         while (!estado.empty() && std::isspace(static_cast<unsigned char>(estado.front()))) estado.erase(estado.begin());
@@ -343,6 +377,8 @@ HttpResponsePtr signAndSend(domain::EcfDocument& doc, AppServices::Scope& scope,
                         if (lowerEstado == "aceptado" || lowerEstado == "aceptado condicional") {
                             doc.state = "AcceptedByDgii";
                             doc.dgiiResponseXml = "Aceptado por DGII: " + estado;
+                            doc.lastStatusCheckAt = sys::utcNowIso();
+                            doc.statusCheckAttempts = std::max(1, doc.statusCheckAttempts + 1);
                         } else if (lowerEstado == "rechazado") {
                             doc.state = "RejectedByDgii";
                             std::string errors = "Rechazado por DGII";
@@ -354,10 +390,11 @@ HttpResponsePtr signAndSend(domain::EcfDocument& doc, AppServices::Scope& scope,
                                 }
                             }
                             doc.dgiiResponseXml = errors;
+                            doc.lastStatusCheckAt = sys::utcNowIso();
+                            doc.statusCheckAttempts = std::max(1, doc.statusCheckAttempts + 1);
                         }
                     }
                 } catch (...) {
-                    // Immediate check didn't complete; will be polled by background reconciler
                 }
             } else {
                 std::string err = response.error.value_or(response.mensaje.value_or(""));
@@ -378,13 +415,13 @@ HttpResponsePtr signAndSend(domain::EcfDocument& doc, AppServices::Scope& scope,
         scope.docs->update(doc);
         scope.uow->saveChanges();
     } catch (...) {
-        // Fallback: If DB connection dropped during DGII transmission, retry with a fresh scope
+
         try {
             auto retryScope = services.makeScope(nullptr);
             retryScope.docs->update(doc);
             retryScope.uow->saveChanges();
         } catch (...) {
-            // Retain doc in memory so response still carries trackId and status to caller
+
         }
     }
 
@@ -478,7 +515,6 @@ HttpResponsePtr reconcileUncertain(domain::EcfDocument& doc,
         std::string lowerEstado = estadoTrim;
         std::transform(lowerEstado.begin(), lowerEstado.end(), lowerEstado.begin(), ::tolower);
 
-        // Recuperar trackId desde DGII mediante consultarTrackIds si aún no está asignado
         if (!doc.trackId.has_value() || doc.trackId->empty()) {
             try {
                 auto trackDetails = client->consultarTrackIds(doc.rncEmisor, doc.eNcf);
@@ -486,7 +522,7 @@ HttpResponsePtr reconcileUncertain(domain::EcfDocument& doc,
                     doc.trackId = trackDetails.front().trackId;
                 }
             } catch (...) {
-                // Consulta de trackId no disponible; se mantendrá trackId si existía
+
             }
         }
 
@@ -526,7 +562,6 @@ HttpResponsePtr reconcileUncertain(domain::EcfDocument& doc,
         return json(out, k202Accepted);
     }
 
-    // DGII confirms it never received it: treat as never transmitted
     applyCanonicalContent(doc, dto, editSequence, emisorRnc, emisorRazonSocial);
     scope.docs->update(doc);
     scope.uow->saveChanges();
@@ -557,7 +592,20 @@ HttpResponsePtr handleExistingDocument(domain::EcfDocument& existingDoc,
     }
 
     if (existingDoc.state == "RejectedByDgii") {
-        // Re-issuance of rejected e-CF: allocate fresh eNCF and re-transmit
+        auto currInfo = app::resolveCanonicalCurrency(dto.currency);
+        double incomingTotalDop = std::round(dto.totals.montoTotal * currInfo.exchangeRate * 100.0) / 100.0;
+        std::string prevResp = existingDoc.dgiiResponseXml.value_or("");
+        if ((prevResp.find("[615]") != std::string::npos ||
+             prevResp.find("no puede ser mayor al monto total") != std::string::npos) &&
+            std::abs(incomingTotalDop - existingDoc.totalAmount) <= 0.05) {
+            Json::Value rejBody;
+            rejBody["error"] = prevResp;
+            rejBody["documentId"] = existingDoc.id;
+            rejBody["eNcf"] = existingDoc.eNcf;
+            rejBody["state"] = existingDoc.state;
+            return json(rejBody, k400BadRequest);
+        }
+
         std::string sequenceScope = isDefaultFallback ? "default-tenant" : (tenantId + ":" + ambienteToString(ambiente));
         std::string newEncf = services.sequenceManager()->getNextEncf(sequenceScope, dto.tipoComprobante.empty() ? "E31" : dto.tipoComprobante);
         existingDoc.eNcf = newEncf;
@@ -615,7 +663,7 @@ HttpResponsePtr handleExistingDocument(domain::EcfDocument& existingDoc,
     return json(out, statusCode);
 }
 
-} // namespace
+}
 
 bool tryResolveAmbienteEnum(const std::string& rawEnv, domain::AmbienteEnum& outAmb) {
     if (rawEnv.empty()) return false;
@@ -760,7 +808,6 @@ void DocumentsController::submit(const HttpRequestPtr& req,
             }
             dto.tipoComprobante = tipoComprobante;
 
-            // Pre-allocation type-specific validations
             if (tipoComprobante == "E34" || tipoComprobante == "E33") {
                 if (dto.references.correctsENcf.empty()) {
                     cb(json(err("References.CorrectsENcf (NCFModificado) is required for TipoComprobante " + dto.tipoComprobante + "."), k400BadRequest));
@@ -828,7 +875,6 @@ void DocumentsController::submit(const HttpRequestPtr& req,
                 }
             }
 
-            // Validate ITBIS tax buckets
             for (const auto& bucket : dto.totals.taxBuckets) {
                 if (DgiiItbisSlots.find(bucket.rate) == DgiiItbisSlots.end()) {
                     cb(json(err("Tasa(s) de ITBIS sin bucket DGII: " + std::to_string(bucket.rate) + ". Solo se admiten 18, 16, 0 (I1/I2/I3)."), k400BadRequest));
@@ -837,7 +883,7 @@ void DocumentsController::submit(const HttpRequestPtr& req,
             }
 
             std::string emisorRnc = services.emisorOptions().rnc;
-            if (emisorRnc.empty()) emisorRnc = services.ecfClientOptions().rncEmisor.value_or("101672919");
+            if (emisorRnc.empty()) emisorRnc = services.ecfClientOptions().rncEmisor.value_or("101000001");
             std::string emisorRazonSocial = services.emisorOptions().razonSocial;
             if (emisorRazonSocial.empty()) emisorRazonSocial = "EMPRESA EMISORA";
 
@@ -897,7 +943,6 @@ void DocumentsController::submit(const HttpRequestPtr& req,
             std::string editSequence = dto.sourceReference.editSequence;
             std::string ambStr = ambienteToString(ambiente);
 
-            // Check if document for this TxnId has already been processed in this ambiente
             try {
                 auto existing = scope.docs->getBySourceTxnId(effectiveTenantId, dto.sourceReference.txnId, ambStr);
                 if (existing.has_value()) {
@@ -910,7 +955,23 @@ void DocumentsController::submit(const HttpRequestPtr& req,
                 return;
             }
 
-            // Allocate eNCF Sequence
+            if (tipoComprobante == "E34" && !dto.references.correctsENcf.empty()) {
+                try {
+                    auto modDoc = scope.docs->getByENcf(dto.references.correctsENcf);
+                    if (modDoc.has_value() &&
+                        modDoc->rncEmisor == effectiveRnc &&
+                        (!modDoc->ambiente.has_value() || *modDoc->ambiente == ambStr) &&
+                        modDoc->state != "RejectedByDgii" &&
+                        modDoc->totalAmount > 0.0) {
+                        double incomingTotalDop = std::round(dto.totals.montoTotal * currencyRes.exchangeRate * 100.0) / 100.0;
+                        if (incomingTotalDop > modDoc->totalAmount + 0.05) {
+                            cb(json(err("Regla DGII [615]: El monto total de la Nota de Crédito Electrónica no puede ser mayor al monto total del NCF modificado (" + dto.references.correctsENcf + ")."), k400BadRequest));
+                            return;
+                        }
+                    }
+                } catch (...) {}
+            }
+
             std::string eNcf;
             try {
                 eNcf = services.sequenceManager()->getNextEncf(sequenceScope, dto.tipoComprobante);
@@ -933,10 +994,9 @@ void DocumentsController::submit(const HttpRequestPtr& req,
             } catch (const std::exception& ex) {
                 std::string what = ex.what();
                 if (what.find(TenantSourceTxnUniqueConstraint) != std::string::npos || what.find("23505") != std::string::npos) {
-                    // Release the sequence allocated by the loser of the race
+
                     services.sequenceManager()->releaseUnusedEncf(sequenceScope, dto.tipoComprobante, eNcf);
 
-                    // BUG-048: Create a fresh recovery scope to avoid operation pollution from the failed insert
                     auto recoveryScope = services.makeScope(mapping::currentUserFrom(req));
                     auto winner = recoveryScope.docs->getBySourceTxnId(effectiveTenantId, dto.sourceReference.txnId, ambStr);
                     if (winner.has_value()) {
@@ -976,10 +1036,18 @@ void DocumentsController::getBySourceTxnId(const HttpRequestPtr& req,
         if (!hTenant.empty()) tenantId = hTenant;
     }
 
-    std::string envHeader = req->getHeader("X-Environment");
+    std::string envHeader = req->getParameter("environment");
+    if (envHeader.empty()) {
+        envHeader = req->getHeader("X-Environment");
+    }
     std::optional<std::string> ambOpt = std::nullopt;
     if (!envHeader.empty()) {
-        ambOpt = envHeader;
+        domain::AmbienteEnum parsedAmb;
+        if (tryResolveAmbienteEnum(envHeader, parsedAmb)) {
+            ambOpt = ambienteToString(parsedAmb);
+        } else {
+            ambOpt = envHeader;
+        }
     }
 
     try {
@@ -1011,7 +1079,6 @@ void DocumentsController::getBySourceTxnId(const HttpRequestPtr& req,
             return;
         }
 
-        // Si el comprobante sigue en estado no terminal, verificar dinámicamente con DGII
         if (doc->state == "Signed" || doc->state == "SentToDgii" || doc->state == "Processing" || doc->state == "Uncertain" || doc->state == "AwaitingTransmission") {
             try {
                 auto effectiveSigner = resolveSigner(doc->tenantId, doc->rncEmisor, std::nullopt, false, services);
@@ -1050,7 +1117,7 @@ void DocumentsController::getBySourceTxnId(const HttpRequestPtr& req,
                         }
                     }
                 } else if (!doc->eNcf.empty()) {
-                    // BUG-087: Reconciliar documentos sin TrackId (p. ej. falla de BD pos-transmisión)
+
                     try {
                         auto status = client->consultarEstado(doc->rncEmisor, doc->eNcf);
                         std::string estadoTrim = status.estado;
@@ -1084,7 +1151,7 @@ void DocumentsController::getBySourceTxnId(const HttpRequestPtr& req,
                     } catch (...) {}
                 }
             } catch (const std::exception& ex) {
-                // Log and continue, return current DB state
+
             }
         }
 
@@ -1101,6 +1168,8 @@ void DocumentsController::getBySourceTxnId(const HttpRequestPtr& req,
         out["signedXml"] = doc->signedXmlContent.value_or("");
         out["dgiiResponse"] = doc->dgiiResponseXml.value_or("");
         out["dgiiResponseXml"] = doc->dgiiResponseXml.value_or("");
+        out["environment"] = doc->ambiente.value_or("");
+        out["sourceTxnId"] = doc->sourceTxnId.value_or("");
 
         callback(json(out, k200OK));
     } catch (const std::exception& ex) {
@@ -1123,16 +1192,24 @@ void DocumentsController::getXmlBySourceTxnId(const HttpRequestPtr& req,
     if (req->attributes()->find("tenantId")) {
         tenantId = req->attributes()->get<std::string>("tenantId");
     }
-    // Only Worker or SuperAdmin can override tenantId via header
+
     if (isWorkerOrSuperAdmin) {
         std::string hTenant = req->getHeader("X-Tenant-Id");
         if (!hTenant.empty()) tenantId = hTenant;
     }
 
-    std::string envHeader = req->getHeader("X-Environment");
+    std::string envHeader = req->getParameter("environment");
+    if (envHeader.empty()) {
+        envHeader = req->getHeader("X-Environment");
+    }
     std::optional<std::string> ambOpt = std::nullopt;
     if (!envHeader.empty()) {
-        ambOpt = envHeader;
+        domain::AmbienteEnum parsedAmb;
+        if (tryResolveAmbienteEnum(envHeader, parsedAmb)) {
+            ambOpt = ambienteToString(parsedAmb);
+        } else {
+            ambOpt = envHeader;
+        }
     }
 
     try {
@@ -1197,7 +1274,7 @@ void DocumentsController::getXmlById(const HttpRequestPtr& req,
     if (req->attributes()->find("tenantId")) {
         tenantId = req->attributes()->get<std::string>("tenantId");
     }
-    // Only Worker or SuperAdmin can override tenantId via header
+
     if (isWorkerOrSuperAdmin) {
         std::string hTenant = req->getHeader("X-Tenant-Id");
         if (!hTenant.empty()) tenantId = hTenant;
@@ -1307,10 +1384,18 @@ void DocumentsController::reconcileBySourceTxnId(const HttpRequestPtr& req,
         if (!hTenant.empty()) tenantId = hTenant;
     }
 
-    std::string envHeader = req->getHeader("X-Environment");
+    std::string envHeader = req->getParameter("environment");
+    if (envHeader.empty()) {
+        envHeader = req->getHeader("X-Environment");
+    }
     std::optional<std::string> ambOpt = std::nullopt;
     if (!envHeader.empty()) {
-        ambOpt = envHeader;
+        domain::AmbienteEnum parsedAmb;
+        if (tryResolveAmbienteEnum(envHeader, parsedAmb)) {
+            ambOpt = ambienteToString(parsedAmb);
+        } else {
+            ambOpt = envHeader;
+        }
     }
 
     try {
@@ -1342,6 +1427,69 @@ void DocumentsController::reconcileBySourceTxnId(const HttpRequestPtr& req,
             return;
         }
 
+        if (doc->state == "Signed" || doc->state == "SentToDgii" || doc->state == "Processing" || doc->state == "Uncertain" || doc->state == "AwaitingTransmission") {
+            try {
+                auto effectiveSigner = resolveSigner(doc->tenantId, doc->rncEmisor, std::nullopt, false, services);
+                auto defaultAmbiente = services.ecfClientOptions().toAmbiente(services.ecfClientOptions().environment);
+                auto amb = resolveAmbienteEnum(doc->ambiente.value_or(""), defaultAmbiente);
+                auto client = resolveEcfClient(doc->rncEmisor, effectiveSigner, amb, false, services);
+
+                if (doc->trackId.has_value() && !doc->trackId->empty()) {
+                    auto resultado = client->consultarResultado(*doc->trackId);
+                    if (!resultado.estado.empty()) {
+                        std::string estado = resultado.estado;
+                        while (!estado.empty() && std::isspace(static_cast<unsigned char>(estado.front()))) estado.erase(estado.begin());
+                        while (!estado.empty() && std::isspace(static_cast<unsigned char>(estado.back()))) estado.pop_back();
+                        std::string lower = estado;
+                        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+                        if (lower == "aceptado" || lower == "aceptado condicional") {
+                            doc->state = "AcceptedByDgii";
+                            doc->dgiiResponseXml = "Aceptado por DGII: " + estado;
+                            scope.docs->update(*doc);
+                            scope.uow->saveChanges();
+                        } else if (lower == "rechazado") {
+                            doc->state = "RejectedByDgii";
+                            doc->dgiiResponseXml = "Rechazado por DGII: " + estado;
+                            scope.docs->update(*doc);
+                            scope.uow->saveChanges();
+                        }
+                    }
+                } else if (!doc->eNcf.empty()) {
+                    auto status = client->consultarEstado(doc->rncEmisor, doc->eNcf);
+                    std::string estadoTrim = status.estado;
+                    while (!estadoTrim.empty() && std::isspace(static_cast<unsigned char>(estadoTrim.front()))) estadoTrim.erase(estadoTrim.begin());
+                    while (!estadoTrim.empty() && std::isspace(static_cast<unsigned char>(estadoTrim.back()))) estadoTrim.pop_back();
+                    std::string lower = estadoTrim;
+                    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+
+                    if (!lower.empty() && lower != "no encontrado") {
+                        if (lower == "aceptado" || lower == "aceptado condicional") {
+                            doc->state = "AcceptedByDgii";
+                            doc->dgiiResponseXml = "Aceptado por DGII (Reconciliado): " + estadoTrim;
+                        } else if (lower == "rechazado") {
+                            doc->state = "RejectedByDgii";
+                            doc->dgiiResponseXml = "Rechazado por DGII (Reconciliado): " + estadoTrim;
+                        }
+                        scope.docs->update(*doc);
+                        scope.uow->saveChanges();
+                    } else if (doc->state == "Uncertain" &&
+                               lower == "no encontrado" &&
+                               doc->signedXmlContent.has_value() && !doc->signedXmlContent->empty()) {
+                        std::string fileName = doc->rncEmisor + doc->eNcf + ".xml";
+                        auto reResp = client->sendEcf(*doc->signedXmlContent, fileName);
+                        if (!reResp.trackId.empty()) {
+                            doc->trackId = reResp.trackId;
+                            doc->state = "Signed";
+                            doc->sentToDgiiAt = sys::utcNowIso();
+                            doc->dgiiResponseXml = "Retransmitido automáticamente tras estado incierto.";
+                            scope.docs->update(*doc);
+                            scope.uow->saveChanges();
+                        }
+                    }
+                }
+            } catch (...) {}
+        }
+
         Json::Value out;
         out["documentId"] = doc->id;
         if (doc->ncf.has_value()) out["ncf"] = *doc->ncf;
@@ -1355,6 +1503,8 @@ void DocumentsController::reconcileBySourceTxnId(const HttpRequestPtr& req,
         out["signedXml"] = doc->signedXmlContent.value_or("");
         out["dgiiResponse"] = doc->dgiiResponseXml.value_or("");
         out["dgiiResponseXml"] = doc->dgiiResponseXml.value_or("");
+        out["environment"] = doc->ambiente.value_or("");
+        out["sourceTxnId"] = doc->sourceTxnId.value_or("");
         out["reconciled"] = true;
 
         callback(json(out, k200OK));
@@ -1365,4 +1515,4 @@ void DocumentsController::reconcileBySourceTxnId(const HttpRequestPtr& req,
     }
 }
 
-} // namespace ecf::api
+}

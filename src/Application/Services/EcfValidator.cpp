@@ -49,7 +49,7 @@ std::string money2(double v) {
     return std::string(buf);
 }
 
-}  // namespace
+}
 
 bool EcfValidator::isValidRnc(const std::string& rnc) {
     if (rnc.empty()) return false;
@@ -60,8 +60,7 @@ bool EcfValidator::isValidRnc(const std::string& rnc) {
 
 void EcfValidator::validateTotalesConsistency(const RfceTotales& t,
                                               std::vector<std::string>& errors) {
-    // BUG-111: Fundamental consistency: MontoTotal must equal MontoGravadoTotal + TotalITBIS + MontoExento (+ MontoImpuestoAdicional)
-    // Only verify when MontoGravadoTotal is provided or when MontoExento is provided without ITBIS
+
     if (t.montoGravadoTotal.has_value()) {
         double expectedTotal = *t.montoGravadoTotal +
                                t.totalITBIS.value_or(0.0) +
@@ -77,9 +76,6 @@ void EcfValidator::validateTotalesConsistency(const RfceTotales& t,
         }
     }
 
-    // The per-rate breakdown fields are optional. Only cross-check the aggregate
-    // against the breakdown when at least one breakdown component is provided;
-    // a document that carries only the aggregate total is valid on its own.
     if (t.montoGravadoTotal.has_value() &&
         (t.montoGravadoI1.has_value() || t.montoGravadoI2.has_value() ||
          t.montoGravadoI3.has_value())) {
@@ -148,4 +144,4 @@ ValidationResult EcfValidator::validateRfce(const Rfce& rfce) {
     return ValidationResult(std::move(errors));
 }
 
-}  // namespace ecf::app
+}

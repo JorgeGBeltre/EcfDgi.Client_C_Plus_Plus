@@ -43,76 +43,66 @@ static int failures = 0;
 int main() {
     std::printf("Running XSD resolver and validation tests...\n");
 
-    // Test 1: Resolver for e-CF 31
     {
         std::string xml = "<ECF><Encabezado><IdDoc><TipoeCF>31</TipoeCF></IdDoc></Encabezado></ECF>";
         std::string res = ecf::infra::EcfXsdFileNameResolver::resolve(xml);
         CHECK(res == "e-CF 31 v.1.0.xsd", "Resolve e-CF 31");
     }
 
-    // Test 2: Resolver for e-CF 32
     {
         std::string xml = "<ECF><Encabezado><IdDoc><TipoeCF>32</TipoeCF></IdDoc></Encabezado></ECF>";
         std::string res = ecf::infra::EcfXsdFileNameResolver::resolve(xml);
         CHECK(res == "e-CF 32 v.1.0.xsd", "Resolve e-CF 32");
     }
 
-    // Test 3: Resolver for e-CF 34
     {
         std::string xml = "<ECF><Encabezado><IdDoc><TipoeCF>34</TipoeCF></IdDoc></Encabezado></ECF>";
         std::string res = ecf::infra::EcfXsdFileNameResolver::resolve(xml);
         CHECK(res == "e-CF 34 v.1.0.xsd", "Resolve e-CF 34");
     }
 
-    // Test 4: Resolver for e-CF 41
     {
         std::string xml = "<ECF><Encabezado><IdDoc><TipoeCF>41</TipoeCF></IdDoc></Encabezado></ECF>";
         std::string res = ecf::infra::EcfXsdFileNameResolver::resolve(xml);
         CHECK(res == "e-CF 41 v.1.0.xsd", "Resolve e-CF 41");
     }
 
-    // Test 5: Resolver for e-CF 47
     {
         std::string xml = "<ECF><Encabezado><IdDoc><TipoeCF>47</TipoeCF></IdDoc></Encabezado></ECF>";
         std::string res = ecf::infra::EcfXsdFileNameResolver::resolve(xml);
         CHECK(res == "e-CF 47 v.1.0.xsd", "Resolve e-CF 47");
     }
 
-    // Test 6: Resolver for ARECF
     {
         std::string xml = "<ARECF><DetalleAcusedeRecibo></DetalleAcusedeRecibo></ARECF>";
         std::string res = ecf::infra::EcfXsdFileNameResolver::resolve(xml);
         CHECK(res == "ARECF v1.0.xsd", "Resolve ARECF");
     }
 
-    // Test 7: Fallback XML Signer generates valid XMLDSig
     {
-        ecf::infra::EcfXmlSigner signer; // Uses fallback cert in memory
+        ecf::infra::EcfXmlSigner signer;
         CHECK(signer.usesFallbackCertificate(), "Fallback signer indicates usesFallbackCertificate is true");
 
         std::string sampleXml = "<?xml version=\"1.0\" encoding=\"utf-8\"?><ECF><Encabezado><IdDoc><TipoeCF>31</TipoeCF><eNCF>E310000000001</eNCF></IdDoc></Encabezado></ECF>";
-        std::string signedXml = signer.signXml(sampleXml, "101672919");
+        std::string signedXml = signer.signXml(sampleXml, "101000021");
         CHECK(signedXml.find("Signature") != std::string::npos, "Signed XML contains Signature");
         CHECK(signedXml.find("SignatureValue") != std::string::npos, "Signed XML contains SignatureValue");
 
-        // Test 8: Security Code extraction (first 6 chars of Base64 SignatureValue per DGII standard)
         std::string sigVal = signer.extractSignatureValue(signedXml);
         std::string secCode = ecf::infra::EcfSecurityUtils::calcularCodigoSeguridad(signedXml);
         CHECK(secCode.length() == 6, "Security code length is 6 characters");
         CHECK(secCode == sigVal.substr(0, 6), "Security code matches exactly first 6 chars of SignatureValue");
     }
 
-    // Test 9: Schema Validator caching
     {
         std::string xsdDir = resolveXsdDir();
         ecf::infra::EcfSchemaValidator validator(xsdDir);
-        // Validating an empty XML against invalid schema returns invalid with clear errors
+
         auto res = validator.validate("<InvalidDoc/>", xsdDir + "/e-CF 31 v.1.0.xsd");
         CHECK(!res.isValid, "Malformed document fails XSD validation");
         CHECK(!res.errors.empty(), "XSD validation failure provides error descriptions");
     }
 
-    // Test 9b: Schema Validator Fail-Closed behavior (BUG-077)
     {
         ecf::infra::EcfSchemaValidator emptyValidator("");
         auto res1 = emptyValidator.validate("<ECF><Encabezado><IdDoc><TipoeCF>31</TipoeCF></IdDoc></Encabezado></ECF>");
@@ -126,11 +116,10 @@ int main() {
         CHECK(!res2.errors.empty(), "Unresolved schema provides error description");
     }
 
-    // Test 10: Timbre URL Spelling Parity (codigoseguridad, not codigoseuridad)
     {
         ecf::domain::TimbreEcfRequest ecfReq;
-        ecfReq.rncEmisor = "101672919";
-        ecfReq.rncComprador = "101889063";
+        ecfReq.rncEmisor = "101000021";
+        ecfReq.rncComprador = "101000001";
         ecfReq.eNcf = "E310000000001";
         ecfReq.fechaEmision = "10-10-2020";
         ecfReq.montoTotal = 100.50;
@@ -138,7 +127,7 @@ int main() {
         ecfReq.codigoSeguridad = "abcd12";
 
         ecf::domain::TimbreFcRequest fcReq;
-        fcReq.rncEmisor = "101672919";
+        fcReq.rncEmisor = "101000021";
         fcReq.eNcf = "E320000000001";
         fcReq.montoTotal = 100.50;
         fcReq.codigoSeguridad = "abcd12";
@@ -152,7 +141,6 @@ int main() {
         CHECK(fcUrl.find("codigoseuridad=") == std::string::npos, "fcUrl does not contain codigoseuridad=");
     }
 
-    // Test 11: RFCE Serialization, CodigoSeguridadeCF placement, and Schema Validation
     {
         ecf::domain::Rfce rfce;
         rfce.encabezado.version = "1.0";
@@ -160,11 +148,11 @@ int main() {
         rfce.encabezado.idDoc.eNcf = "E320000000001";
         rfce.encabezado.idDoc.tipoIngresos = 1;
         rfce.encabezado.idDoc.tipoPago = 1;
-        rfce.encabezado.emisor.rncEmisor = "101672919";
-        rfce.encabezado.emisor.razonSocialEmisor = "WILLY CHIC DOMINICANA SRL";
+        rfce.encabezado.emisor.rncEmisor = "101000021";
+        rfce.encabezado.emisor.razonSocialEmisor = "EMPRESA DEMO SRL";
         rfce.encabezado.emisor.fechaEmision = "10-10-2020";
         ecf::domain::RfceComprador comp;
-        comp.rncComprador = "101889063";
+        comp.rncComprador = "101000001";
         comp.razonSocialComprador = "Cliente Test";
         rfce.encabezado.comprador = comp;
         rfce.encabezado.totales.montoTotal = 100.50;
@@ -174,26 +162,22 @@ int main() {
         ecf::infra::EcfXmlSerializer serializer;
         std::string xml = serializer.serialize(rfce);
 
-        // Assert tag casing parity with C# RfceSerializationTests
         CHECK(xml.find("<Version>1.0</Version>") != std::string::npos, "RFCE XML has <Version>1.0</Version>");
         CHECK(xml.find("<eNCF>E320000000001</eNCF>") != std::string::npos, "RFCE XML has <eNCF>");
-        CHECK(xml.find("<RNCEmisor>101672919</RNCEmisor>") != std::string::npos, "RFCE XML has <RNCEmisor>");
-        CHECK(xml.find("<RNCComprador>101889063</RNCComprador>") != std::string::npos, "RFCE XML has <RNCComprador>");
+        CHECK(xml.find("<RNCEmisor>101000021</RNCEmisor>") != std::string::npos, "RFCE XML has <RNCEmisor>");
+        CHECK(xml.find("<RNCComprador>101000001</RNCComprador>") != std::string::npos, "RFCE XML has <RNCComprador>");
         CHECK(xml.find("<CodigoSeguridadeCF>ABCD12</CodigoSeguridadeCF>") != std::string::npos, "RFCE XML has <CodigoSeguridadeCF>");
 
-        // Verify CodigoSeguridadeCF is child of Encabezado, after </Totales>
         auto idxSecCode = xml.find("<CodigoSeguridadeCF>");
         auto idxTotales = xml.find("</Totales>");
         auto idxEnc = xml.find("</Encabezado>");
         CHECK(idxTotales != std::string::npos && idxSecCode > idxTotales, "CodigoSeguridadeCF is placed after </Totales>");
         CHECK(idxEnc != std::string::npos && idxSecCode < idxEnc, "CodigoSeguridadeCF is placed before </Encabezado>");
 
-        // Sign XML with fallback signer
         ecf::infra::EcfXmlSigner signer;
-        std::string signedXml = signer.signXml(xml, "101672919");
+        std::string signedXml = signer.signXml(xml, "101000021");
         CHECK(signedXml.find("Signature") != std::string::npos, "Signed RFCE XML contains Signature");
 
-        // Validate against RFCE 32 v.1.0.xsd
         std::string xsdDir = resolveXsdDir();
         ecf::infra::EcfSchemaValidator validator(xsdDir);
         auto res = validator.validate(signedXml, xsdDir + "/RFCE 32 v.1.0.xsd");
@@ -205,10 +189,9 @@ int main() {
         CHECK(res.isValid, "Signed RFCE validates against RFCE 32 v.1.0.xsd");
     }
 
-    // Test 12: Certificate validation with self-signed bypass and Dominican RNC
     {
         ecf::infra::EcfXmlSigner signer;
-        CHECK(signer.validateCertificateSn("101672919"), "Fallback cert passes self-signed validation");
+        CHECK(signer.validateCertificateSn("101000021"), "Fallback cert passes self-signed validation");
         CHECK(signer.validateCertificateSn("131-23456-7"), "Fallback cert passes formatted RNC");
     }
 
@@ -229,12 +212,11 @@ int main() {
         return res.isValid;
     };
 
-    // Test 13: Tipo 31 (Factura de Crédito Fiscal) - Normalization of ISO Date & XSD validation
     {
         ecf::app::CanonicalDocumentDto dto;
         dto.tipoComprobante = "E31";
-        dto.header.rncEmisor = "101889063";
-        dto.header.razonSocialEmisor = "Willy Chic";
+        dto.header.rncEmisor = "101000001";
+        dto.header.razonSocialEmisor = "Empresa Demo";
         dto.header.rncComprador = "130000000";
         dto.header.razonSocialComprador = "Cliente de Prueba";
         dto.header.fechaEmision = "2026-08-06";
@@ -249,17 +231,16 @@ int main() {
         line.amount = 100.0;
         dto.lines.push_back(line);
 
-        std::string xml = ecf::app::buildXmlFromCanonical(dto, "E310000000801", "101889063", "Willy Chic");
+        std::string xml = ecf::app::buildXmlFromCanonical(dto, "E310000000801", "101000001", "Empresa Demo");
         CHECK(xml.find("<FechaEmision>06-08-2026</FechaEmision>") != std::string::npos, "Tipo 31 ISO date converted to dd-MM-yyyy");
-        signAndCheck(xml, "101889063", "e-CF 31 v.1.0.xsd", "Tipo 31 generated XML is valid against e-CF 31 XSD");
+        signAndCheck(xml, "101000001", "e-CF 31 v.1.0.xsd", "Tipo 31 generated XML is valid against e-CF 31 XSD");
     }
 
-    // Test 14: Tipo 31 with Exempt and Taxed lines
     {
         ecf::app::CanonicalDocumentDto dto;
         dto.tipoComprobante = "E31";
-        dto.header.rncEmisor = "101889063";
-        dto.header.razonSocialEmisor = "Willy Chic";
+        dto.header.rncEmisor = "101000001";
+        dto.header.razonSocialEmisor = "Empresa Demo";
         dto.header.rncComprador = "130000000";
         dto.header.razonSocialComprador = "Cliente de Prueba";
         dto.totals.montoSubtotal = 100.0;
@@ -281,18 +262,17 @@ int main() {
         l1.amount = 50.0;
         dto.lines.push_back(l1);
 
-        std::string xml = ecf::app::buildXmlFromCanonical(dto, "E310000000802", "101889063", "Willy Chic");
+        std::string xml = ecf::app::buildXmlFromCanonical(dto, "E310000000802", "101000001", "Empresa Demo");
         CHECK(xml.find("<MontoExento>50.00</MontoExento>") != std::string::npos, "Tipo 31 includes MontoExento");
-        signAndCheck(xml, "101889063", "e-CF 31 v.1.0.xsd", "Tipo 31 with exempt lines is valid against e-CF 31 XSD");
+        signAndCheck(xml, "101000001", "e-CF 31 v.1.0.xsd", "Tipo 31 with exempt lines is valid against e-CF 31 XSD");
     }
 
-    // Test 15: Tipo 32 (Factura de Consumo) - Buyer present
     {
         ecf::app::CanonicalDocumentDto dto;
         dto.tipoComprobante = "E32";
-        dto.header.rncEmisor = "101889063";
-        dto.header.razonSocialEmisor = "Willy Chic";
-        dto.header.rncComprador = "101889063";
+        dto.header.rncEmisor = "101000001";
+        dto.header.razonSocialEmisor = "Empresa Demo";
+        dto.header.rncComprador = "101000001";
         dto.header.razonSocialComprador = "Juan Pérez Consumidor";
         dto.totals.montoSubtotal = 500.0;
         dto.totals.montoGravadoTotal = 500.0;
@@ -312,18 +292,17 @@ int main() {
         l1.amount = 500.0;
         dto.lines.push_back(l1);
 
-        std::string xml = ecf::app::buildXmlFromCanonical(dto, "E320000000101", "101889063", "Willy Chic");
+        std::string xml = ecf::app::buildXmlFromCanonical(dto, "E320000000101", "101000001", "Empresa Demo");
         CHECK(xml.find("<TipoeCF>32</TipoeCF>") != std::string::npos, "Tipo 32 XML has TipoeCF 32");
         CHECK(xml.find("<FechaVencimientoSecuencia>") == std::string::npos, "Tipo 32 omits FechaVencimientoSecuencia");
-        signAndCheck(xml, "101889063", "e-CF 32 v.1.0.xsd", "Tipo 32 is valid against e-CF 32 XSD");
+        signAndCheck(xml, "101000001", "e-CF 32 v.1.0.xsd", "Tipo 32 is valid against e-CF 32 XSD");
     }
 
-    // Test 16: Tipo 32 with No Buyer Data At All
     {
         ecf::app::CanonicalDocumentDto dto;
         dto.tipoComprobante = "E32";
-        dto.header.rncEmisor = "101889063";
-        dto.header.razonSocialEmisor = "Willy Chic";
+        dto.header.rncEmisor = "101000001";
+        dto.header.razonSocialEmisor = "Empresa Demo";
         dto.totals.montoSubtotal = 100.0;
         dto.totals.montoGravadoTotal = 100.0;
         dto.totals.montoItbis = 18.0;
@@ -336,17 +315,16 @@ int main() {
         l1.amount = 100.0;
         dto.lines.push_back(l1);
 
-        std::string xml = ecf::app::buildXmlFromCanonical(dto, "E320000000102", "101889063", "Willy Chic");
+        std::string xml = ecf::app::buildXmlFromCanonical(dto, "E320000000102", "101000001", "Empresa Demo");
         CHECK(xml.find("<RazonSocialComprador>Consumidor Final</RazonSocialComprador>") != std::string::npos, "Tipo 32 without buyer sets Consumidor Final");
-        signAndCheck(xml, "101889063", "e-CF 32 v.1.0.xsd", "Tipo 32 with no buyer is valid against e-CF 32 XSD");
+        signAndCheck(xml, "101000001", "e-CF 32 v.1.0.xsd", "Tipo 32 with no buyer is valid against e-CF 32 XSD");
     }
 
-    // Test 17: Tipo 33 (Nota de Débito)
     {
         ecf::app::CanonicalDocumentDto dto;
         dto.tipoComprobante = "E33";
-        dto.header.rncEmisor = "101889063";
-        dto.header.razonSocialEmisor = "Willy Chic";
+        dto.header.rncEmisor = "101000001";
+        dto.header.razonSocialEmisor = "Empresa Demo";
         dto.header.rncComprador = "130000000";
         dto.header.razonSocialComprador = "Cliente de Prueba";
         dto.totals.montoSubtotal = 100.0;
@@ -364,18 +342,17 @@ int main() {
         l1.amount = 100.0;
         dto.lines.push_back(l1);
 
-        std::string xml = ecf::app::buildXmlFromCanonical(dto, "E330000000801", "101889063", "Willy Chic");
+        std::string xml = ecf::app::buildXmlFromCanonical(dto, "E330000000801", "101000001", "Empresa Demo");
         CHECK(xml.find("<TipoeCF>33</TipoeCF>") != std::string::npos, "Tipo 33 has TipoeCF 33");
         CHECK(xml.find("<NCFModificado>E310000000801</NCFModificado>") != std::string::npos, "Tipo 33 has NCFModificado");
-        signAndCheck(xml, "101889063", "e-CF 33 v.1.0.xsd", "Tipo 33 is valid against e-CF 33 XSD");
+        signAndCheck(xml, "101000001", "e-CF 33 v.1.0.xsd", "Tipo 33 is valid against e-CF 33 XSD");
     }
 
-    // Test 18: Tipo 34 (Nota de Crédito)
     {
         ecf::app::CanonicalDocumentDto dto;
         dto.tipoComprobante = "E34";
-        dto.header.rncEmisor = "101889063";
-        dto.header.razonSocialEmisor = "Willy Chic";
+        dto.header.rncEmisor = "101000001";
+        dto.header.razonSocialEmisor = "Empresa Demo";
         dto.header.rncComprador = "130000000";
         dto.header.razonSocialComprador = "Cliente de Prueba";
         dto.totals.montoSubtotal = 100.0;
@@ -393,18 +370,17 @@ int main() {
         l1.amount = 100.0;
         dto.lines.push_back(l1);
 
-        std::string xml = ecf::app::buildXmlFromCanonical(dto, "E340000000801", "101889063", "Willy Chic");
+        std::string xml = ecf::app::buildXmlFromCanonical(dto, "E340000000801", "101000001", "Empresa Demo");
         CHECK(xml.find("<IndicadorNotaCredito>0</IndicadorNotaCredito>") != std::string::npos, "Tipo 34 has IndicadorNotaCredito");
         CHECK(xml.find("<NCFModificado>E310000000801</NCFModificado>") != std::string::npos, "Tipo 34 has NCFModificado");
-        signAndCheck(xml, "101889063", "e-CF 34 v.1.0.xsd", "Tipo 34 is valid against e-CF 34 XSD");
+        signAndCheck(xml, "101000001", "e-CF 34 v.1.0.xsd", "Tipo 34 is valid against e-CF 34 XSD");
     }
 
-    // Test 19: Tipo 41 (Compras con Retención)
     {
         ecf::app::CanonicalDocumentDto dto;
         dto.tipoComprobante = "E41";
-        dto.header.rncEmisor = "101889063";
-        dto.header.razonSocialEmisor = "Willy Chic";
+        dto.header.rncEmisor = "101000001";
+        dto.header.razonSocialEmisor = "Empresa Demo";
         dto.header.rncComprador = "130000000";
         dto.header.razonSocialComprador = "Proveedor Informal";
         dto.totals.montoSubtotal = 1000.0;
@@ -424,18 +400,17 @@ int main() {
         l1.amount = 1000.0;
         dto.lines.push_back(l1);
 
-        std::string xml = ecf::app::buildXmlFromCanonical(dto, "E410000000801", "101889063", "Willy Chic");
+        std::string xml = ecf::app::buildXmlFromCanonical(dto, "E410000000801", "101000001", "Empresa Demo");
         CHECK(xml.find("<TotalITBISRetenido>180.00</TotalITBISRetenido>") != std::string::npos, "Tipo 41 has TotalITBISRetenido");
         CHECK(xml.find("<TotalISRRetencion>100.00</TotalISRRetencion>") != std::string::npos, "Tipo 41 has TotalISRRetencion");
-        signAndCheck(xml, "101889063", "e-CF 41 v.1.0.xsd", "Tipo 41 is valid against e-CF 41 XSD");
+        signAndCheck(xml, "101000001", "e-CF 41 v.1.0.xsd", "Tipo 41 is valid against e-CF 41 XSD");
     }
 
-    // Test 20: Tipo 43 (Gastos Menores)
     {
         ecf::app::CanonicalDocumentDto dto;
         dto.tipoComprobante = "E43";
-        dto.header.rncEmisor = "101889063";
-        dto.header.razonSocialEmisor = "Willy Chic";
+        dto.header.rncEmisor = "101000001";
+        dto.header.razonSocialEmisor = "Empresa Demo";
         dto.totals.montoSubtotal = 500.0;
         dto.totals.montoItbis = 0.0;
         dto.totals.montoTotal = 500.0;
@@ -447,19 +422,18 @@ int main() {
         l1.amount = 500.0;
         dto.lines.push_back(l1);
 
-        std::string xml = ecf::app::buildXmlFromCanonical(dto, "E430000000801", "101889063", "Willy Chic");
+        std::string xml = ecf::app::buildXmlFromCanonical(dto, "E430000000801", "101000001", "Empresa Demo");
         CHECK(xml.find("<Comprador>") == std::string::npos, "Tipo 43 does not contain Comprador");
         CHECK(xml.find("<TipoIngresos>") == std::string::npos, "Tipo 43 does not contain TipoIngresos");
         CHECK(xml.find("<MontoExento>500.00</MontoExento>") != std::string::npos, "Tipo 43 has MontoExento");
-        signAndCheck(xml, "101889063", "e-CF 43 v.1.0.xsd", "Tipo 43 is valid against e-CF 43 XSD");
+        signAndCheck(xml, "101000001", "e-CF 43 v.1.0.xsd", "Tipo 43 is valid against e-CF 43 XSD");
     }
 
-    // Test 21: Tipo 44 (Regímenes Especiales)
     {
         ecf::app::CanonicalDocumentDto dto;
         dto.tipoComprobante = "E44";
-        dto.header.rncEmisor = "101889063";
-        dto.header.razonSocialEmisor = "Willy Chic";
+        dto.header.rncEmisor = "101000001";
+        dto.header.razonSocialEmisor = "Empresa Demo";
         dto.header.rncComprador = "130000000";
         dto.header.razonSocialComprador = "Zona Franca del Norte SAS";
         dto.totals.montoSubtotal = 1000.0;
@@ -473,19 +447,18 @@ int main() {
         l1.amount = 1000.0;
         dto.lines.push_back(l1);
 
-        std::string xml = ecf::app::buildXmlFromCanonical(dto, "E440000000801", "101889063", "Willy Chic");
+        std::string xml = ecf::app::buildXmlFromCanonical(dto, "E440000000801", "101000001", "Empresa Demo");
         CHECK(xml.find("<Comprador>") != std::string::npos, "Tipo 44 contains Comprador");
         CHECK(xml.find("<MontoExento>1000.00</MontoExento>") != std::string::npos, "Tipo 44 has MontoExento");
         CHECK(xml.find("<TotalITBIS>") == std::string::npos, "Tipo 44 does not contain TotalITBIS");
-        signAndCheck(xml, "101889063", "e-CF 44 v.1.0.xsd", "Tipo 44 is valid against e-CF 44 XSD");
+        signAndCheck(xml, "101000001", "e-CF 44 v.1.0.xsd", "Tipo 44 is valid against e-CF 44 XSD");
     }
 
-    // Test 22: Tipo 45 (Gubernamental)
     {
         ecf::app::CanonicalDocumentDto dto;
         dto.tipoComprobante = "E45";
-        dto.header.rncEmisor = "101889063";
-        dto.header.razonSocialEmisor = "Willy Chic";
+        dto.header.rncEmisor = "101000001";
+        dto.header.razonSocialEmisor = "Empresa Demo";
         dto.header.rncComprador = "401007421";
         dto.header.razonSocialComprador = "Ministerio de Hacienda";
         dto.totals.montoSubtotal = 1000.0;
@@ -499,19 +472,18 @@ int main() {
         l1.amount = 1000.0;
         dto.lines.push_back(l1);
 
-        std::string xml = ecf::app::buildXmlFromCanonical(dto, "E450000000801", "101889063", "Willy Chic");
+        std::string xml = ecf::app::buildXmlFromCanonical(dto, "E450000000801", "101000001", "Empresa Demo");
         CHECK(xml.find("<RNCComprador>401007421</RNCComprador>") != std::string::npos, "Tipo 45 has RNCComprador");
         CHECK(xml.find("<MontoGravadoTotal>1000.00</MontoGravadoTotal>") != std::string::npos, "Tipo 45 has MontoGravadoTotal");
         CHECK(xml.find("<TotalITBIS>180.00</TotalITBIS>") != std::string::npos, "Tipo 45 has TotalITBIS");
-        signAndCheck(xml, "101889063", "e-CF 45 v.1.0.xsd", "Tipo 45 is valid against e-CF 45 XSD");
+        signAndCheck(xml, "101000001", "e-CF 45 v.1.0.xsd", "Tipo 45 is valid against e-CF 45 XSD");
     }
 
-    // Test 23: Tipo 46 (Exportaciones)
     {
         ecf::app::CanonicalDocumentDto dto;
         dto.tipoComprobante = "E46";
-        dto.header.rncEmisor = "101889063";
-        dto.header.razonSocialEmisor = "Willy Chic";
+        dto.header.rncEmisor = "101000001";
+        dto.header.razonSocialEmisor = "Empresa Demo";
         dto.header.rncComprador = "US-987654321";
         dto.header.razonSocialComprador = "Miami Apparel Imports LLC";
         dto.totals.montoSubtotal = 2500.0;
@@ -525,19 +497,18 @@ int main() {
         l1.amount = 2500.0;
         dto.lines.push_back(l1);
 
-        std::string xml = ecf::app::buildXmlFromCanonical(dto, "E460000000801", "101889063", "Willy Chic");
+        std::string xml = ecf::app::buildXmlFromCanonical(dto, "E460000000801", "101000001", "Empresa Demo");
         CHECK(xml.find("<IdentificadorExtranjero>US-987654321</IdentificadorExtranjero>") != std::string::npos, "Tipo 46 has IdentificadorExtranjero");
         CHECK(xml.find("<MontoGravadoI3>2500.00</MontoGravadoI3>") != std::string::npos, "Tipo 46 has MontoGravadoI3");
         CHECK(xml.find("<ITBIS3>0</ITBIS3>") != std::string::npos, "Tipo 46 has ITBIS3 0");
-        signAndCheck(xml, "101889063", "e-CF 46 v.1.0.xsd", "Tipo 46 is valid against e-CF 46 XSD");
+        signAndCheck(xml, "101000001", "e-CF 46 v.1.0.xsd", "Tipo 46 is valid against e-CF 46 XSD");
     }
 
-    // Test 24: Tipo 47 (Pagos al Exterior)
     {
         ecf::app::CanonicalDocumentDto dto;
         dto.tipoComprobante = "E47";
-        dto.header.rncEmisor = "101889063";
-        dto.header.razonSocialEmisor = "Willy Chic";
+        dto.header.rncEmisor = "101000001";
+        dto.header.razonSocialEmisor = "Empresa Demo";
         dto.header.rncComprador = "DE-123456789";
         dto.header.razonSocialComprador = "Software Cloud GmbH";
         dto.totals.montoSubtotal = 3000.0;
@@ -556,22 +527,21 @@ int main() {
         l1.amount = 3000.0;
         dto.lines.push_back(l1);
 
-        std::string xml = ecf::app::buildXmlFromCanonical(dto, "E470000000801", "101889063", "Willy Chic");
+        std::string xml = ecf::app::buildXmlFromCanonical(dto, "E470000000801", "101000001", "Empresa Demo");
         CHECK(xml.find("<IdentificadorExtranjero>DE-123456789</IdentificadorExtranjero>") != std::string::npos, "Tipo 47 has IdentificadorExtranjero");
         CHECK(xml.find("<TotalISRRetencion>300.00</TotalISRRetencion>") != std::string::npos, "Tipo 47 has TotalISRRetencion");
         CHECK(xml.find("<MontoISRRetenido>300.00</MontoISRRetenido>") != std::string::npos, "Tipo 47 has MontoISRRetenido");
         CHECK(xml.find("<TotalITBIS>") == std::string::npos, "Tipo 47 does not have TotalITBIS");
-        signAndCheck(xml, "101889063", "e-CF 47 v.1.0.xsd", "Tipo 47 is valid against e-CF 47 XSD");
+        signAndCheck(xml, "101000001", "e-CF 47 v.1.0.xsd", "Tipo 47 is valid against e-CF 47 XSD");
     }
 
-    // Test 25: ARECF (Acuse de Recibo) Schema Validation
     {
         std::string unsignedArecf =
             "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
             "<ARECF>\n"
             "  <DetalleAcusedeRecibo>\n"
             "    <Version>1.0</Version>\n"
-            "    <RNCEmisor>101889063</RNCEmisor>\n"
+            "    <RNCEmisor>101000001</RNCEmisor>\n"
             "    <RNCComprador>130000000</RNCComprador>\n"
             "    <eNCF>E310000000801</eNCF>\n"
             "    <Estado>0</Estado>\n"
@@ -582,13 +552,12 @@ int main() {
         signAndCheck(unsignedArecf, "130000000", "ARECF v1.0.xsd", "ARECF generated XML is valid against ARECF XSD");
     }
 
-    // Test 26: Multi-Tenant RNC and Razon Social Isolation
     {
         ecf::app::CanonicalDocumentDto dto;
         dto.tipoComprobante = "E31";
         dto.header.rncEmisor = "131888999";
         dto.header.razonSocialEmisor = "Tenant B Corp";
-        dto.header.rncComprador = "101889063";
+        dto.header.rncComprador = "101000001";
         dto.header.razonSocialComprador = "Cliente Tenant";
         dto.totals.montoSubtotal = 200.0;
         dto.totals.montoItbis = 36.0;
@@ -602,21 +571,19 @@ int main() {
         l1.amount = 200.0;
         dto.lines.push_back(l1);
 
-        // Effective RNC and RazonSocial must match the tenant, NOT the default host
         std::string xml = ecf::app::buildXmlFromCanonical(dto, "E310000000999", "131888999", "Tenant B Corp");
         CHECK(xml.find("<RNCEmisor>131888999</RNCEmisor>") != std::string::npos, "Multi-tenant XML has Tenant RNCEmisor");
         CHECK(xml.find("<RazonSocialEmisor>Tenant B Corp</RazonSocialEmisor>") != std::string::npos, "Multi-tenant XML has Tenant RazonSocialEmisor");
-        CHECK(xml.find("Willy Chic") == std::string::npos, "Multi-tenant XML does not leak default host name");
+        CHECK(xml.find("Empresa Demo") == std::string::npos, "Multi-tenant XML does not leak default host name");
         signAndCheck(xml, "131888999", "e-CF 31 v.1.0.xsd", "Multi-tenant isolated XML is valid against e-CF 31 XSD");
     }
 
-    // Test 27: Tipo 46 without buyer RNC passes XSD validation with EXTRANJERO fallback
     {
         ecf::app::CanonicalDocumentDto dto;
         dto.tipoComprobante = "E46";
-        dto.header.rncEmisor = "101889063";
-        dto.header.razonSocialEmisor = "Willy Chic";
-        dto.header.rncComprador = ""; // No Dominican RNC
+        dto.header.rncEmisor = "101000001";
+        dto.header.razonSocialEmisor = "Empresa Demo";
+        dto.header.rncComprador = "";
         dto.header.razonSocialComprador = "Foreign Client Corp";
         dto.totals.montoSubtotal = 500.0;
         dto.totals.montoItbis = 0.0;
@@ -629,20 +596,19 @@ int main() {
         l1.amount = 500.0;
         dto.lines.push_back(l1);
 
-        std::string xml = ecf::app::buildXmlFromCanonical(dto, "E460000000028", "101889063", "Willy Chic");
+        std::string xml = ecf::app::buildXmlFromCanonical(dto, "E460000000028", "101000001", "Empresa Demo");
         CHECK(xml.find("<IdentificadorExtranjero>EXTRANJERO</IdentificadorExtranjero>") != std::string::npos,
               "Tipo 46 without buyer RNC generates IdentificadorExtranjero EXTRANJERO");
         CHECK(xml.find("<RNCComprador>") == std::string::npos,
               "Tipo 46 without buyer RNC does not generate RNCComprador");
-        signAndCheck(xml, "101889063", "e-CF 46 v.1.0.xsd", "Tipo 46 with EXTRANJERO fallback passes XSD");
+        signAndCheck(xml, "101000001", "e-CF 46 v.1.0.xsd", "Tipo 46 with EXTRANJERO fallback passes XSD");
     }
 
-    // Test 24: BUG-078 - Deserializers reject empty or non-conforming XML responses
     {
         ecf::infra::EcfXmlSerializer serializer;
         bool threwRecepcion = false;
         try {
-            // Well-formed XML without trackId or error (e.g. WAF, proxy, or foreign endpoint)
+
             std::string foreignXml = "<ProblemDetails><Status>502</Status><Title>Bad Gateway</Title></ProblemDetails>";
             serializer.deserializeEcfRecepcion(foreignXml);
         } catch (const ecf::domain::EcfException&) {
@@ -667,19 +633,17 @@ int main() {
         CHECK(errorRecepcion, "deserializeEcfRecepcion accepts XML with error field");
     }
 
-    // Test 28: OtraMoneda (USD) XSD validation across E31, E32, E34, E41, E43, E46, E47 & DOP computed totals
     {
         ecf::app::CanonicalCurrencyDto usd;
-        usd.code = "US$"; // Alias normalized to USD
+        usd.code = "US$";
         usd.exchangeRate = 60.50;
 
-        // 28a: E31 in USD
         {
             ecf::app::CanonicalDocumentDto dto;
             dto.tipoComprobante = "E31";
             dto.currency = usd;
-            dto.header.rncEmisor = "101889063";
-            dto.header.razonSocialEmisor = "Willy Chic";
+            dto.header.rncEmisor = "101000001";
+            dto.header.razonSocialEmisor = "Empresa Demo";
             dto.header.rncComprador = "130000000";
             dto.header.razonSocialComprador = "Cliente USD SRL";
             dto.totals.montoSubtotal = 100.0;
@@ -695,7 +659,7 @@ int main() {
             dto.lines.push_back(l1);
 
             double totalDop = 0.0, itbisDop = 0.0;
-            std::string xml = ecf::app::buildXmlFromCanonical(dto, "E310000000901", "101889063", "Willy Chic", totalDop, itbisDop);
+            std::string xml = ecf::app::buildXmlFromCanonical(dto, "E310000000901", "101000001", "Empresa Demo", totalDop, itbisDop);
             CHECK(xml.find("<TipoMoneda>USD</TipoMoneda>") != std::string::npos, "E31 USD has TipoMoneda USD");
             CHECK(xml.find("<TipoCambio>60.50</TipoCambio>") != std::string::npos, "E31 USD has TipoCambio 60.50");
             CHECK(xml.find("<OtraMonedaDetalle>") != std::string::npos, "E31 USD has OtraMonedaDetalle");
@@ -703,10 +667,9 @@ int main() {
             CHECK(xml.find("<MontoItemOtraMoneda>100.00</MontoItemOtraMoneda>") != std::string::npos, "E31 USD has MontoItemOtraMoneda 100.00");
             CHECK(xml.find("<MontoTotalOtraMoneda>118.00</MontoTotalOtraMoneda>") != std::string::npos, "E31 USD has MontoTotalOtraMoneda 118.00");
             CHECK(totalDop == 7139.00 && itbisDop == 1089.00, "E31 USD computes exact DOP total (7139.00) and ITBIS (1089.00)");
-            signAndCheck(xml, "101889063", "e-CF 31 v.1.0.xsd", "E31 USD passes DGII XSD validation");
+            signAndCheck(xml, "101000001", "e-CF 31 v.1.0.xsd", "E31 USD passes DGII XSD validation");
         }
 
-        // 28b: E32, E34, E41, E43, E46, E47 in USD
         {
             ecf::app::CanonicalDocumentDto dto32;
             dto32.tipoComprobante = "E32";
@@ -717,8 +680,8 @@ int main() {
             ecf::app::CanonicalLineDto l;
             l.lineNumber = 1; l.itemName = "Prod USD"; l.quantity = 1.0; l.unitPrice = 50.0; l.amount = 50.0;
             dto32.lines.push_back(l);
-            signAndCheck(ecf::app::buildXmlFromCanonical(dto32, "E320000000901", "101889063", "Willy Chic"),
-                         "101889063", "e-CF 32 v.1.0.xsd", "E32 USD passes DGII XSD validation");
+            signAndCheck(ecf::app::buildXmlFromCanonical(dto32, "E320000000901", "101000001", "Empresa Demo"),
+                         "101000001", "e-CF 32 v.1.0.xsd", "E32 USD passes DGII XSD validation");
 
             ecf::app::CanonicalDocumentDto dto34 = dto32;
             dto34.tipoComprobante = "E34";
@@ -727,8 +690,8 @@ int main() {
             dto34.references.correctsENcf = "E310000000901";
             dto34.references.codigoModificacion = 1;
             dto34.references.fechaNcfModificado = "2026-08-06";
-            signAndCheck(ecf::app::buildXmlFromCanonical(dto34, "E340000000901", "101889063", "Willy Chic"),
-                         "101889063", "e-CF 34 v.1.0.xsd", "E34 USD passes DGII XSD validation");
+            signAndCheck(ecf::app::buildXmlFromCanonical(dto34, "E340000000901", "101000001", "Empresa Demo"),
+                         "101000001", "e-CF 34 v.1.0.xsd", "E34 USD passes DGII XSD validation");
 
             ecf::app::CanonicalDocumentDto dto41 = dto32;
             dto41.tipoComprobante = "E41";
@@ -739,8 +702,8 @@ int main() {
             ret41.montoItbisRetenido = 9.0;
             ret41.montoIsrRetenido = 5.0;
             dto41.retention = ret41;
-            signAndCheck(ecf::app::buildXmlFromCanonical(dto41, "E410000000901", "101889063", "Willy Chic"),
-                         "101889063", "e-CF 41 v.1.0.xsd", "E41 USD passes DGII XSD validation");
+            signAndCheck(ecf::app::buildXmlFromCanonical(dto41, "E410000000901", "101000001", "Empresa Demo"),
+                         "101000001", "e-CF 41 v.1.0.xsd", "E41 USD passes DGII XSD validation");
 
             ecf::app::CanonicalDocumentDto dto43;
             dto43.tipoComprobante = "E43";
@@ -750,8 +713,8 @@ int main() {
             dto43.lines.push_back(l);
             dto43.lines[0].unitPrice = 20.0;
             dto43.lines[0].amount = 20.0;
-            signAndCheck(ecf::app::buildXmlFromCanonical(dto43, "E430000000901", "101889063", "Willy Chic"),
-                         "101889063", "e-CF 43 v.1.0.xsd", "E43 USD passes DGII XSD validation");
+            signAndCheck(ecf::app::buildXmlFromCanonical(dto43, "E430000000901", "101000001", "Empresa Demo"),
+                         "101000001", "e-CF 43 v.1.0.xsd", "E43 USD passes DGII XSD validation");
 
             ecf::app::CanonicalDocumentDto dto46;
             dto46.tipoComprobante = "E46";
@@ -762,8 +725,8 @@ int main() {
             dto46.lines.push_back(l);
             dto46.lines[0].unitPrice = 500.0;
             dto46.lines[0].amount = 500.0;
-            signAndCheck(ecf::app::buildXmlFromCanonical(dto46, "E460000000901", "101889063", "Willy Chic"),
-                         "101889063", "e-CF 46 v.1.0.xsd", "E46 USD passes DGII XSD validation");
+            signAndCheck(ecf::app::buildXmlFromCanonical(dto46, "E460000000901", "101000001", "Empresa Demo"),
+                         "101000001", "e-CF 46 v.1.0.xsd", "E46 USD passes DGII XSD validation");
 
             ecf::app::CanonicalDocumentDto dto47 = dto46;
             dto47.tipoComprobante = "E47";
@@ -771,14 +734,13 @@ int main() {
             ret47.indicadorAgenteRetencionoPercepcion = 1;
             ret47.montoIsrRetenido = 135.0;
             dto47.retention = ret47;
-            signAndCheck(ecf::app::buildXmlFromCanonical(dto47, "E470000000901", "101889063", "Willy Chic"),
-                         "101889063", "e-CF 47 v.1.0.xsd", "E47 USD passes DGII XSD validation");
+            signAndCheck(ecf::app::buildXmlFromCanonical(dto47, "E470000000901", "101000001", "Empresa Demo"),
+                         "101000001", "e-CF 47 v.1.0.xsd", "E47 USD passes DGII XSD validation");
         }
     }
 
-    // Test 29: E34 modifying E43/B13 (Gastos Menores), E46/B16 (Exportación), and 100% exempt E31
     {
-        // 29a: E34 modifying B13 (Serie B Gastos Menores)
+
         ecf::app::CanonicalDocumentDto dtoB13;
         dtoB13.tipoComprobante = "E34";
         dtoB13.totals.montoSubtotal = 300.0;
@@ -792,14 +754,13 @@ int main() {
         l.lineNumber = 1; l.itemName = "Anulacion gasto menor"; l.quantity = 1.0; l.unitPrice = 300.0; l.amount = 300.0;
         dtoB13.lines.push_back(l);
 
-        std::string xmlB13 = ecf::app::buildXmlFromCanonical(dtoB13, "E340000000910", "101889063", "Willy Chic");
+        std::string xmlB13 = ecf::app::buildXmlFromCanonical(dtoB13, "E340000000910", "101000001", "Empresa Demo");
         CHECK(xmlB13.find("<Comprador>") == std::string::npos, "E34 modifying B13 omits <Comprador>");
         CHECK(xmlB13.find("<TipoIngresos>") == std::string::npos, "E34 modifying B13 omits <TipoIngresos>");
         CHECK(xmlB13.find("<IndicadorMontoGravado>") == std::string::npos, "E34 modifying B13 omits <IndicadorMontoGravado>");
         CHECK(xmlB13.find("<MontoExento>300.00</MontoExento>") != std::string::npos, "E34 modifying B13 emits MontoExento");
-        signAndCheck(xmlB13, "101889063", "e-CF 34 v.1.0.xsd", "E34 modifying B13 passes DGII XSD validation");
+        signAndCheck(xmlB13, "101000001", "e-CF 34 v.1.0.xsd", "E34 modifying B13 passes DGII XSD validation");
 
-        // 29b: E34 modifying E46 (Exportaciones)
         ecf::app::CanonicalDocumentDto dtoE46;
         dtoE46.tipoComprobante = "E34";
         dtoE46.header.razonSocialComprador = "Foreign Export Client";
@@ -811,15 +772,14 @@ int main() {
         l.unitPrice = 1000.0; l.amount = 1000.0;
         dtoE46.lines.push_back(l);
 
-        std::string xmlE46 = ecf::app::buildXmlFromCanonical(dtoE46, "E340000000911", "101889063", "Willy Chic");
+        std::string xmlE46 = ecf::app::buildXmlFromCanonical(dtoE46, "E340000000911", "101000001", "Empresa Demo");
         CHECK(xmlE46.find("<IdentificadorExtranjero>EXTRANJERO</IdentificadorExtranjero>") != std::string::npos,
               "E34 modifying E46 emits EXTRANJERO fallback when foreign buyer has no RNC");
         CHECK(xmlE46.find("<IndicadorFacturacion>3</IndicadorFacturacion>") != std::string::npos,
               "E34 modifying E46 uses IndicadorFacturacion 3 (0% export)");
-        signAndCheck(xmlE46, "101889063", "e-CF 34 v.1.0.xsd", "E34 modifying E46 passes DGII XSD validation");
+        signAndCheck(xmlE46, "101000001", "e-CF 34 v.1.0.xsd", "E34 modifying E46 passes DGII XSD validation");
     }
 
-    // Test 30: Pre-folded 4-decimal gross UnitPrice cuadratura & Rule [613] reference stripping
     {
         ecf::app::CanonicalDocumentDto dto;
         dto.tipoComprobante = "E31";
@@ -829,7 +789,7 @@ int main() {
         dto.totals.montoGravadoTotal = 90.0;
         dto.totals.montoItbis = 16.20;
         dto.totals.montoTotal = 106.20;
-        // Accidental non-contingency reference on E31 must be stripped per Rule [613]
+
         dto.references.correctsENcf = "E310000000001";
         dto.references.codigoModificacion = 1;
 
@@ -837,28 +797,27 @@ int main() {
         l.lineNumber = 1;
         l.itemName = "Lote 3 unidades con descuento plegado";
         l.quantity = 3.0;
-        l.unitPrice = 30.0;     // Net price after folding 10.00 discount into 100.00 gross -> gross price 33.3333
+        l.unitPrice = 30.0;
         l.discountAmount = 10.0;
         l.amount = 90.0;
         dto.lines.push_back(l);
 
-        std::string xml = ecf::app::buildXmlFromCanonical(dto, "E310000000920", "101889063", "Willy Chic");
+        std::string xml = ecf::app::buildXmlFromCanonical(dto, "E310000000920", "101000001", "Empresa Demo");
         CHECK(xml.find("<PrecioUnitarioItem>33.3333</PrecioUnitarioItem>") != std::string::npos,
               "Pre-folded line reconstructs 4-decimal gross PrecioUnitarioItem 33.3333");
         CHECK(xml.find("<DescuentoMonto>10.00</DescuentoMonto>") != std::string::npos,
               "Pre-folded line emits DescuentoMonto 10.00");
         CHECK(xml.find("<InformacionReferencia>") == std::string::npos,
               "Rule [613]: E31 with CodigoModificacion=1 strips InformacionReferencia");
-        signAndCheck(xml, "101889063", "e-CF 31 v.1.0.xsd", "Pre-folded 4-decimal discount E31 passes DGII XSD validation");
+        signAndCheck(xml, "101000001", "e-CF 31 v.1.0.xsd", "Pre-folded 4-decimal discount E31 passes DGII XSD validation");
 
-        // Contingency replacement (CodigoModificacion = 4) on E31 MUST emit InformacionReferencia
-        dto.references.correctsENcf = "0100000009"; // 10-digit legacy normalized to B0100000009
+        dto.references.correctsENcf = "0100000009";
         dto.references.codigoModificacion = 4;
         dto.references.fechaNcfModificado = "2026-08-05";
-        std::string xmlContingency = ecf::app::buildXmlFromCanonical(dto, "E310000000921", "101889063", "Willy Chic");
+        std::string xmlContingency = ecf::app::buildXmlFromCanonical(dto, "E310000000921", "101000001", "Empresa Demo");
         CHECK(xmlContingency.find("<NCFModificado>B0100000009</NCFModificado>") != std::string::npos,
               "Rule [613]: E31 with CodigoModificacion=4 preserves normalized Serie B NCFModificado");
-        signAndCheck(xmlContingency, "101889063", "e-CF 31 v.1.0.xsd", "Contingency replacement E31 passes DGII XSD validation");
+        signAndCheck(xmlContingency, "101000001", "e-CF 31 v.1.0.xsd", "Contingency replacement E31 passes DGII XSD validation");
     }
 
     if (failures == 0) {

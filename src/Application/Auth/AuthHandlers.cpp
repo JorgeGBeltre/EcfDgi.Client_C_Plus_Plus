@@ -22,7 +22,6 @@ ResultT<AuthResponseDto> RegisterUserCommandHandler::handle(const RegisterUserCo
     userRepo_->add(user);
     uow_->saveChanges();
 
-    // Re-read to obtain the persisted id for the token subject.
     auto persisted = userRepo_->getByUsername(cmd.username).value_or(user);
 
     AuthResponseDto dto;
@@ -47,4 +46,4 @@ ResultT<AuthResponseDto> LoginUserCommandHandler::handle(const LoginUserCommand&
     return ResultT<AuthResponseDto>::Success(std::move(dto));
 }
 
-}  // namespace ecf::app
+}

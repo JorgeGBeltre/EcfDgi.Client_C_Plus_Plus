@@ -12,11 +12,11 @@ namespace {
 CustomerDto toDto(const domain::Customer& c) {
     return CustomerDto{c.id, c.name, c.email, c.rnc};
 }
-}  // namespace
+}
 
 ResultT<std::string> CreateCustomerCommandHandler::handle(const CreateCustomerCommand& cmd) {
     domain::Customer customer;
-    // Generate the id up front so the repository persists it and we can return it.
+
     customer.id = sys::newUuid();
     customer.name = cmd.name;
     customer.email = cmd.email;
@@ -63,4 +63,4 @@ ResultT<CustomerDto> GetCustomerByIdQueryHandler::handle(const GetCustomerByIdQu
     return ResultT<CustomerDto>::Success(toDto(*c));
 }
 
-}  // namespace ecf::app
+}

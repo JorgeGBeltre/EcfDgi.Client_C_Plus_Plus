@@ -34,4 +34,4 @@ public:
                 std::string id);
 };
 
-}  // namespace ecf::api
+}

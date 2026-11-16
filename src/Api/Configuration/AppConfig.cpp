@@ -56,7 +56,7 @@ static std::string normalizePostgresConnectionString(const std::string& input) {
     return out.empty() ? input : out;
 }
 
-}  // namespace
+}
 
 AppConfig AppConfig::load(const std::string& path) {
     std::ifstream f(path);
@@ -79,7 +79,6 @@ AppConfig AppConfig::load(const std::string& path) {
         cfg.redisConnectionString = getStr(j["ConnectionStrings"], "Redis");
     }
 
-    // Allow the connection strings to be overridden via environment variables.
     if (const char* env = std::getenv("ConnectionStrings__DefaultConnection"))
         cfg.connectionString = env;
     else if (const char* envDb = std::getenv("DATABASE_URL"))
@@ -162,7 +161,6 @@ AppConfig AppConfig::load(const std::string& path) {
             cfg.statusPollingOptions.maxPollingWindowHours = s["MaxPollingWindowHours"].get<int>();
     }
 
-    // Support env overrides
     if (const char* envRnc = std::getenv("ECF_EMISOR_RNC")) {
         cfg.emisorOptions.rnc = envRnc;
         cfg.ecfOptions.rncEmisor = envRnc;
@@ -177,14 +175,12 @@ AppConfig AppConfig::load(const std::string& path) {
         cfg.ecfOptions.xsdDirectoryPath = envXsd2;
     }
 
-    // BUG-077: Fallback predeterminado para asegurar validación XSD activa en contenedor Docker (fail-closed)
     if (!cfg.ecfOptions.xsdDirectoryPath.has_value() || cfg.ecfOptions.xsdDirectoryPath->empty()) {
         cfg.ecfOptions.xsdDirectoryPath = "/app/Documentación Técnica (XSD)";
     }
 
     if (const char* envSchema = std::getenv("SCHEMA_PATH")) cfg.schemaPath = envSchema;
 
-    // Parse Worker configurations
     cfg.workerKeyId = getStr(j, "WorkerKeyId", cfg.workerKeyId);
     cfg.workerSecretKey = getStr(j, "WorkerSecretKey", cfg.workerSecretKey);
     if (j.contains("WorkerApiKey")) {
@@ -201,4 +197,4 @@ AppConfig AppConfig::load(const std::string& path) {
     return cfg;
 }
 
-}  // namespace ecf::api
+}

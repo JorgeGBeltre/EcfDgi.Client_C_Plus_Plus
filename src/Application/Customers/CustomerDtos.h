@@ -1,5 +1,4 @@
 #pragma once
-// Ports of the Customer commands/queries + CustomerDto.
 
 #include <string>
 
@@ -35,4 +34,4 @@ struct GetCustomerByIdQuery {
 
 struct GetAllCustomersQuery {};
 
-}  // namespace ecf::app
+}

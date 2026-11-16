@@ -1,6 +1,4 @@
 #pragma once
-// Conversions between domain models/DTOs and jsoncpp (Drogon's JSON type),
-// plus a helper to build a CurrentUserService from a request's JWT claims.
 
 #include <memory>
 
@@ -31,4 +29,4 @@ app::CanonicalDocumentDto canonicalDocumentFromJson(const Json::Value& j);
 std::shared_ptr<domain::ICurrentUserService> currentUserFrom(
     const drogon::HttpRequestPtr& req);
 
-}  // namespace ecf::api::mapping
+}

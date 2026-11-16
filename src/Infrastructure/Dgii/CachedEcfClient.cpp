@@ -68,7 +68,7 @@ std::vector<DirectorioContribuyente> CachedEcfClient::consultarDirectorio() {
 
     auto result = innerClient_->consultarDirectorio();
     if (!result.empty()) {
-        cacheService_->setObject(cacheKey, result, std::chrono::seconds(86400));  // Cache for 24 hours
+        cacheService_->setObject(cacheKey, result, std::chrono::seconds(86400));
     }
     return result;
 }
@@ -84,7 +84,7 @@ DirectorioContribuyente CachedEcfClient::consultarDirectorioPorRnc(const std::st
 
     auto result = innerClient_->consultarDirectorioPorRnc(rnc);
     if (!result.rnc.empty()) {
-        cacheService_->setObject(cacheKey, result, std::chrono::seconds(86400));  // Cache for 24 hours
+        cacheService_->setObject(cacheKey, result, std::chrono::seconds(86400));
     }
     return result;
 }
@@ -100,7 +100,7 @@ std::vector<EstatusServicio> CachedEcfClient::consultarEstatusServicios() {
 
     auto result = innerClient_->consultarEstatusServicios();
     if (!result.empty()) {
-        cacheService_->setObject(cacheKey, result, std::chrono::seconds(300));  // Cache for 5 minutes
+        cacheService_->setObject(cacheKey, result, std::chrono::seconds(300));
     }
     return result;
 }
@@ -116,7 +116,7 @@ std::vector<VentanaMantenimiento> CachedEcfClient::consultarVentanasMantenimient
 
     auto result = innerClient_->consultarVentanasMantenimiento();
     if (!result.empty()) {
-        cacheService_->setObject(cacheKey, result, std::chrono::seconds(3600));  // Cache for 1 hour
+        cacheService_->setObject(cacheKey, result, std::chrono::seconds(3600));
     }
     return result;
 }
@@ -134,4 +134,4 @@ AprobacionComercialResponse CachedEcfClient::sendAprobacionComercial(
     return innerClient_->sendAprobacionComercial(xmlContent, fileName);
 }
 
-}  // namespace ecf::infra
+}

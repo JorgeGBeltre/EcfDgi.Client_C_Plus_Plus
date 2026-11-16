@@ -27,7 +27,7 @@ public:
 
     void submit(const drogon::HttpRequestPtr& req,
                 std::function<void(const drogon::HttpResponsePtr&)>&& callback);
-                
+
     void getBySourceTxnId(const drogon::HttpRequestPtr& req,
                           std::function<void(const drogon::HttpResponsePtr&)>&& callback,
                           std::string txnId);
@@ -49,4 +49,4 @@ public:
                  std::string id);
 };
 
-} // namespace ecf::api
+}

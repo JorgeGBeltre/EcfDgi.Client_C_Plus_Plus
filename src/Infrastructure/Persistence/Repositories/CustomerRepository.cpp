@@ -55,7 +55,7 @@ void CustomerRepository::update(const Customer& customer) {
 }
 
 void CustomerRepository::remove(const Customer& customer) {
-    // Soft delete: mark the row deleted instead of removing it.
+
     const std::string id = customer.id;
     const std::string at = sys::utcNowIso();
     const std::string by = db_->auditUsername();
@@ -67,4 +67,4 @@ void CustomerRepository::remove(const Customer& customer) {
     });
 }
 
-}  // namespace ecf::infra
+}

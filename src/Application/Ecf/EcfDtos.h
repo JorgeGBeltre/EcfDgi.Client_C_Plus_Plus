@@ -1,5 +1,4 @@
 #pragma once
-// Ports of the Ecf commands/queries.
 
 #include <optional>
 #include <string>
@@ -27,4 +26,4 @@ struct GetEcfStatusQuery {
     std::string eNcf;
 };
 
-}  // namespace ecf::app
+}

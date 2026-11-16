@@ -28,4 +28,4 @@ bool PasswordHasher::verifyPassword(const std::string& password,
                                     password.size()) == 0;
 }
 
-}  // namespace ecf::infra
+}

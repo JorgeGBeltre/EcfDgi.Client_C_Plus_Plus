@@ -1,5 +1,4 @@
 #pragma once
-// Ports of RegisterUserCommandHandler and LoginUserCommandHandler.
 
 #include <memory>
 
@@ -48,4 +47,4 @@ private:
     std::shared_ptr<domain::ITokenService> tokenService_;
 };
 
-}  // namespace ecf::app
+}

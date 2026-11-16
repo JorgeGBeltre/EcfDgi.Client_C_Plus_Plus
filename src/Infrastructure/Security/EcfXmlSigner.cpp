@@ -39,7 +39,6 @@ using domain::EcfSigningException;
 
 namespace {
 
-// One-time initialisation of libxml2 + xmlsec (+ the OpenSSL engine).
 void ensureXmlSecInit() {
     static std::once_flag flag;
     static bool ok = false;
@@ -163,7 +162,7 @@ std::vector<unsigned char> generateSelfSignedPfx(const std::string& password) {
     if (!ctx) {
         throw std::runtime_error("Fallo al crear contexto de clave RSA.");
     }
-    
+
     if (EVP_PKEY_keygen_init(ctx) <= 0 ||
         EVP_PKEY_CTX_set_rsa_keygen_bits(ctx, 2048) <= 0 ||
         EVP_PKEY_keygen(ctx, &pkey) <= 0) {
@@ -178,28 +177,28 @@ std::vector<unsigned char> generateSelfSignedPfx(const std::string& password) {
         throw std::runtime_error("Fallo al instanciar certificado X509.");
     }
 
-    X509_set_version(cert, 2); // v3
+    X509_set_version(cert, 2);
     ASN1_INTEGER_set(X509_get_serialNumber(cert), 1);
-    X509_gmtime_adj(X509_get_notBefore(cert), -86400); // 1 day ago
-    X509_gmtime_adj(X509_get_notAfter(cert), 365LL * 5 * 86400); // 5 years
+    X509_gmtime_adj(X509_get_notBefore(cert), -86400);
+    X509_gmtime_adj(X509_get_notAfter(cert), 365LL * 5 * 86400);
     X509_set_pubkey(cert, pkey);
 
     X509_NAME* name = X509_get_subject_name(cert);
     if (!name ||
-        X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, (const unsigned char*)"CN=101889063", -1, -1, 0) <= 0 ||
-        X509_NAME_add_entry_by_txt(name, "O", MBSTRING_ASC, (const unsigned char*)"WILLY CHIC DOMINICANA SRL", -1, -1, 0) <= 0 ||
+        X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, (const unsigned char*)"FALLBACK", -1, -1, 0) <= 0 ||
+        X509_NAME_add_entry_by_txt(name, "O", MBSTRING_ASC, (const unsigned char*)"FALLBACK CERTIFICATE", -1, -1, 0) <= 0 ||
         X509_NAME_add_entry_by_txt(name, "C", MBSTRING_ASC, (const unsigned char*)"DO", -1, -1, 0) <= 0 ||
         X509_set_issuer_name(cert, name) <= 0 ||
         X509_sign(cert, pkey, EVP_sha256()) <= 0) {
-        
+
         X509_free(cert);
         EVP_PKEY_free(pkey);
         throw std::runtime_error("Fallo al rellenar o firmar certificado X509.");
     }
 
     p12 = PKCS12_create(
-        const_cast<char*>(password.c_str()), // password
-        const_cast<char*>("EcfTestCert"),    // friendlyName
+        const_cast<char*>(password.c_str()),
+        const_cast<char*>("EcfTestCert"),
         pkey,
         cert,
         nullptr, 0, 0, 0, 0, 0
@@ -232,7 +231,7 @@ std::vector<unsigned char> generateSelfSignedPfx(const std::string& password) {
     return pfxBytes;
 }
 
-}  // namespace
+}
 
 EcfXmlSigner::EcfXmlSigner() : EcfXmlSigner("", "") {}
 
@@ -258,7 +257,7 @@ EcfXmlSigner::EcfXmlSigner(const std::vector<unsigned char>& pfxBytes, const std
 EcfXmlSigner::EcfXmlSigner(const std::string& pfxPath, const std::string& pfxPassword)
     : pfxPassword_(pfxPassword) {
     ensureXmlSecInit();
-    
+
     bool useSelfSigned = pfxPath.empty();
     if (!useSelfSigned) {
         std::ifstream f(pfxPath, std::ios::binary);
@@ -308,7 +307,6 @@ bool EcfXmlSigner::validateCertificateSn(const std::string& rncOCedula) const {
     std::string subjectUpper = toUpper(certSubject_);
     std::string issuerUpper = toUpper(certIssuer_);
 
-    // 2. Exact 9-11 digit identifier match in Subject or SAN (never Issuer)
     static const std::regex kDigitRunRegex(R"((\d{9,11}))");
     for (std::sregex_iterator it(certSubject_.begin(), certSubject_.end(), kDigitRunRegex), end; it != end; ++it) {
         if ((*it)[1].str() == cleanSn) {
@@ -323,7 +321,6 @@ bool EcfXmlSigner::validateCertificateSn(const std::string& rncOCedula) const {
         }
     }
 
-    // 3. Qualified Natural Person / Tax Procedures delegation under Dominican CA (Norma 06-2018 / Ley 32-23)
     bool isTaxProcedures = (subjectUpper.find("TAX PROCEDURES") != std::string::npos ||
                             subjectUpper.find("PROCEDIMIENTOS TRIBUTARIOS") != std::string::npos);
     bool isNaturalPerson = (subjectUpper.find("NATURAL PERSON") != std::string::npos ||
@@ -336,7 +333,7 @@ bool EcfXmlSigner::validateCertificateSn(const std::string& rncOCedula) const {
                           issuerUpper.find("OPTIC") != std::string::npos);
 
     if ((isTaxProcedures || isNaturalPerson) && isDominicanCa) {
-        // Reject if Subject carries an explicit corporate 9-digit RNC belonging to a DIFFERENT company
+
         static const std::regex kCorpRncRegex(R"((?:VATDO|RNC)[-:\s=]?(\d{9})(?!\d))");
         bool hasExplicitOtherCorporateRnc = false;
         for (std::sregex_iterator it(subjectUpper.begin(), subjectUpper.end(), kCorpRncRegex), end; it != end; ++it) {
@@ -385,12 +382,11 @@ std::string EcfXmlSigner::signXml(const std::string& xmlContent,
     std::string result;
 
     try {
-        // <Signature> template: Exclusive C14N + RSA-SHA256.
+
         signNode = xmlSecTmplSignatureCreate(doc, xmlSecTransformExclC14NId,
                                              xmlSecTransformRsaSha256Id, nullptr);
         if (!signNode) throw EcfSigningException("No se pudo crear la plantilla de firma.");
 
-        // Enveloped signature over the whole document (URI="").
         xmlNodePtr refNode = xmlSecTmplSignatureAddReference(
             signNode, xmlSecTransformSha256Id, nullptr,
             reinterpret_cast<const xmlChar*>(""), nullptr);
@@ -400,15 +396,12 @@ std::string EcfXmlSigner::signXml(const std::string& xmlContent,
         if (!xmlSecTmplReferenceAddTransform(refNode, xmlSecTransformExclC14NId))
             throw EcfSigningException("No se pudo agregar la transformación ExcC14N.");
 
-        // KeyInfo/X509Data so the certificate travels with the signature.
         xmlNodePtr keyInfoNode = xmlSecTmplSignatureEnsureKeyInfo(signNode, nullptr);
         if (!keyInfoNode || !xmlSecTmplKeyInfoAddX509Data(keyInfoNode))
             throw EcfSigningException("No se pudo agregar KeyInfo/X509Data.");
 
-        // Append template to the document root => enveloped.
         xmlAddChild(xmlDocGetRootElement(doc), signNode);
 
-        // Load the signing key + certificate from the in-memory PKCS#12.
         key = xmlSecCryptoAppKeyLoadMemory(
             pfxBytes_.data(), pfxBytes_.size(), xmlSecKeyDataFormatPkcs12,
             pfxPassword_.c_str(), nullptr, nullptr);
@@ -417,7 +410,7 @@ std::string EcfXmlSigner::signXml(const std::string& xmlContent,
         dsigCtx = xmlSecDSigCtxCreate(nullptr);
         if (!dsigCtx) throw EcfSigningException("No se pudo crear el contexto de firma.");
         dsigCtx->signKey = key;
-        key = nullptr;  // owned by dsigCtx now
+        key = nullptr;
 
         if (xmlSecDSigCtxSign(dsigCtx, signNode) < 0)
             throw EcfSigningException("Fallo al calcular la firma digital.");
@@ -466,7 +459,6 @@ std::string EcfXmlSigner::extractSignatureValue(const std::string& signedXml) {
     if (ctx) xmlXPathFreeContext(ctx);
     xmlFreeDoc(doc);
 
-    // trim
     size_t a = value.find_first_not_of(" \t\r\n");
     size_t b = value.find_last_not_of(" \t\r\n");
     if (a == std::string::npos)
@@ -475,4 +467,4 @@ std::string EcfXmlSigner::extractSignatureValue(const std::string& signedXml) {
     return value.substr(a, b - a + 1);
 }
 
-}  // namespace ecf::infra
+}

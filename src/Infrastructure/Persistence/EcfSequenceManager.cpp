@@ -12,16 +12,15 @@ std::string EcfSequenceManager::getNextEncf(const std::string& tenantId, const s
     pqxx::connection conn(connectionString_);
     pqxx::work w(conn);
 
-    // Fetch existing sequence record with FOR UPDATE lock to avoid race conditions
     pqxx::result r = w.exec_params(
-        "SELECT " + std::string(ecfSequenceColumns()) + 
+        "SELECT " + std::string(ecfSequenceColumns()) +
         " FROM ecf_sequences WHERE tenant_id = $1 AND tipo_comprobante = $2 AND is_active = true FOR UPDATE",
         tenantId, tipoComprobante
     );
 
     domain::EcfSequence seq;
     if (r.empty()) {
-        // Fallback check between PreCertificacion and TestEcf, or Certificacion and CertEcf
+
         auto endsWithNoCase = [](const std::string& str, const std::string& suffix) {
             if (str.size() < suffix.size()) return false;
             return std::equal(suffix.rbegin(), suffix.rend(), str.rbegin(),
@@ -46,7 +45,7 @@ std::string EcfSequenceManager::getNextEncf(const std::string& tenantId, const s
 
         if (!altTenantId.empty()) {
             pqxx::result r_alt = w.exec_params(
-                "SELECT " + std::string(ecfSequenceColumns()) + 
+                "SELECT " + std::string(ecfSequenceColumns()) +
                 " FROM ecf_sequences WHERE tenant_id = $1 AND tipo_comprobante = $2 AND is_active = true FOR UPDATE",
                 altTenantId, tipoComprobante
             );
@@ -59,7 +58,7 @@ std::string EcfSequenceManager::getNextEncf(const std::string& tenantId, const s
     }
 
     if (seq.id == 0 && r.empty()) {
-        throw std::runtime_error("No existe un rango de secuencias eNCF activo y autorizado para el tipo '" + 
+        throw std::runtime_error("No existe un rango de secuencias eNCF activo y autorizado para el tipo '" +
                                  tipoComprobante + "' en el ámbito '" + tenantId + "'. Debe registrar el rango otorgado por la DGII antes de emitir.");
     } else if (seq.id == 0 && !r.empty()) {
         seq = mapEcfSequence(r[0]);
@@ -127,8 +126,8 @@ void EcfSequenceManager::releaseUnusedEncf(const std::string& tenantId, const st
         }
         w.commit();
     } catch (...) {
-        // Best-effort release to avoid leaving unused sequence gaps
+
     }
 }
 
-} // namespace ecf::infra
+}

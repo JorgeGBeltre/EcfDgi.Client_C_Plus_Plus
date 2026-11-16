@@ -27,16 +27,16 @@ inline IdempotencyStatus idempotencyStatusFromString(const std::string& s) {
 }
 
 struct EcfIdempotencyRecord {
-    std::string key; // Format: tenant_id:idempotency_key
+    std::string key;
     std::string createdByWorkerKeyId;
     std::string payloadHash;
     IdempotencyStatus status = IdempotencyStatus::Processing;
     int statusCode = 0;
     std::string contentType = "application/json";
     std::string responseBody;
-    std::string createdAt; // ISO-8601 UTC
-    std::optional<std::string> updatedAt; // ISO-8601 UTC
-    std::string expiresAt; // ISO-8601 UTC
+    std::string createdAt;
+    std::optional<std::string> updatedAt;
+    std::string expiresAt;
 };
 
-} // namespace ecf::domain
+}

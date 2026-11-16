@@ -39,17 +39,16 @@ bool isUnderlyingDocumentRejected(pqxx::work& w, const std::string& responseBody
     return false;
 }
 
-} // namespace
+}
 
 IdempotencyReservationResult DbIdempotencyStore::reserveOrGet(
-    const std::string& key, 
-    const std::string& payloadHash, 
+    const std::string& key,
+    const std::string& payloadHash,
     const std::string& workerKeyId) {
-    
+
     pqxx::connection conn(connectionString_);
     pqxx::work w(conn);
 
-    // 1. Fetch existing record
     pqxx::result r = w.exec_params(
         "SELECT key, created_by_worker_key_id, payload_hash, status, status_code, "
         "       content_type, response_body, created_at::text, updated_at::text, expires_at::text, "
@@ -66,7 +65,7 @@ IdempotencyReservationResult DbIdempotencyStore::reserveOrGet(
         std::string responseBody = row["response_body"].template as<std::string>();
 
         if (existingHash != payloadHash) {
-            // Allow retry with corrected payload if previous attempt failed (>= 400) or was rejected by DGII
+
             if (statusCode >= 400 || isUnderlyingDocumentRejected(w, responseBody)) {
                 w.exec_params(
                     "UPDATE ecf_idempotency_records "
@@ -90,7 +89,6 @@ IdempotencyReservationResult DbIdempotencyStore::reserveOrGet(
                 return IdempotencyReservationResult{IdempotencyReservationStatus::AlreadyCompleted, res};
             }
 
-            // Previous completion failed (>= 400) or was rejected by DGII: allow retry
             w.exec_params(
                 "UPDATE ecf_idempotency_records "
                 "SET status = 'Processing', status_code = 0, response_body = '', "
@@ -104,7 +102,7 @@ IdempotencyReservationResult DbIdempotencyStore::reserveOrGet(
 
         bool isLeaseExpired = row["is_lease_expired"].template as<bool>();
         if (statusStr == "Processing" && isLeaseExpired) {
-            // Reclaim lease atomically
+
             pqxx::result upR = w.exec_params(
                 "UPDATE ecf_idempotency_records "
                 "SET created_at = NOW(), "
@@ -123,7 +121,6 @@ IdempotencyReservationResult DbIdempotencyStore::reserveOrGet(
         return IdempotencyReservationResult{IdempotencyReservationStatus::AlreadyProcessing, std::nullopt};
     }
 
-    // 2. Try to insert new record
     try {
         w.exec_params(
             "INSERT INTO ecf_idempotency_records (key, created_by_worker_key_id, payload_hash, status, "
@@ -134,8 +131,7 @@ IdempotencyReservationResult DbIdempotencyStore::reserveOrGet(
         w.commit();
         return IdempotencyReservationResult{IdempotencyReservationStatus::Reserved, std::nullopt};
     } catch (const pqxx::sql_error& ex) {
-        // Safe check for unique violation
-        // Code 23505 is PostgreSQL's unique_violation code
+
         if (std::string(ex.sqlstate()) == "23505") {
             return IdempotencyReservationResult{IdempotencyReservationStatus::AlreadyProcessing, std::nullopt};
         }
@@ -144,9 +140,9 @@ IdempotencyReservationResult DbIdempotencyStore::reserveOrGet(
 }
 
 void DbIdempotencyStore::complete(
-    const std::string& key, 
+    const std::string& key,
     const IdempotentResult& result) {
-    
+
     pqxx::connection conn(connectionString_);
     pqxx::work w(conn);
 
@@ -175,4 +171,4 @@ void DbIdempotencyStore::release(const std::string& key) {
     } catch (...) {}
 }
 
-} // namespace ecf::infra
+}

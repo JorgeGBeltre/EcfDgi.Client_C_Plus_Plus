@@ -8,7 +8,6 @@ if(WIN32)
     add_compile_definitions(NOMINMAX)
 endif()
 
-# Find dependencies (normally resolved via vcpkg toolchain)
 find_package(Drogon CONFIG REQUIRED)
 find_package(cpr CONFIG REQUIRED)
 find_package(LibXml2 REQUIRED)
@@ -20,14 +19,11 @@ find_package(libpqxx CONFIG REQUIRED)
 find_package(unofficial-sodium CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 
-# Core Library Target
 add_library(ecfdgii_core STATIC
-    # Shared
     src/Shared/Common/Sys.cpp
     src/Shared/Common/Sys.h
     src/Shared/Common/Result.h
 
-    # Domain
     src/Domain/Common/AuditableEntity.h
     src/Domain/Entities/Customer.h
     src/Domain/Entities/EcfClientOptions.h
@@ -55,7 +51,6 @@ add_library(ecfdgii_core STATIC
     src/Domain/Interfaces/IUnitOfWork.h
     src/Domain/Interfaces/IUserRepository.h
 
-    # Application
     src/Application/Auth/AuthDtos.h
     src/Application/Auth/AuthHandlers.cpp
     src/Application/Auth/AuthHandlers.h
@@ -78,7 +73,6 @@ add_library(ecfdgii_core STATIC
     src/Application/Services/EcfStatusReconciler.h
     src/Application/Services/PollingHelper.h
 
-    # Infrastructure
     src/Infrastructure/Caching/RedisCacheService.cpp
     src/Infrastructure/Caching/RedisCacheService.h
     src/Infrastructure/Dgii/CachedEcfClient.cpp
@@ -149,7 +143,6 @@ target_link_libraries(ecfdgii_core PUBLIC
     spdlog::spdlog
 )
 
-# API Host Executable Target
 add_executable(ecfdgii_api
     src/Api/main.cpp
     src/Api/AppServices.cpp
@@ -184,11 +177,9 @@ add_executable(ecfdgii_api
 
 target_link_libraries(ecfdgii_api PRIVATE ecfdgii_core)
 
-# Copy XSD directory to build tree so schemas are immediately available next to binaries
 file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/Documentación Técnica (XSD)"
      DESTINATION "${CMAKE_CURRENT_BINARY_DIR}")
 
-# Tests Subdirectory
 option(ECF_BUILD_TESTS "Build tests" ON)
 if(ECF_BUILD_TESTS)
     enable_testing()

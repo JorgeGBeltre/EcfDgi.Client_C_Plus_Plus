@@ -46,4 +46,4 @@ private:
     std::shared_ptr<domain::ICacheService> cacheService_;
 };
 
-}  // namespace ecf::infra
+}

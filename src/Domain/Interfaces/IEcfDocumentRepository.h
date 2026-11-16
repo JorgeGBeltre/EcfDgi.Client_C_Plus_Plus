@@ -27,4 +27,4 @@ public:
     virtual void update(const EcfDocument& document) = 0;
 };
 
-}  // namespace ecf::domain
+}

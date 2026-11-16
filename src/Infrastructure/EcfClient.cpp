@@ -15,8 +15,6 @@ namespace ecf::infra {
 
 using namespace ecf::domain;
 
-
-
 EcfClient::EcfClient(EcfClientOptions options,
                      std::shared_ptr<IEcfSequenceProvider> sequenceProvider,
                      std::shared_ptr<ICacheService> cacheService,
@@ -91,7 +89,6 @@ RfceRecepcionResponse EcfClient::sendRfce(Rfce& rfce) {
         const std::string fileName =
             serializer_.getFileName(rfce.encabezado.emisor.rncEmisor, rfce.encabezado.idDoc.eNcf);
 
-        // BUG-051: Sign RFCE XML before schema validation and transmission
         std::string signedXml = xml;
         if (signer_) {
             signedXml = signer_->signXml(xml, rfce.encabezado.emisor.rncEmisor);
@@ -202,4 +199,4 @@ AnulacionResponse EcfClient::anularRangos(const std::string& xmlContent) {
     return transport_->anularRangos(xmlContent);
 }
 
-}  // namespace ecf::infra
+}

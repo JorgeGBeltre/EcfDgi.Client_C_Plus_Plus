@@ -14,4 +14,4 @@ public:
     virtual bool usesFallbackCertificate() const = 0;
 };
 
-}  // namespace ecf::domain
+}

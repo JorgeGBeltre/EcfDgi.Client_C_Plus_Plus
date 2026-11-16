@@ -11,8 +11,6 @@ namespace ecf::infra {
 
 using namespace ecf::domain;
 
-
-
 EcfFrontendClient::EcfFrontendClient(EcfClientOptions options,
                                      std::shared_ptr<IEcfTransport> transport) {
     if (transport) {
@@ -25,7 +23,7 @@ EcfFrontendClient::EcfFrontendClient(EcfClientOptions options,
 
     auto envConfig = EcfEnvironmentConfig::getConfig(toAmbiente(options.environment));
 
-    std::shared_ptr<EcfTokenManager> tokenManager;  // may stay null (queries w/o token)
+    std::shared_ptr<EcfTokenManager> tokenManager;
     if (options.certificatePath && !options.certificatePath->empty() &&
         options.rncEmisor && !options.rncEmisor->empty()) {
         auto signer = std::make_shared<EcfXmlSigner>(
@@ -59,4 +57,4 @@ TimbreFcResponse EcfFrontendClient::validarTimbreFc(const TimbreFcRequest& reque
     return transport_->consultarTimbreFc(request);
 }
 
-}  // namespace ecf::infra
+}

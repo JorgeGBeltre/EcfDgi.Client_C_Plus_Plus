@@ -1,8 +1,4 @@
 #pragma once
-// Cross-cutting request behaviors:
-//  - validateOrThrow: runs the request validator and throws on failures.
-//  - LoggingScope:    logs request start/completion with elapsed time.
-// These are invoked explicitly at the top of each controller action.
 
 #include <chrono>
 #include <string>
@@ -15,15 +11,12 @@
 
 namespace ecf::app {
 
-// validateOrThrow<TRequest>: throws ValidationException if the request fails.
 template <typename TRequest>
 void validateOrThrow(const TRequest& request) {
     std::vector<ValidationFailure> failures = validators::validate(request);
     if (!failures.empty()) throw ValidationException(failures);
 }
 
-// LoggingScope: RAII scope that logs start on construction and the elapsed
-// time on destruction.
 class LoggingScope {
 public:
     explicit LoggingScope(std::string requestName)
@@ -48,4 +41,4 @@ private:
     std::chrono::steady_clock::time_point start_;
 };
 
-}  // namespace ecf::app
+}

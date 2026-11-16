@@ -16,7 +16,6 @@ public:
     explicit EcfSigningException(const std::string& message) : EcfException(message) {}
 };
 
-// Raised by EcfValidator/EcfClient when an RFCE fails validation.
 class EcfValidationException : public EcfException {
 public:
     explicit EcfValidationException(std::vector<std::string> errors)
@@ -54,4 +53,4 @@ public:
         : std::runtime_error(message) {}
 };
 
-}  // namespace ecf::domain
+}

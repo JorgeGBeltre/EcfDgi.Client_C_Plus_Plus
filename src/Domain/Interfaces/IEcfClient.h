@@ -40,4 +40,4 @@ public:
     virtual DirectorioContribuyente consultarDirectorioPorRnc(const std::string& rnc) = 0;
 };
 
-}  // namespace ecf::domain
+}

@@ -4,11 +4,6 @@
 
 namespace ecf::infra {
 
-/// <summary>
-/// Renewing a DGII signing certificate with a certificate authority takes days, not minutes.
-/// Finding out on expiry day means stopping invoicing while renewal is in progress — this exists
-/// so the warning arrives while there's still time to act on it.
-/// </summary>
 class CertificateExpiryPolicy {
 public:
     enum class ExpiryUrgency { Ok, Warning, Critical };
@@ -29,4 +24,4 @@ public:
     }
 };
 
-}  // namespace ecf::infra
+}

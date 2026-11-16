@@ -16,7 +16,6 @@ using json = nlohmann::json;
 
 namespace {
 
-// Case-insensitive JSON field lookup for tolerant matching.
 const json* find(const json& j, const std::string& key) {
     if (!j.is_object()) return nullptr;
     for (auto it = j.begin(); it != j.end(); ++it) {
@@ -74,7 +73,7 @@ std::vector<MensajeCodigo> jmensajes(const json& j) {
 }
 
 json parseJson(const std::string& body) {
-    return json::parse(body, nullptr, /*allow_exceptions=*/false);
+    return json::parse(body, nullptr, false);
 }
 
 bool looksLikeXml(const std::string& body, const std::string& contentType) {
@@ -92,7 +91,7 @@ cpr::Multipart xmlPart(const std::string& xml, const std::string& fileName) {
     return cpr::Multipart{{"xml", cpr::Buffer{xml.begin(), xml.end(), fileName}}};
 }
 
-}  // namespace
+}
 
 DgiiDirectTransport::DgiiDirectTransport(std::shared_ptr<EcfTokenManager> tokenManager,
                                          EcfEnvironmentConfig config)
@@ -306,7 +305,7 @@ AprobacionComercialResponse DgiiDirectTransport::sendAprobacionComercial(
             break;
         }
     }
-    // BUG-014: Only accept empty body as success if HTTP status is explicitly 200 or 204
+
     if (isWhitespace && (resp.status_code == 200 || resp.status_code == 204)) {
         AprobacionComercialResponse r;
         r.estado = "Aceptado";
@@ -486,4 +485,4 @@ std::string DgiiDirectTransport::verificarEstadoAmbiente(AmbienteEnum ambiente) 
     return resp.text;
 }
 
-}  // namespace ecf::infra
+}

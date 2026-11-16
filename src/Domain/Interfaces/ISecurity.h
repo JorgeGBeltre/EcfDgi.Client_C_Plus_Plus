@@ -1,7 +1,4 @@
 #pragma once
-// Ports of the Application.Common.Interfaces security abstractions:
-// IPasswordHasher, ITokenService, ICurrentUserService.
-// Consolidated here to keep the C++ dependency graph acyclic.
 
 #include <optional>
 #include <string>
@@ -31,4 +28,4 @@ public:
     virtual std::optional<std::string> username() const = 0;
 };
 
-}  // namespace ecf::domain
+}

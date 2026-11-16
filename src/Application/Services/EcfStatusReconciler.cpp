@@ -16,12 +16,14 @@ EcfStatusReconciler::EcfStatusReconciler(std::shared_ptr<domain::IEcfDocumentRep
                                         std::shared_ptr<domain::IUnitOfWork> uow,
                                         std::shared_ptr<domain::IEcfClient> ecfClient,
                                         domain::EcfStatusPollingOptions options,
-                                        std::shared_ptr<domain::ITenantSignerResolver> signerResolver)
+                                        std::shared_ptr<domain::ITenantSignerResolver> signerResolver,
+                                        std::shared_ptr<domain::ICacheService> cacheService)
     : docsRepo_(std::move(docsRepo)),
       uow_(std::move(uow)),
       ecfClient_(std::move(ecfClient)),
       options_(options),
-      signerResolver_(std::move(signerResolver)) {}
+      signerResolver_(std::move(signerResolver)),
+      cacheService_(std::move(cacheService)) {}
 
 int EcfStatusReconciler::reconcile() {
     if (!docsRepo_ || !uow_ || !ecfClient_) return 0;
@@ -96,7 +98,7 @@ int EcfStatusReconciler::reconcile() {
                     clientOpts.environment = envToUse;
                     clientOpts.mode = domain::IntegrationMode::DgiiDirect;
                     clientOpts.validateSchemasLocal = false;
-                    clientToUse = std::make_shared<infra::EcfClient>(clientOpts, nullptr, nullptr, nullptr, dynamicSigner);
+                    clientToUse = std::make_shared<infra::EcfClient>(clientOpts, nullptr, cacheService_, nullptr, dynamicSigner);
                     clientCache[cacheKey] = clientToUse;
                 }
             } catch (const std::exception& ex) {
@@ -125,7 +127,7 @@ int EcfStatusReconciler::reconcile() {
                     }
                 }
             } catch (...) {
-                // Fallback to consultarEstado below
+
             }
         }
 
@@ -166,6 +168,23 @@ int EcfStatusReconciler::reconcile() {
                 "RECHAZADO por DGII tras verificación posterior. Requiere atención — el "
                 "comprobante no tiene validez fiscal.",
                 doc.eNcf, doc.rncEmisor);
+        } else if (doc.state == "Uncertain" &&
+                   (!doc.trackId.has_value() || doc.trackId->empty()) &&
+                   (lowerEstado == "no encontrado") &&
+                   doc.signedXmlContent.has_value() && !doc.signedXmlContent->empty()) {
+            try {
+                std::string fileName = doc.rncEmisor + doc.eNcf + ".xml";
+                auto reResp = clientToUse->sendEcf(*doc.signedXmlContent, fileName);
+                if (!reResp.trackId.empty()) {
+                    doc.trackId = reResp.trackId;
+                    doc.state = "Signed";
+                    doc.sentToDgiiAt = nowIso;
+                    doc.dgiiResponseXml = "Retransmitido automáticamente tras estado incierto.";
+                } else if (reResp.error.has_value() && !reResp.error->empty()) {
+                    doc.state = "RejectedByDgii";
+                    doc.dgiiResponseXml = *reResp.error;
+                }
+            } catch (...) {}
         }
         try {
             docsRepo_->update(doc);
@@ -183,4 +202,4 @@ int EcfStatusReconciler::reconcile() {
     return processed;
 }
 
-}  // namespace ecf::app
+}

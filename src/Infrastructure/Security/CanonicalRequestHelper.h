@@ -25,4 +25,4 @@ public:
         const std::string& b);
 };
 
-} // namespace ecf::infra
+}

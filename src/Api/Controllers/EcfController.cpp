@@ -1,12 +1,19 @@
 #include "Api/Controllers/EcfController.h"
 
+#include <algorithm>
+#include <cctype>
+#include <chrono>
 #include <exception>
+#include <cpr/cpr.h>
+#include <nlohmann/json.hpp>
 
 #include "Api/AppServices.h"
 #include "Api/JsonMapping.h"
 #include "Application/Common/Behaviors/Behaviors.h"
 #include "Application/Ecf/EcfHandlers.h"
 #include "Api/Security/IdempotencyHandler.h"
+#include "Infrastructure/Dgii/EcfEnvironmentConfig.h"
+#include "Shared/Common/Sys.h"
 
 using namespace drogon;
 
@@ -23,7 +30,7 @@ Json::Value err(const std::string& message) {
     v["error"] = message;
     return v;
 }
-}  // namespace
+}
 
 void EcfController::send(const HttpRequestPtr& req,
                          std::function<void(const HttpResponsePtr&)>&& callback) {
@@ -87,7 +94,7 @@ void EcfController::send(const HttpRequestPtr& req,
             cmd.itbisAmount = body->isMember("itbisAmount") ? (*body)["itbisAmount"].asDouble() : 0.0;
 
             app::LoggingScope _log("SendEcfCommand");
-            app::validateOrThrow(cmd);  // throws ValidationException -> 400
+            app::validateOrThrow(cmd);
 
             try {
                 auto scope = services.makeScope(mapping::currentUserFrom(req));
@@ -142,7 +149,7 @@ void EcfController::sendRfce(const HttpRequestPtr& req,
                 return;
             }
 
-            app::validateOrThrow(cmd);  // throws ValidationException -> 400
+            app::validateOrThrow(cmd);
 
             try {
                 auto scope = services.makeScope(mapping::currentUserFrom(req));
@@ -183,4 +190,125 @@ void EcfController::status(const HttpRequestPtr& req,
     }
 }
 
-}  // namespace ecf::api
+void EcfController::servicesStatus(const HttpRequestPtr& req,
+                                   std::function<void(const HttpResponsePtr&)>&& callback) {
+    auto& services = AppServices::instance();
+    std::string rawEnv = req->getParameter("environment");
+    if (rawEnv.empty()) {
+        rawEnv = req->getHeader("X-Environment");
+    }
+
+    domain::AmbienteEnum ambiente = services.ecfClientOptions().toAmbiente(services.ecfClientOptions().environment);
+    if (!rawEnv.empty()) {
+        std::string lower = rawEnv;
+        std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+        if (lower == "test" || lower == "testecf" || lower.find("precert") != std::string::npos || lower == "1") {
+            ambiente = domain::AmbienteEnum::PreCertificacion;
+        } else if (lower == "cert" || lower == "certecf" || lower.find("certific") != std::string::npos || lower == "2") {
+            ambiente = domain::AmbienteEnum::Certificacion;
+        } else if (lower == "prod" || lower == "prd" || lower == "production" || lower == "ecf" || lower.find("producc") != std::string::npos || lower == "4") {
+            ambiente = domain::AmbienteEnum::Produccion;
+        }
+    }
+
+    std::string cacheKey = "ecf:services:probe:" + std::to_string(static_cast<int>(ambiente));
+    auto cache = services.cacheService();
+    if (cache) {
+        auto cachedStr = cache->get(cacheKey);
+        if (cachedStr.has_value() && !cachedStr->empty()) {
+            Json::CharReaderBuilder rb;
+            Json::Value parsed;
+            std::string errs;
+            std::istringstream iss(*cachedStr);
+            if (Json::parseFromStream(rb, iss, &parsed, &errs) && parsed.isArray() && !parsed.empty()) {
+                callback(json(parsed, k200OK));
+                return;
+            }
+        }
+    }
+
+    auto envConfig = infra::EcfEnvironmentConfig::getConfig(ambiente);
+    std::string statusUrl = envConfig.estatusServiciosUrl + "/api/estatusservicios/obtenerestatus";
+    std::string nowIso = sys::utcNowIso();
+    bool gatewayOnline = false;
+    int latencyMs = 0;
+
+    try {
+        auto t0 = std::chrono::steady_clock::now();
+        auto r1 = cpr::Get(cpr::Url{statusUrl}, cpr::Timeout{3000});
+        auto t1 = std::chrono::steady_clock::now();
+        if (r1.error.code == cpr::ErrorCode::OK && r1.status_code > 0 && r1.status_code < 500) {
+            gatewayOnline = true;
+            latencyMs = std::max(1, static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count()));
+        }
+        if (gatewayOnline && latencyMs > 100) {
+            auto w0 = std::chrono::steady_clock::now();
+            auto r2 = cpr::Get(cpr::Url{statusUrl}, cpr::Timeout{2000});
+            auto w1 = std::chrono::steady_clock::now();
+            if (r2.error.code == cpr::ErrorCode::OK && r2.status_code > 0 && r2.status_code < 500) {
+                latencyMs = std::max(1, static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(w1 - w0).count()));
+            }
+        }
+    } catch (...) {
+        gatewayOnline = false;
+        latencyMs = 0;
+    }
+
+    std::vector<domain::EstatusServicio> officialStatuses;
+    if (gatewayOnline) {
+        try {
+            officialStatuses = services.ecfClient()->consultarEstatusServicios();
+        } catch (...) {}
+    }
+
+    auto containsIgnoreCase = [](const std::string& haystack, const std::string& needle) {
+        if (needle.empty()) return true;
+        auto it = std::search(
+            haystack.begin(), haystack.end(),
+            needle.begin(), needle.end(),
+            [](char ch1, char ch2) {
+                return std::tolower(static_cast<unsigned char>(ch1)) ==
+                       std::tolower(static_cast<unsigned char>(ch2));
+            });
+        return it != haystack.end();
+    };
+
+    auto isOfficialAvailable = [&](const std::string& keyword) -> bool {
+        if (!gatewayOnline) return false;
+        if (officialStatuses.empty()) return true;
+        for (const auto& s : officialStatuses) {
+            if (containsIgnoreCase(s.servicio, keyword)) {
+                if (s.estatus.empty()) return true;
+                return !containsIgnoreCase(s.estatus, "No Disponible") &&
+                       !containsIgnoreCase(s.estatus, "Mantenimiento");
+            }
+        }
+        return true;
+    };
+
+    auto makeItem = [&](const std::string& name, bool avail) {
+        Json::Value item;
+        item["servicio"] = name;
+        item["disponible"] = avail;
+        item["latencia"] = gatewayOnline ? latencyMs : 0;
+        item["ultimaVerificacion"] = nowIso;
+        return item;
+    };
+
+    Json::Value arr(Json::arrayValue);
+    arr.append(makeItem("Recepción e-CF", isOfficialAvailable("Recepci")));
+    arr.append(makeItem("Consulta Estado", isOfficialAvailable("Consulta Estado")));
+    arr.append(makeItem("Timbre / QR", isOfficialAvailable("Timbre")));
+    arr.append(makeItem("Directorio Contribuyentes", isOfficialAvailable("Directorio")));
+    arr.append(makeItem("Aprobación Comercial", isOfficialAvailable("Aprobaci")));
+
+    if (gatewayOnline && cache) {
+        Json::StreamWriterBuilder wb;
+        wb["indentation"] = "";
+        cache->set(cacheKey, Json::writeString(wb, arr), std::chrono::seconds(45));
+    }
+
+    callback(json(arr, k200OK));
+}
+
+}

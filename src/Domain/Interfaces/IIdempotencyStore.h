@@ -29,15 +29,15 @@ public:
     virtual ~IIdempotencyStore() = default;
 
     virtual IdempotencyReservationResult reserveOrGet(
-        const std::string& key, 
-        const std::string& payloadHash, 
+        const std::string& key,
+        const std::string& payloadHash,
         const std::string& workerKeyId) = 0;
 
     virtual void complete(
-        const std::string& key, 
+        const std::string& key,
         const IdempotentResult& result) = 0;
 
     virtual void release(const std::string& key) { (void)key; }
 };
 
-} // namespace ecf::domain
+}

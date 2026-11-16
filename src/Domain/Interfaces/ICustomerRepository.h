@@ -16,7 +16,7 @@ public:
     virtual std::vector<Customer> getAll() = 0;
     virtual void add(const Customer& customer) = 0;
     virtual void update(const Customer& customer) = 0;
-    virtual void remove(const Customer& customer) = 0;  // soft delete
+    virtual void remove(const Customer& customer) = 0;
 };
 
-}  // namespace ecf::domain
+}

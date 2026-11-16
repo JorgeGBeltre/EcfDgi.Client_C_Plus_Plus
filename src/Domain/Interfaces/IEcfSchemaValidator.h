@@ -24,4 +24,4 @@ public:
     virtual SchemaValidationResult validate(const std::string& xmlContent) = 0;
 };
 
-}  // namespace ecf::domain
+}

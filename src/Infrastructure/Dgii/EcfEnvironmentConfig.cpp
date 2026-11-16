@@ -56,4 +56,4 @@ EcfEnvironmentConfig EcfEnvironmentConfig::getConfig(AmbienteEnum ambiente) {
     throw std::invalid_argument("Ambiente no soportado");
 }
 
-}  // namespace ecf::infra
+}

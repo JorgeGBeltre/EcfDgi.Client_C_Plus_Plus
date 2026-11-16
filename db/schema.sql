@@ -1,13 +1,5 @@
--- ---------------------------------------------------------------------------
--- EcfDgii.Client (C++ replica) — PostgreSQL schema.
--- This replaces the EF Core migrations used by the .NET solution. Column names
--- mirror the snake_case mappings declared in the *Configuration.cs classes.
--- Applied automatically at startup by DbInitializer (see Infrastructure/Persistence).
--- ---------------------------------------------------------------------------
-
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- Users ----------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS users (
     id            uuid PRIMARY KEY,
     username      varchar(100) NOT NULL,
@@ -26,7 +18,6 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE UNIQUE INDEX IF NOT EXISTS uq_users_username ON users (username);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_users_email    ON users (email);
 
--- Customers ------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS customers (
     id         uuid PRIMARY KEY,
     name       varchar(200) NOT NULL,
@@ -43,7 +34,6 @@ CREATE TABLE IF NOT EXISTS customers (
 
 CREATE INDEX IF NOT EXISTS ix_customers_rnc ON customers (rnc);
 
--- e-CF documents -------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS ecf_documents (
     id                 uuid PRIMARY KEY,
     e_ncf              varchar(20)   NOT NULL,
@@ -85,7 +75,6 @@ CREATE INDEX IF NOT EXISTS ix_ecf_documents_state    ON ecf_documents (state);
 CREATE INDEX IF NOT EXISTS ix_ecf_documents_state_last_status_check_at
     ON ecf_documents (state, last_status_check_at);
 
--- e-CF sequences --------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS ecf_sequences (
     id                serial PRIMARY KEY,
     tenant_id         varchar(100) NOT NULL DEFAULT 'default-tenant',
@@ -102,7 +91,6 @@ CREATE TABLE IF NOT EXISTS ecf_sequences (
 CREATE UNIQUE INDEX IF NOT EXISTS uq_ecf_sequences_tenant_tipo
     ON ecf_sequences (tenant_id, tipo_comprobante);
 
--- e-CF idempotency records ----------------------------------------------------
 CREATE TABLE IF NOT EXISTS ecf_idempotency_records (
     key                     varchar(200) PRIMARY KEY,
     created_by_worker_key_id varchar(100) NOT NULL,
@@ -118,4 +106,3 @@ CREATE TABLE IF NOT EXISTS ecf_idempotency_records (
 
 CREATE INDEX IF NOT EXISTS ix_ecf_idempotency_records_expires_at
     ON ecf_idempotency_records (expires_at);
-

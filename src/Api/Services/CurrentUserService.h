@@ -1,5 +1,4 @@
 #pragma once
-// Built per request from the validated JWT claims.
 
 #include <optional>
 #include <string>
@@ -22,4 +21,4 @@ private:
     std::optional<std::string> username_;
 };
 
-}  // namespace ecf::api
+}

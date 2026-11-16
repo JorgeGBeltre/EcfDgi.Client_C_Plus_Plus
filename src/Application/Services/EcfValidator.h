@@ -29,4 +29,4 @@ private:
     static bool isValidRnc(const std::string& rnc);
 };
 
-}  // namespace ecf::app
+}

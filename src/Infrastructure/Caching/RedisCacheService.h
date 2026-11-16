@@ -37,7 +37,6 @@ private:
     bool useRedis_{false};
     std::chrono::system_clock::time_point lastPingAttempt_{};
 
-    // Memory fallback store
     std::mutex memMutex_;
     std::unordered_map<std::string, CacheItem> memoryStore_;
     std::unordered_map<std::string, std::pair<std::string, std::chrono::system_clock::time_point>> locks_;
@@ -47,4 +46,4 @@ private:
     std::string sendRedisCommand(const std::string& cmd);
 };
 
-}  // namespace ecf::infra
+}

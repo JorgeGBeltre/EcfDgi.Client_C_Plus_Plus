@@ -1,4 +1,4 @@
-// Comprehensive Parity Tests between C# and C++ implementations
+
 #include <cstdio>
 #include <string>
 #include <iostream>
@@ -29,7 +29,6 @@ static int failures = 0;
 int main() {
     std::cout << "--- Running Parity Tests ---\n";
 
-    // Test 1: IndicadorMontoGravado and FechaVencimientoSecuencia for E31
     {
         app::CanonicalDocumentDto dto;
         dto.tipoComprobante = "E31";
@@ -40,15 +39,14 @@ int main() {
         dto.totals.montoSubtotal = 100.0;
         dto.totals.montoItbis = 18.0;
 
-        std::string xml = app::buildXmlFromCanonical(dto, "E310000000001", "101672919", "WILLY CHIC DOMINICANA SRL");
-        
+        std::string xml = app::buildXmlFromCanonical(dto, "E310000000001", "101000021", "EMPRESA DEMO SRL");
+
         CHECK(xml.find("<IndicadorMontoGravado>0</IndicadorMontoGravado>") != std::string::npos,
               "E31 XML includes <IndicadorMontoGravado>0</IndicadorMontoGravado>");
         CHECK(xml.find("<FechaVencimientoSecuencia>") != std::string::npos,
               "E31 XML includes default <FechaVencimientoSecuencia>");
     }
 
-    // Test 2: Non-E31 (E32) must NOT have FechaVencimientoSecuencia
     {
         app::CanonicalDocumentDto dto;
         dto.tipoComprobante = "E32";
@@ -56,13 +54,12 @@ int main() {
         dto.header.rncComprador = "131234567";
         dto.totals.montoTotal = 100.0;
 
-        std::string xml = app::buildXmlFromCanonical(dto, "E320000000001", "101672919", "WILLY CHIC DOMINICANA SRL");
-        
+        std::string xml = app::buildXmlFromCanonical(dto, "E320000000001", "101000021", "EMPRESA DEMO SRL");
+
         CHECK(xml.find("<FechaVencimientoSecuencia>") == std::string::npos,
               "E32 XML excludes <FechaVencimientoSecuencia>");
     }
 
-    // Test 3: IndicadorMontoGravado for E34
     {
         app::CanonicalDocumentDto dto;
         dto.tipoComprobante = "E34";
@@ -70,13 +67,12 @@ int main() {
         dto.header.rncComprador = "131234567";
         dto.totals.montoTotal = 100.0;
 
-        std::string xml = app::buildXmlFromCanonical(dto, "E340000000001", "101672919", "WILLY CHIC DOMINICANA SRL");
-        
+        std::string xml = app::buildXmlFromCanonical(dto, "E340000000001", "101000021", "EMPRESA DEMO SRL");
+
         CHECK(xml.find("<IndicadorMontoGravado>0</IndicadorMontoGravado>") != std::string::npos,
               "E34 XML includes <IndicadorMontoGravado>0</IndicadorMontoGravado>");
     }
 
-    // Test 4: Explicit FechaVencimientoSecuencia passed in DTO
     {
         app::CanonicalDocumentDto dto;
         dto.tipoComprobante = "E31";
@@ -85,13 +81,12 @@ int main() {
         dto.header.rncComprador = "131234567";
         dto.totals.montoTotal = 100.0;
 
-        std::string xml = app::buildXmlFromCanonical(dto, "E310000000001", "101672919", "WILLY CHIC DOMINICANA SRL");
-        
+        std::string xml = app::buildXmlFromCanonical(dto, "E310000000001", "101000021", "EMPRESA DEMO SRL");
+
         CHECK(xml.find("<FechaVencimientoSecuencia>31-12-2029</FechaVencimientoSecuencia>") != std::string::npos,
               "Explicit fechaVencimientoSecuencia is respected");
     }
 
-    // Test 5: Multi-email in Comprador
     {
         app::CanonicalDocumentDto dto;
         dto.tipoComprobante = "E31";
@@ -100,31 +95,28 @@ int main() {
         dto.header.correoComprador = "primary@client.com; secondary@client.com, third@client.com";
         dto.totals.montoTotal = 100.0;
 
-        std::string xml = app::buildXmlFromCanonical(dto, "E310000000001", "101672919", "WILLY CHIC DOMINICANA SRL");
-        
+        std::string xml = app::buildXmlFromCanonical(dto, "E310000000001", "101000021", "EMPRESA DEMO SRL");
+
         CHECK(xml.find("<CorreoComprador>primary@client.com</CorreoComprador>") != std::string::npos,
               "Multi-email is trimmed to primary email in <CorreoComprador>");
         CHECK(xml.find("secondary@client.com") == std::string::npos,
               "Secondary emails are correctly excluded");
     }
 
-    // Test 6: Empty line items fallback assigns defaultTotal
     {
         app::CanonicalDocumentDto dto;
         dto.tipoComprobante = "E32";
         dto.header.fechaEmision = "2026-09-17";
         dto.totals.montoTotal = 543.21;
-        // lines are empty
 
-        std::string xml = app::buildXmlFromCanonical(dto, "E320000000001", "101672919", "WILLY CHIC DOMINICANA SRL");
-        
+        std::string xml = app::buildXmlFromCanonical(dto, "E320000000001", "101000021", "EMPRESA DEMO SRL");
+
         CHECK(xml.find("<PrecioUnitarioItem>543.21</PrecioUnitarioItem>") != std::string::npos,
               "Fallback line item inherits total as unit price");
         CHECK(xml.find("<MontoItem>543.21</MontoItem>") != std::string::npos,
               "Fallback line item inherits total as amount");
     }
 
-    // Test 7: Multi-environment field in EcfDocument
     {
         domain::EcfDocument doc;
         doc.ambiente = "PreCertificacion";
@@ -132,7 +124,6 @@ int main() {
               "EcfDocument entity supports ambiente");
     }
 
-    // Test 8: DGII CodigoSeguridad calculation (first 6 chars of Base64 signature, case-preserved)
     {
         std::string sampleSig = "wX9yZ123456789==";
         std::string code = infra::EcfSecurityUtils::calcularCodigoSeguridad(sampleSig);
@@ -143,7 +134,6 @@ int main() {
         CHECK(codeFromXml == "AbCdEf", "calcularCodigoSeguridad extracts from XML SignatureValue correctly");
     }
 
-    // Test 9: extractFechaHoraFirma extracts timestamp from XML or returns empty optional
     {
         std::string xml = "<Invoice><FechaHoraFirma>19-09-2026 15:30:00</FechaHoraFirma></Invoice>";
         auto dt = infra::EcfSecurityUtils::extractFechaHoraFirma(xml);
@@ -154,7 +144,6 @@ int main() {
         CHECK(!dtEmpty.has_value(), "extractFechaHoraFirma returns empty optional when tag is absent");
     }
 
-    // Test 10: DGII Timbre URL for Facturas de Consumo uses fc.dgii.gov.do across environments
     {
         auto prodConfig = infra::EcfEnvironmentConfig::getConfig(domain::AmbienteEnum::Produccion);
         CHECK(prodConfig.timbreFcUrl.find("fc.dgii.gov.do") != std::string::npos,
@@ -175,11 +164,10 @@ int main() {
               "PreCertificacion timbreFcUrl matches exact DGII URL");
     }
 
-    // Test 11: buildRfceXml generates valid RFCE with ITBIS gravado and CodigoSeguridadeCF
     {
         domain::EcfDocument doc;
         doc.eNcf = "E320000000015";
-        doc.rncEmisor = "101672919";
+        doc.rncEmisor = "101000021";
         doc.rncComprador = "40223456789";
         doc.totalAmount = 118.0;
         doc.itbisAmount = 18.0;
@@ -189,15 +177,15 @@ int main() {
         dto.header.fechaEmision = "2026-09-22";
         dto.header.razonSocialComprador = "Juan Perez";
 
-        std::string rfceXml = app::buildRfceXml(doc, &dto, "WILLY CHIC DOMINICANA SRL");
+        std::string rfceXml = app::buildRfceXml(doc, &dto, "EMPRESA DEMO SRL");
 
         CHECK(rfceXml.rfind("<?xml version=\"1.0\" encoding=\"utf-8\"?>", 0) == 0,
               "buildRfceXml starts with XML declaration");
         CHECK(rfceXml.find("<RFCE>") != std::string::npos, "RFCE root tag present");
         CHECK(rfceXml.find("<TipoeCF>32</TipoeCF>") != std::string::npos, "TipoeCF is 32");
         CHECK(rfceXml.find("<eNCF>E320000000015</eNCF>") != std::string::npos, "eNCF matches doc");
-        CHECK(rfceXml.find("<RNCEmisor>101672919</RNCEmisor>") != std::string::npos, "RNCEmisor matches");
-        CHECK(rfceXml.find("<RazonSocialEmisor>WILLY CHIC DOMINICANA SRL</RazonSocialEmisor>") != std::string::npos, "Emisor name present");
+        CHECK(rfceXml.find("<RNCEmisor>101000021</RNCEmisor>") != std::string::npos, "RNCEmisor matches");
+        CHECK(rfceXml.find("<RazonSocialEmisor>EMPRESA DEMO SRL</RazonSocialEmisor>") != std::string::npos, "Emisor name present");
         CHECK(rfceXml.find("<FechaEmision>22-09-2026</FechaEmision>") != std::string::npos, "Normalized FechaEmision present");
         CHECK(rfceXml.find("<RNCComprador>40223456789</RNCComprador>") != std::string::npos, "RNCComprador present");
         CHECK(rfceXml.find("<RazonSocialComprador>Juan Perez</RazonSocialComprador>") != std::string::npos, "Comprador name present");
@@ -210,16 +198,15 @@ int main() {
         CHECK(rfceXml.find("</RFCE>") != std::string::npos, "RFCE closing tag present");
     }
 
-    // Test 12: buildRfceXml with exento (no ITBIS) produces MontoExento
     {
         domain::EcfDocument doc;
         doc.eNcf = "E320000000020";
-        doc.rncEmisor = "101672919";
+        doc.rncEmisor = "101000021";
         doc.totalAmount = 500.0;
         doc.itbisAmount = 0.0;
         doc.securityCode = "SeCuRe";
 
-        std::string rfceXml = app::buildRfceXml(doc, nullptr, "WILLY CHIC DOMINICANA SRL");
+        std::string rfceXml = app::buildRfceXml(doc, nullptr, "EMPRESA DEMO SRL");
 
         CHECK(rfceXml.find("<MontoExento>500.00</MontoExento>") != std::string::npos, "MontoExento = 500.00");
         CHECK(rfceXml.find("<TotalITBIS>") == std::string::npos, "TotalITBIS absent when exento");
@@ -228,7 +215,6 @@ int main() {
               "Defaults to CONSUMIDOR FINAL when dto is null");
     }
 
-    // Test 13: RFCE vs ECF decision rule
     {
         auto isRfceDoc = [](const std::string& encf, double total) {
             return (encf.rfind("E32", 0) == 0 || encf.rfind("e32", 0) == 0) && total < 250000.0;
@@ -242,7 +228,6 @@ int main() {
         CHECK(isRfceDoc("E340000000001", 50.0) == false, "E34 is never RFCE");
     }
 
-    // Test 14: Environment alias resolution
     {
         auto resolveAlt = [](const std::string& tenantId) -> std::string {
             auto endsWithNoCase = [](const std::string& str, const std::string& suffix) {
@@ -268,12 +253,11 @@ int main() {
         CHECK(resolveAlt("t1:Produccion") == "", "Produccion has no alternate alias");
     }
 
-    // Test 15: Item discount emits DescuentoMonto and TablaSubDescuento block
     {
         app::CanonicalDocumentDto dto;
         dto.tipoComprobante = "E31";
-        dto.header.rncEmisor = "101672919";
-        dto.header.razonSocialEmisor = "WILLY CHIC DOMINICANA SRL";
+        dto.header.rncEmisor = "101000021";
+        dto.header.razonSocialEmisor = "EMPRESA DEMO SRL";
         dto.header.rncComprador = "130000000";
         dto.header.razonSocialComprador = "Cliente de Prueba";
         dto.totals.montoSubtotal = 100.0;
@@ -296,7 +280,7 @@ int main() {
         line2.amount = -100.0;
         dto.lines.push_back(line2);
 
-        std::string xml = app::buildXmlFromCanonical(dto, "E310000000001", "101672919", "WILLY CHIC DOMINICANA SRL");
+        std::string xml = app::buildXmlFromCanonical(dto, "E310000000001", "101000021", "EMPRESA DEMO SRL");
 
         CHECK(xml.find("<DescuentoMonto>100.00</DescuentoMonto>") != std::string::npos,
               "DescuentoMonto tag emitted with 100.00");
@@ -312,7 +296,6 @@ int main() {
               "Negative amount item not emitted");
     }
 
-    // Test 16: Tipo 46 without buyer RNC emits IdentificadorExtranjero EXTRANJERO fallback
     {
         app::CanonicalDocumentDto dto;
         dto.tipoComprobante = "E46";
@@ -322,14 +305,13 @@ int main() {
         dto.totals.montoTotal = 500.0;
         dto.totals.montoSubtotal = 500.0;
 
-        std::string xml = app::buildXmlFromCanonical(dto, "E460000000028", "101889063", "Willy Chic");
+        std::string xml = app::buildXmlFromCanonical(dto, "E460000000028", "101000001", "Empresa Demo");
         CHECK(xml.find("<IdentificadorExtranjero>EXTRANJERO</IdentificadorExtranjero>") != std::string::npos,
               "E46 without buyer RNC emits <IdentificadorExtranjero>EXTRANJERO</IdentificadorExtranjero>");
         CHECK(xml.find("<RNCComprador>") == std::string::npos,
               "E46 without buyer RNC does NOT emit <RNCComprador>");
     }
 
-    // Test 17: Dynamic sequence expiry date in test/cert environment defaults to 31-12-2028
     {
         app::CanonicalDocumentDto dtoPreCert;
         dtoPreCert.tipoComprobante = "E31";
@@ -338,7 +320,7 @@ int main() {
         dtoPreCert.header.rncComprador = "131234567";
         dtoPreCert.totals.montoTotal = 100.0;
 
-        std::string xmlPreCert = app::buildXmlFromCanonical(dtoPreCert, "E310000000001", "101672919", "WILLY CHIC DOMINICANA SRL");
+        std::string xmlPreCert = app::buildXmlFromCanonical(dtoPreCert, "E310000000001", "101000021", "EMPRESA DEMO SRL");
         CHECK(xmlPreCert.find("<FechaVencimientoSecuencia>31-12-2028</FechaVencimientoSecuencia>") != std::string::npos,
               "PreCertificacion environment defaults sequence expiry to 31-12-2028");
 
@@ -349,32 +331,27 @@ int main() {
         dtoCert.header.rncComprador = "131234567";
         dtoCert.totals.montoTotal = 100.0;
 
-        std::string xmlCert = app::buildXmlFromCanonical(dtoCert, "E310000000001", "101672919", "WILLY CHIC DOMINICANA SRL");
+        std::string xmlCert = app::buildXmlFromCanonical(dtoCert, "E310000000001", "101000021", "EMPRESA DEMO SRL");
         CHECK(xmlCert.find("<FechaVencimientoSecuencia>31-12-2028</FechaVencimientoSecuencia>") != std::string::npos,
               "Certificacion environment defaults sequence expiry to 31-12-2028");
     }
 
-    // Test 18: sys::parseIsoUtc handles ISO UTC, PostgreSQL ::text format, fractions and timezones (BUG-027)
     {
-        // Standard ISO 8601 with Z
+
         auto t1 = sys::parseIsoUtc("2026-10-02T14:30:15Z");
         CHECK(t1 != std::chrono::system_clock::time_point{}, "parseIsoUtc parses standard ISO 8601 with Z");
 
-        // PostgreSQL ::text format (space separator, microseconds, +00)
         auto t2 = sys::parseIsoUtc("2026-10-02 14:30:15.123456+00");
         CHECK(t2 != std::chrono::system_clock::time_point{}, "parseIsoUtc parses PostgreSQL timestamptz ::text format with space and microseconds");
 
-        // Both timestamps represent the same second in UTC
         auto s1 = std::chrono::duration_cast<std::chrono::seconds>(t1.time_since_epoch()).count();
         auto s2 = std::chrono::duration_cast<std::chrono::seconds>(t2.time_since_epoch()).count();
         CHECK(s1 == s2, "parseIsoUtc ISO and PostgreSQL formats produce identical UTC timestamp");
 
-        // Offset -04:00 (Santo Domingo local time) => 10:30:15 -04:00 is 14:30:15 UTC
         auto t3 = sys::parseIsoUtc("2026-10-02 10:30:15-04:00");
         auto s3 = std::chrono::duration_cast<std::chrono::seconds>(t3.time_since_epoch()).count();
         CHECK(s1 == s3, "parseIsoUtc timezone offset -04:00 correctly converted to UTC");
 
-        // Empty / invalid returns time_point{} (epoch)
         auto tEmpty = sys::parseIsoUtc("");
         CHECK(tEmpty == std::chrono::system_clock::time_point{}, "parseIsoUtc empty returns default time_point");
 
@@ -382,13 +359,11 @@ int main() {
         CHECK(tInvalid == std::chrono::system_clock::time_point{}, "parseIsoUtc invalid returns default time_point");
     }
 
-    // Test 19: DGII Transport explicit timeouts & network error discrimination (BUG-014, PERF-001)
     {
         CHECK(infra::kDefaultConnectTimeout.count() == 5000, "PERF-001: kDefaultConnectTimeout is 5000ms");
         CHECK(infra::kDefaultReadTimeout.count() == 15000, "PERF-001: kDefaultReadTimeout is 15000ms");
         CHECK(infra::kReceptionTimeout.count() == 30000, "PERF-001: kReceptionTimeout is 30000ms");
 
-        // Network error code throws EcfException
         cpr::Response netErrResp;
         netErrResp.error.code = cpr::ErrorCode::NO_CONNECTION_AVAILABLE;
         netErrResp.error.message = "Connection refused";
@@ -400,7 +375,6 @@ int main() {
         }
         CHECK(caughtNetErr, "BUG-014: validateDgiiResponse throws EcfException on cpr network failure");
 
-        // HTTP 0 (Unreachable) throws EcfException
         cpr::Response http0Resp;
         http0Resp.status_code = 0;
         bool caughtHttp0 = false;
@@ -411,7 +385,6 @@ int main() {
         }
         CHECK(caughtHttp0, "BUG-014: validateDgiiResponse throws EcfException on HTTP 0");
 
-        // HTTP 503 Server error throws EcfException
         cpr::Response http500Resp;
         http500Resp.status_code = 503;
         http500Resp.text = "Service Unavailable";
@@ -423,7 +396,6 @@ int main() {
         }
         CHECK(caught500, "BUG-014: validateDgiiResponse throws EcfException on HTTP 503");
 
-        // HTTP 401 Unauthorized throws EcfException
         cpr::Response http401Resp;
         http401Resp.status_code = 401;
         http401Resp.text = "Unauthorized token";
@@ -435,7 +407,6 @@ int main() {
         }
         CHECK(caught401, "BUG-014: validateDgiiResponse throws EcfException on HTTP 401");
 
-        // HTTP 200 OK does NOT throw
         cpr::Response http200Resp;
         http200Resp.status_code = 200;
         http200Resp.text = "{\"trackId\":\"TRK-123\"}";
@@ -448,10 +419,9 @@ int main() {
         CHECK(noThrow, "BUG-014: validateDgiiResponse allows HTTP 200 OK to pass");
     }
 
-    // Test BUG-092: UTF-8 safe truncation and XML control character sanitization
     {
         std::string spanishText = "Construcción y Reparación";
-        // 11 codepoints is "Construcció" (ends right at ó, which is 2 bytes)
+
         std::string trunc11 = app::truncateUtf8(spanishText, 11);
         CHECK(trunc11 == "Construcció", "BUG-092: truncateUtf8 preserves multi-byte accent character boundary");
         CHECK(trunc11.size() == 12, "BUG-092: 11 codepoints with 1 multi-byte char yields 12 bytes");
@@ -464,7 +434,6 @@ int main() {
         CHECK(escaped.find('\n') != std::string::npos, "BUG-092: escapeXml preserves newline 0x0A");
     }
 
-    // Test BUG-093: Ambiente resolution whitelist & rejection of invalid/unknown environments
     {
         domain::AmbienteEnum amb;
         CHECK(domain::tryResolveAmbienteEnum("Test", amb) && amb == domain::AmbienteEnum::PreCertificacion, "BUG-093: recognizes Test");
@@ -481,14 +450,12 @@ int main() {
         CHECK(domain::tryResolveAmbienteEnum("Produccion", amb) && amb == domain::AmbienteEnum::Produccion, "BUG-093: recognizes Produccion");
         CHECK(domain::tryResolveAmbienteEnum("2", amb) && amb == domain::AmbienteEnum::Produccion, "BUG-093: recognizes 2");
 
-        // Unrecognized values must return false (preventing silent fallback to default)
         CHECK(!domain::tryResolveAmbienteEnum("invalid_env", amb), "BUG-093: rejects invalid_env");
         CHECK(!domain::tryResolveAmbienteEnum("dev", amb), "BUG-093: rejects dev");
         CHECK(!domain::tryResolveAmbienteEnum("staging", amb), "BUG-093: rejects staging");
         CHECK(!domain::tryResolveAmbienteEnum("", amb), "BUG-093: rejects empty env");
     }
 
-    // Test BUG-100: Idempotency uniqueness - source_txn_id strictly isolated from track_id and e_ncf
     {
         struct MockDoc {
             std::string sourceTxnId;
@@ -499,7 +466,7 @@ int main() {
         MockDoc existingDoc{"QB-INV-5001", "TRK-9999", "E310000000001"};
 
         auto matchesSourceTxnId = [](const MockDoc& doc, const std::string& queryId) -> bool {
-            // BUG-100: Strictly match source_txn_id, NOT track_id or e_ncf
+
             return doc.sourceTxnId == queryId;
         };
 
@@ -508,7 +475,6 @@ int main() {
         CHECK(matchesSourceTxnId(existingDoc, "QB-INV-5001"), "BUG-100: query by actual source_txn_id matches correctly");
     }
 
-    // Test 20: Serie B NCF reference normalization (B03, B15, B16, B17 & legacy numeric strings)
     {
         CHECK(app::normalizeNcfReference("0300000012") == "B0300000012", "10-digit 03... normalizes to B03");
         CHECK(app::normalizeNcfReference("1500000045") == "B1500000045", "10-digit 15... normalizes to B15");
@@ -520,11 +486,10 @@ int main() {
         CHECK(app::normalizeNcfReference("b1300000001") == "B1300000001", "lowercase b13 uppercases cleanly");
     }
 
-    // Test 21: buildTimbreUrl omits rnccomprador on E43 and empty-buyer E34/E47
     {
         domain::TimbreEcfRequest req43;
-        req43.rncEmisor = "101672919";
-        req43.rncComprador = "101672919"; // Even if accidentally populated, E43 has no buyer in DGII QR
+        req43.rncEmisor = "101000021";
+        req43.rncComprador = "101000021";
         req43.eNcf = "E430000000001";
         req43.fechaEmision = "05-11-2026";
         req43.montoTotal = 450.00;
@@ -541,7 +506,6 @@ int main() {
         CHECK(url34.find("rnccomprador=") == std::string::npos, "Empty-buyer E34 QR Timbre URL omits rnccomprador=");
     }
 
-    // Test 22: Foreign currency resolution & buildRfceXml DOP totals enforcement
     {
         app::CanonicalCurrencyDto cUsd{"US$", 60.0};
         auto rUsd = app::resolveCanonicalCurrency(cUsd);
@@ -559,10 +523,9 @@ int main() {
         auto rBad = app::resolveCanonicalCurrency(cBad);
         CHECK(!rBad.validationError.empty(), "Unsupported ISO currency code produces validation error");
 
-        // RFCE for USD 100 + USD 18 ITBIS @ 60.0 => doc stores DOP 7,080.00 total and DOP 1,080.00 ITBIS
         domain::EcfDocument doc;
         doc.eNcf = "E320000000099";
-        doc.rncEmisor = "101672919";
+        doc.rncEmisor = "101000021";
         doc.totalAmount = 7080.00;
         doc.itbisAmount = 1080.00;
         doc.securityCode = "UsdRfc";
@@ -575,7 +538,7 @@ int main() {
         dto.totals.montoItbis = 18.0;
         dto.totals.montoTotal = 118.0;
 
-        std::string rfceXml = app::buildRfceXml(doc, &dto, "WILLY CHIC DOMINICANA SRL");
+        std::string rfceXml = app::buildRfceXml(doc, &dto, "EMPRESA DEMO SRL");
         CHECK(rfceXml.find("<MontoGravadoTotal>6000.00</MontoGravadoTotal>") != std::string::npos,
               "Foreign-currency RFCE emits DOP MontoGravadoTotal (6000.00), not USD (100.00)");
         CHECK(rfceXml.find("<TotalITBIS>1080.00</TotalITBIS>") != std::string::npos,

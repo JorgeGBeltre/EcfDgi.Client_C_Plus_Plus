@@ -53,7 +53,7 @@ ResultT<RfceRecepcionResponse> SendRfceCommandHandler::handle(SendRfceCommand cm
         doc.rncEmisor = rfce.encabezado.emisor.rncEmisor;
         if (rfce.encabezado.comprador.has_value())
             doc.rncComprador = rfce.encabezado.comprador->rncComprador;
-        doc.trackId = std::nullopt;  // RFCE responses return code/estado, not a TrackId
+        doc.trackId = std::nullopt;
         doc.state = response.estado;
         doc.totalAmount = rfce.encabezado.totales.montoTotal;
         doc.itbisAmount = rfce.encabezado.totales.totalITBIS.value_or(0);
@@ -83,7 +83,6 @@ ResultT<ConsultaEstadoResponse> GetEcfStatusQueryHandler::handle(const GetEcfSta
     try {
         auto localDoc = docRepo_->getByENcf(q.eNcf);
 
-        // BUG-031: Verificar correspondencia de RNC emisor para prevenir acceso o sobreescritura entre tenants
         if (localDoc.has_value() && !q.rncEmisor.empty()) {
             std::string cleanQ = q.rncEmisor;
             cleanQ.erase(std::remove_if(cleanQ.begin(), cleanQ.end(), [](char c){ return c == '-' || c == ' '; }), cleanQ.end());
@@ -116,7 +115,7 @@ ResultT<ConsultaEstadoResponse> GetEcfStatusQueryHandler::handle(const GetEcfSta
         auto live = client_->consultarEstado(q.rncEmisor, q.eNcf, rncComprador, secCode);
 
         if (localDoc.has_value()) {
-            // Mapear vocabulario externo de la DGII al vocabulario canónico interno del motor
+
             std::string mappedState = live.estado;
             if (live.estado == "Aceptado" || live.estado == "Accepted") {
                 mappedState = "AcceptedByDgii";
@@ -140,4 +139,4 @@ ResultT<ConsultaEstadoResponse> GetEcfStatusQueryHandler::handle(const GetEcfSta
     }
 }
 
-}  // namespace ecf::app
+}

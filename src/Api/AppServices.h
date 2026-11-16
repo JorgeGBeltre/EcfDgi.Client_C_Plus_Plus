@@ -1,7 +1,4 @@
 #pragma once
-// Composition root: wires the application and infrastructure services. Holds
-// singletons and builds a per-request scope (DbContext + repositories + unit of
-// work).
 
 #include <exception>
 #include <memory>
@@ -43,7 +40,6 @@ public:
     void configure(AppConfig config);
     const AppConfig& config() const { return config_; }
 
-    // Singletons.
     std::shared_ptr<domain::IPasswordHasher> passwordHasher() const { return passwordHasher_; }
     std::shared_ptr<domain::ITokenService> tokenService() const { return tokenService_; }
     std::shared_ptr<domain::IEcfXmlSerializer> serializer() const { return serializer_; }
@@ -58,9 +54,8 @@ public:
     const domain::EcfStatusPollingOptions& statusPollingOptions() const { return config_.statusPollingOptions; }
     const domain::EcfClientOptions& ecfClientOptions() const { return config_.ecfOptions; }
 
-    std::shared_ptr<domain::IEcfClient> ecfClient();  // lazily built
+    std::shared_ptr<domain::IEcfClient> ecfClient();
 
-    // Per-request scope (new DB connection + repositories bound to currentUser).
     Scope makeScope(std::shared_ptr<domain::ICurrentUserService> currentUser);
 
 private:
@@ -81,4 +76,4 @@ private:
     std::exception_ptr ecfClientError_;
 };
 
-}  // namespace ecf::api
+}

@@ -1,6 +1,4 @@
 #pragma once
-// Drogon filter equivalent to [Authorize]: validates the Bearer JWT and stashes
-// the user claims (userId/username/role) on the request for downstream use.
 
 #include <drogon/HttpFilter.h>
 
@@ -13,4 +11,4 @@ public:
                   drogon::FilterChainCallback&& fccb) override;
 };
 
-}  // namespace ecf::api
+}

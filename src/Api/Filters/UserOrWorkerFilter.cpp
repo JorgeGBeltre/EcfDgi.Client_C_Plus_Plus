@@ -26,14 +26,13 @@ long long currentUnixTimestamp() {
     auto now = std::chrono::system_clock::now();
     return std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count();
 }
-}  // namespace
+}
 
 void UserOrWorkerFilter::doFilter(const HttpRequestPtr& req, FilterCallback&& fcb,
                                   FilterChainCallback&& fccb) {
     const std::string& auth = req->getHeader("authorization");
     const std::string prefix = "Bearer ";
 
-    // 1. Try JWT Bearer Authentication first
     if (auth.size() > prefix.size() && auth.compare(0, prefix.size(), prefix) == 0) {
         const std::string token = auth.substr(prefix.size());
         const auto& jwtCfg = AppServices::instance().config().jwt;
@@ -65,7 +64,6 @@ void UserOrWorkerFilter::doFilter(const HttpRequestPtr& req, FilterCallback&& fc
         }
     }
 
-    // 2. Try Worker HMAC Authentication
     const std::string& keyId = req->getHeader("x-worker-key-id");
     const std::string& timestampStr = req->getHeader("x-request-timestamp");
     const std::string& nonce = req->getHeader("x-request-nonce");
@@ -77,7 +75,6 @@ void UserOrWorkerFilter::doFilter(const HttpRequestPtr& req, FilterCallback&& fc
             return;
         }
 
-        // Verify Timestamp & Clock Drift
         long long clientTs = 0;
         try {
             clientTs = std::stoll(timestampStr);
@@ -93,9 +90,8 @@ void UserOrWorkerFilter::doFilter(const HttpRequestPtr& req, FilterCallback&& fc
             return;
         }
 
-        // Resolve Worker Key
         const auto& config = AppServices::instance().config();
-        
+
         if (config.workerKeyId.empty()) {
             fcb(unauthorized("Worker authentication is not configured."));
             return;
@@ -106,7 +102,6 @@ void UserOrWorkerFilter::doFilter(const HttpRequestPtr& req, FilterCallback&& fc
             return;
         }
 
-        // Read Request Body & Verify HMAC Signature
         std::string body(req->bodyData(), req->bodyLength());
         std::string pathAndQuery = req->path();
         if (!req->query().empty()) {
@@ -125,21 +120,19 @@ void UserOrWorkerFilter::doFilter(const HttpRequestPtr& req, FilterCallback&& fc
             return;
         }
 
-        // Verify Anti-Replay Nonce
         auto nonceCache = AppServices::instance().nonceCache();
         if (!nonceCache->tryAddNonce(keyId, nonce, 300.0)) {
             fcb(unauthorized("Replayed nonce detected. Code: nonce_replayed."));
             return;
         }
 
-        // Build Authenticated Claims
         req->attributes()->insert("userId", keyId);
         req->attributes()->insert("username", std::string("Worker:") + keyId);
         req->attributes()->insert("role", std::string("Worker"));
         req->attributes()->insert("tenantId", config.workerTenantId);
         req->attributes()->insert("workerKeyId", keyId);
         req->attributes()->insert("clientType", std::string("worker"));
-        
+
         fccb();
         return;
     }
@@ -147,4 +140,4 @@ void UserOrWorkerFilter::doFilter(const HttpRequestPtr& req, FilterCallback&& fc
     fcb(unauthorized("Missing or malformed Authorization header or Worker credentials."));
 }
 
-} // namespace ecf::api
+}

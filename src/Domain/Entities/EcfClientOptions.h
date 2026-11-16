@@ -9,7 +9,6 @@ enum class EcfEnvironment { Test, Cert, Prod };
 
 enum class IntegrationMode { DgiiDirect };
 
-// DGII environment identifier used when selecting endpoints.
 enum class AmbienteEnum { PreCertificacion = 1, Certificacion = 2, Produccion = 3 };
 
 inline AmbienteEnum toAmbiente(EcfEnvironment env) {
@@ -60,4 +59,4 @@ struct PollingOptions {
     std::optional<int> timeoutMs;
 };
 
-}  // namespace ecf::domain
+}

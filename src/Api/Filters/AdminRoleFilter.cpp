@@ -26,4 +26,4 @@ void AdminRoleFilter::doFilter(const HttpRequestPtr& req, FilterCallback&& fcb,
     fccb();
 }
 
-}  // namespace ecf::api
+}

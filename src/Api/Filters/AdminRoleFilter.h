@@ -1,6 +1,4 @@
 #pragma once
-// Drogon filter equivalent to [Authorize(Roles = "Admin")]. Runs after
-// JwtAuthFilter and checks the "role" claim it stashed.
 
 #include <drogon/HttpFilter.h>
 
@@ -13,4 +11,4 @@ public:
                   drogon::FilterChainCallback&& fccb) override;
 };
 
-}  // namespace ecf::api
+}

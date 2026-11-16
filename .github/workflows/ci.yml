@@ -20,9 +20,6 @@ permissions:
   packages: write
 
 jobs:
-  # ============================================================================
-  # 1. Pruebas y Compilación del Core en C++ (CMake + Ninja + ctest)
-  # ============================================================================
   build-and-test:
     name: Build & Test (C++20 / Ubuntu 24.04)
     runs-on: ubuntu-24.04
@@ -73,9 +70,6 @@ jobs:
       - name: Correr Tests
         run: ctest --test-dir build --output-on-failure
 
-  # ============================================================================
-  # 2. Auto-Merge de develop a main (solo en push a develop con pruebas exitosas)
-  # ============================================================================
   automerge:
     name: Auto-Merge to main
     needs: build-and-test
@@ -98,9 +92,6 @@ jobs:
           git merge --no-ff develop -m "Auto-merge develop to main"
           git push origin main
 
-  # ============================================================================
-  # 3. Compilación y Publicación de Imagen Docker en GHCR (GitHub Container Registry)
-  # ============================================================================
   build-docker:
     name: Build & Push Docker Image (GHCR)
     needs: build-and-test
@@ -144,9 +135,6 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # ============================================================================
-  # 4. Despliegue Automático en VPS vía SSH
-  # ============================================================================
   deploy-vps:
     name: Deploy C++ Engine to VPS
     needs: build-docker
@@ -171,7 +159,7 @@ jobs:
                   stripped = line.strip()
                   if not stripped:
                       continue
-                  if not in_block and stripped.startswith("#"):
+                  if not in_block and (stripped.startswith(chr(35))):
                       continue
                   if in_block:
                       current_val.append(line)
@@ -247,13 +235,14 @@ jobs:
         uses: appleboy/ssh-action@v1.2.0
         env:
           REDIS_PASSWORD: ${{ env.REDIS_PASSWORD || secrets.REDIS_PASSWORD }}
+          TRAEFIK_HOST: ${{ vars.TRAEFIK_HOST || secrets.TRAEFIK_HOST || env.TRAEFIK_HOST }}
         with:
           host: ${{ env.HOSTINGER_SERVER || secrets.HOSTINGER_SERVER }}
           username: ${{ env.HOSTINGER_USERNAME || secrets.HOSTINGER_USERNAME || 'root' }}
           key: ${{ env.HOSTINGER_SSH_KEY || secrets.HOSTINGER_SSH_KEY }}
           password: ${{ env.HOSTINGER_PASSWORD || secrets.HOSTINGER_PASSWORD }}
           port: ${{ env.HOSTINGER_SSH_PORT || secrets.HOSTINGER_SSH_PORT || 22 }}
-          envs: REDIS_PASSWORD
+          envs: REDIS_PASSWORD,TRAEFIK_HOST
           script: |
             set -e
             CONTAINER_NAME="saas-ecf-dgii-api"
@@ -262,6 +251,13 @@ jobs:
             DEPLOY_DIR="/var/www/saas-ecf-dgii"
 
             mkdir -p "$DEPLOY_DIR/certificates"
+
+            if [ -z "${TRAEFIK_HOST}" ] && [ -f "$DEPLOY_DIR/.env" ]; then
+              TRAEFIK_HOST=$(grep -E '^TRAEFIK_HOST=' "$DEPLOY_DIR/.env" | head -n 1 | cut -d '=' -f2- || true)
+            fi
+            if [ -z "${TRAEFIK_HOST}" ]; then
+              TRAEFIK_HOST=$(docker inspect "$CONTAINER_NAME" --format '{{index .Config.Labels "traefik.http.routers.saas-ecf-dgii.rule"}}' 2>/dev/null | awk -F'\140' '{print $2}' || true)
+            fi
 
             echo "Asegurando red Docker netbird..."
             if ! docker network inspect netbird >/dev/null 2>&1; then
@@ -305,7 +301,6 @@ jobs:
             fi
             chmod 600 "$DEPLOY_DIR/.env"
 
-            # Detectar si hay saas-ecf-postgres-db o saas-ecf-redis-db dedicados
             if docker ps -q -f "name=^/saas-ecf-postgres-db$" | grep -q .; then
               sed -i 's/Host=ecf-postgres-db/Host=saas-ecf-postgres-db/g' "$DEPLOY_DIR/.env"
             fi
@@ -324,7 +319,7 @@ jobs:
               -p 127.0.0.1:8086:8080 \
               -e TZ=America/Santo_Domingo \
               --label "traefik.enable=true" \
-              --label 'traefik.http.routers.saas-ecf-dgii.rule=Host(`dgii.app.vesismart.com`) && PathPrefix(`/fe/`)' \
+              --label "traefik.http.routers.saas-ecf-dgii.rule=Host(\`${TRAEFIK_HOST}\`) && PathPrefix(\`/fe/\`)" \
               --label "traefik.http.routers.saas-ecf-dgii.entrypoints=websecure" \
               --label "traefik.http.routers.saas-ecf-dgii.tls.certresolver=letsencrypt" \
               --label "traefik.http.services.saas-ecf-dgii.loadbalancer.server.port=8080" \

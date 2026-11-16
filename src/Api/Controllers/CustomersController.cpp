@@ -38,7 +38,7 @@ bool isValidUuid(const std::string& s) {
     return true;
 }
 
-}  // namespace
+}
 
 void CustomersController::getAll(const HttpRequestPtr& req,
                                  std::function<void(const HttpResponsePtr&)>&& callback) {
@@ -97,7 +97,7 @@ void CustomersController::create(const HttpRequestPtr& req,
     auto result = handler.handle(cmd);
 
     if (result.isFailure()) { callback(json(err(*result.error()), k400BadRequest)); return; }
-    Json::Value v = *result.value();  // the new id
+    Json::Value v = *result.value();
     auto resp = json(v, k201Created);
     resp->addHeader("Location", "/api/customers/" + *result.value());
     callback(resp);
@@ -169,4 +169,4 @@ void CustomersController::remove(const HttpRequestPtr& req,
     callback(noContent());
 }
 
-}  // namespace ecf::api
+}

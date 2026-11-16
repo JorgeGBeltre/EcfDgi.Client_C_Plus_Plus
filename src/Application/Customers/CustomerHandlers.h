@@ -1,5 +1,4 @@
 #pragma once
-// Ports of the Customer command/query handlers.
 
 #include <memory>
 #include <vector>
@@ -67,4 +66,4 @@ private:
     std::shared_ptr<domain::ICustomerRepository> repo_;
 };
 
-}  // namespace ecf::app
+}

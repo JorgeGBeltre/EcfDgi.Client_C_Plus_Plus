@@ -13,7 +13,6 @@ std::string newUuid() {
     std::array<unsigned char, 16> b{};
     RAND_bytes(b.data(), static_cast<int>(b.size()));
 
-    // Set version (4) and variant (RFC 4122) bits.
     b[6] = static_cast<unsigned char>((b[6] & 0x0F) | 0x40);
     b[8] = static_cast<unsigned char>((b[8] & 0x3F) | 0x80);
 
@@ -88,7 +87,6 @@ std::chrono::system_clock::time_point parseIsoUtc(const std::string& iso) {
 
     const char* ptr = iso.c_str() + start + charsRead;
 
-    // Skip fractional seconds (e.g. .123456)
     if (*ptr == '.') {
         ptr++;
         while (*ptr >= '0' && *ptr <= '9') {
@@ -96,21 +94,19 @@ std::chrono::system_clock::time_point parseIsoUtc(const std::string& iso) {
         }
     }
 
-    // Skip whitespace before timezone
     while (*ptr == ' ') {
         ptr++;
     }
 
-    // Timezone offset
     if (*ptr == 'Z' || *ptr == 'z') {
-        // UTC, no adjustment
+
     } else if (*ptr == '+' || *ptr == '-') {
         char sign = *ptr++;
         int tzHour = 0, tzMin = 0;
         if (std::sscanf(ptr, "%d:%d", &tzHour, &tzMin) >= 1) {
-            // parsed tzHour and optional tzMin
+
         } else if (std::sscanf(ptr, "%2d%2d", &tzHour, &tzMin) >= 1) {
-            // parsed 2-digit hour
+
         }
         long offsetSec = tzHour * 3600 + tzMin * 60;
         if (sign == '+') {
@@ -123,4 +119,4 @@ std::chrono::system_clock::time_point parseIsoUtc(const std::string& iso) {
     return std::chrono::system_clock::from_time_t(t);
 }
 
-}  // namespace ecf::sys
+}

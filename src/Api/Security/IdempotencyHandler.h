@@ -21,7 +21,7 @@ public:
         std::function<void(std::function<void(const drogon::HttpResponsePtr&)>&&)>&& next) {
 
         const std::string& idempotencyKey = req->getHeader("x-idempotency-key");
-        if (idempotencyKey.empty() || 
+        if (idempotencyKey.empty() ||
             (req->method() != drogon::Post && req->method() != drogon::Put && req->method() != drogon::Patch)) {
             next(std::move(callback));
             return;
@@ -61,11 +61,10 @@ public:
             return;
         }
 
-        // Status == Reserved: Execute handler and capture the response
         try {
             next([store, scopedKey, callback = std::move(callback)](const drogon::HttpResponsePtr& resp) {
                 int sc = resp->statusCode();
-                // Selective caching: Cache business domain results (2xx, 400, 404, 422).
+
                 bool shouldCache = sc >= 200 && sc < 500 &&
                                    sc != 401 && sc != 403 && sc != 408 && sc != 409 && sc != 429;
 
@@ -91,4 +90,4 @@ public:
     }
 };
 
-} // namespace ecf::api
+}

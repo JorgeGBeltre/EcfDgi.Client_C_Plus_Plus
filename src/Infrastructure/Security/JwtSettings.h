@@ -11,4 +11,4 @@ struct JwtSettings {
     std::string audience;
 };
 
-}  // namespace ecf::infra
+}

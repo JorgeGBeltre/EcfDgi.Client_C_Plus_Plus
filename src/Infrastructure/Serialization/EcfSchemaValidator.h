@@ -29,4 +29,4 @@ private:
     std::unordered_map<std::string, xmlSchemaPtr> schemaCache_;
 };
 
-}  // namespace ecf::infra
+}

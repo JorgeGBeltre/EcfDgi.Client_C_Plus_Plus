@@ -38,4 +38,4 @@ private:
     std::unordered_map<std::string, CachedSigner> cache_;
 };
 
-}  // namespace ecf::infra
+}

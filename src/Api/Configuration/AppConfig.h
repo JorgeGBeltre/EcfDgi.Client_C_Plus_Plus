@@ -1,5 +1,4 @@
 #pragma once
-// Loads appsettings.json into strongly-typed configuration options.
 
 #include <string>
 
@@ -11,7 +10,7 @@ namespace ecf::api {
 struct AppConfig {
     std::string serverHost = "0.0.0.0";
     int serverPort = 8080;
-    int threads = 0;  // 0 => hardware_concurrency
+    int threads = 0;
 
     std::string connectionString;
     std::string redisConnectionString;
@@ -28,8 +27,7 @@ struct AppConfig {
     std::string workerTenantId = "default-tenant";
     std::string workerAllowedRncs = "*";
 
-    // Loads from a JSON file; throws std::runtime_error on failure.
     static AppConfig load(const std::string& path);
 };
 
-}  // namespace ecf::api
+}

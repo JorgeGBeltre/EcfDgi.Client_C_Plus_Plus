@@ -41,7 +41,6 @@ void RedisCacheService::parseConnectionString(const std::string& connectionStrin
 
     std::string s = connectionString;
 
-    // Check for password in connection string: e.g. "host:6379,password=secret,abortConnect=false"
     auto passPos = s.find("password=");
     if (passPos != std::string::npos) {
         auto passEnd = s.find_first_of(",;", passPos);
@@ -65,7 +64,6 @@ void RedisCacheService::parseConnectionString(const std::string& connectionStrin
         port_ = 6379;
     }
 
-    // Test socket connection
     lastPingAttempt_ = std::chrono::system_clock::now();
     std::string pingResp = sendRedisCommand("*1\r\n$4\r\nPING\r\n");
     if (!pingResp.empty() && pingResp.find("+PONG") != std::string::npos) {
@@ -102,7 +100,7 @@ std::string RedisCacheService::sendRedisCommand(const std::string& cmd) {
 #if defined(_WIN32)
     SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (sock == INVALID_SOCKET) return "";
-    DWORD timeout = 2500; // 2.5s socket timeout
+    DWORD timeout = 2500;
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
     setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (const char*)&timeout, sizeof(timeout));
 #else
@@ -207,7 +205,7 @@ std::optional<std::string> RedisCacheService::get(const std::string& key) {
         std::string resp = sendRedisCommand(ss.str());
 
         if (resp.rfind("$", 0) == 0) {
-            if (resp.find("$-1") == 0) return std::nullopt; // Key not found
+            if (resp.find("$-1") == 0) return std::nullopt;
             size_t crlf = resp.find("\r\n");
             if (crlf != std::string::npos) {
                 try {
@@ -220,7 +218,6 @@ std::optional<std::string> RedisCacheService::get(const std::string& key) {
         }
     }
 
-    // In-memory fallback
     std::lock_guard<std::mutex> lock(memMutex_);
     auto it = memoryStore_.find(key);
     if (it != memoryStore_.end()) {
@@ -251,7 +248,6 @@ bool RedisCacheService::set(const std::string& key, const std::string& value,
         if (resp.find("+OK") != std::string::npos) return true;
     }
 
-    // In-memory fallback
     std::lock_guard<std::mutex> lock(memMutex_);
     CacheItem item;
     item.value = value;
@@ -287,19 +283,16 @@ bool RedisCacheService::acquireLock(const std::string& lockKey, const std::strin
            << "\r\n" << expiration.count() << "\r\n";
         std::string resp = sendRedisCommand(ss.str());
         if (resp.find("+OK") != std::string::npos) return true;
-        
-        // If Redis responded with null bulk string ("$-1\r\n") or error, the lock is held by another instance.
-        // Returning false ensures true distributed exclusion and prevents split-brain.
+
         return false;
     }
 
-    // In-memory fallback lock only when Redis is not available
     std::lock_guard<std::mutex> lock(memMutex_);
     auto now = std::chrono::system_clock::now();
     auto it = locks_.find(lockKey);
     if (it != locks_.end()) {
         if (now < it->second.second) {
-            return false; // Lock taken and not expired
+            return false;
         }
     }
     locks_[lockKey] = {lockValue, now + expiration};
@@ -308,7 +301,7 @@ bool RedisCacheService::acquireLock(const std::string& lockKey, const std::strin
 
 bool RedisCacheService::releaseLock(const std::string& lockKey, const std::string& lockValue) {
     if (checkRedisAvailability()) {
-        // Atomic compare-and-delete via EVAL Lua script
+
         const std::string script = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end";
         std::ostringstream ss;
         ss << "*5\r\n$4\r\nEVAL\r\n$" << script.length() << "\r\n" << script
@@ -329,4 +322,4 @@ bool RedisCacheService::releaseLock(const std::string& lockKey, const std::strin
     return false;
 }
 
-}  // namespace ecf::infra
+}

@@ -45,7 +45,7 @@ std::string EcfXsdFileNameResolver::resolve(const std::string& xmlContent) {
     }
 
     if (rootName == "ECF") {
-        // Find //Encabezado/IdDoc/TipoeCF
+
         xmlXPathContextPtr xpathCtx = xmlXPathNewContext(doc);
         if (xpathCtx) {
             xmlXPathObjectPtr xpathObj = xmlXPathEvalExpression(
@@ -56,7 +56,7 @@ std::string EcfXsdFileNameResolver::resolve(const std::string& xmlContent) {
                 if (content) {
                     std::string tipo = reinterpret_cast<const char*>(content);
                     xmlFree(content);
-                    // trim
+
                     size_t first = tipo.find_first_not_of(" \t\r\n");
                     size_t last = tipo.find_last_not_of(" \t\r\n");
                     if (first != std::string::npos && last != std::string::npos) {
@@ -77,4 +77,4 @@ std::string EcfXsdFileNameResolver::resolve(const std::string& xmlContent) {
     return "";
 }
 
-}  // namespace ecf::infra
+}

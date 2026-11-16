@@ -21,4 +21,4 @@ private:
     std::shared_ptr<DbContext> db_;
 };
 
-}  // namespace ecf::infra
+}

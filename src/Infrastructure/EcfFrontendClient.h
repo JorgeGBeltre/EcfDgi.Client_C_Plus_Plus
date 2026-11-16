@@ -1,7 +1,4 @@
 #pragma once
-// Lightweight facade over IEcfTransport exposing the read-only queries (estado, rfce,
-// timbres). Builds a DgiiDirectTransport from options; the signing certificate
-// is optional (only the token-based queries need it).
 
 #include <memory>
 #include <optional>
@@ -34,4 +31,4 @@ private:
     std::shared_ptr<domain::IEcfTransport> transport_;
 };
 
-}  // namespace ecf::infra
+}

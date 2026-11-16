@@ -15,9 +15,9 @@ struct EcfSequence {
     long long rangoDesde = 1;
     long long rangoHasta = 9999999999;
     long long secuenciaActual = 0;
-    std::optional<std::string> fechaVencimiento; // ISO-8601 UTC
+    std::optional<std::string> fechaVencimiento;
     bool isActive = true;
-    std::string updatedAt; // ISO-8601 UTC
+    std::string updatedAt;
 
     std::string getCurrentEncfFormatted() const {
         std::ostringstream ss;
@@ -30,4 +30,4 @@ struct EcfSequence {
     }
 };
 
-} // namespace ecf::domain
+}

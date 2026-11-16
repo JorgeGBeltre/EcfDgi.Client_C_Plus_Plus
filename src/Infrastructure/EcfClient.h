@@ -17,14 +17,13 @@ namespace ecf::infra {
 
 class EcfClient : public domain::IEcfClient {
 public:
-    // Full construction from options (builds a DgiiDirectTransport internally).
+
     explicit EcfClient(domain::EcfClientOptions options,
                        std::shared_ptr<domain::IEcfSequenceProvider> sequenceProvider = nullptr,
                        std::shared_ptr<domain::ICacheService> cacheService = nullptr,
                        std::shared_ptr<domain::IEcfSchemaValidator> schemaValidator = nullptr,
                        std::shared_ptr<domain::IEcfXmlSigner> signer = nullptr);
 
-    // Injectable construction (used by tests / DI).
     EcfClient(domain::EcfClientOptions options,
               std::shared_ptr<domain::IEcfTransport> transport,
               std::shared_ptr<domain::IEcfSequenceProvider> sequenceProvider = nullptr,
@@ -66,4 +65,4 @@ private:
     EcfXmlSerializer serializer_;
 };
 
-}  // namespace ecf::infra
+}

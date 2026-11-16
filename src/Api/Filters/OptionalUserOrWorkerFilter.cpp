@@ -26,14 +26,13 @@ long long currentUnixTimestamp() {
     auto now = std::chrono::system_clock::now();
     return std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count();
 }
-}  // namespace
+}
 
 void OptionalUserOrWorkerFilter::doFilter(const HttpRequestPtr& req, FilterCallback&& fcb,
                                           FilterChainCallback&& fccb) {
     const std::string& auth = req->getHeader("authorization");
     const std::string prefix = "Bearer ";
 
-    // 1. If JWT Bearer Authorization is provided, validate it strictly
     if (!auth.empty()) {
         if (auth.size() > prefix.size() && auth.compare(0, prefix.size(), prefix) == 0) {
             const std::string token = auth.substr(prefix.size());
@@ -70,7 +69,6 @@ void OptionalUserOrWorkerFilter::doFilter(const HttpRequestPtr& req, FilterCallb
         }
     }
 
-    // 2. If Worker HMAC Authentication is provided, validate it strictly
     const std::string& keyId = req->getHeader("x-worker-key-id");
     const std::string& timestampStr = req->getHeader("x-request-timestamp");
     const std::string& nonce = req->getHeader("x-request-nonce");
@@ -143,9 +141,8 @@ void OptionalUserOrWorkerFilter::doFilter(const HttpRequestPtr& req, FilterCallb
         return;
     }
 
-    // 3. Neither Bearer nor Worker headers present: Allow unauthenticated (anonymous / direct ERP caller)
     req->attributes()->insert("clientType", std::string("anonymous"));
     fccb();
 }
 
-} // namespace ecf::api
+}

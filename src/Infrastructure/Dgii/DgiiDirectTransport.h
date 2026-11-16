@@ -1,5 +1,4 @@
 #pragma once
-// Talks to the live DGII REST endpoints (bearer token from EcfTokenManager).
 
 #include <chrono>
 #include <memory>
@@ -16,7 +15,6 @@
 
 namespace ecf::infra {
 
-// PERF-001: Explicit timeouts for DGII communications (prevent unconfigured blocking I/O)
 constexpr std::chrono::milliseconds kDefaultConnectTimeout{5000};
 constexpr std::chrono::milliseconds kDefaultReadTimeout{15000};
 constexpr std::chrono::milliseconds kReceptionTimeout{30000};
@@ -49,7 +47,6 @@ public:
     std::vector<domain::VentanaMantenimiento> consultarVentanasMantenimiento() override;
     std::string verificarEstadoAmbiente(domain::AmbienteEnum ambiente) override;
 
-    // BUG-014: Validates that response did not suffer transport/network failure or 5xx server crash
     static void validateDgiiResponse(const cpr::Response& resp) {
         if (resp.error.code != cpr::ErrorCode::OK) {
             throw domain::EcfException("Fallo de red/transporte con DGII: " + resp.error.message +
@@ -67,8 +64,7 @@ public:
     }
 
 private:
-    // Fetches the bearer token; throws if no token manager was supplied
-    // (e.g. EcfFrontendClient built without a signing certificate).
+
     std::string getAuthToken();
 
     template <typename RequestFn>
@@ -89,4 +85,4 @@ private:
     EcfXmlSerializer xmlSerializer_;
 };
 
-}  // namespace ecf::infra
+}

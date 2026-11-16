@@ -37,4 +37,4 @@ inline AmbienteEnum resolveAmbienteEnum(const std::string& rawEnv, AmbienteEnum 
     return defaultAmbiente;
 }
 
-} // namespace ecf::domain
+}

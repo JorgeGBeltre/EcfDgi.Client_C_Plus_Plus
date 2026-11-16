@@ -29,7 +29,7 @@ services:
     networks:
       - ecf-network
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-R3d!s_SecUr3_P@ssw0rd2026}", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping"]
       interval: 5s
       timeout: 5s
       retries: 5

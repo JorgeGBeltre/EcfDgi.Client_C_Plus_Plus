@@ -1,5 +1,4 @@
 #pragma once
-// Serializes the RFCE model to XML and parses the XML-form DGII responses.
 
 #include <string>
 
@@ -23,4 +22,4 @@ public:
     virtual std::string escapeAlfanum(const std::string& value) = 0;
 };
 
-}  // namespace ecf::domain
+}

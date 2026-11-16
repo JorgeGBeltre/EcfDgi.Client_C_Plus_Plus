@@ -26,7 +26,7 @@ std::string money(double v) {
     return std::string(buf);
 }
 
-}  // namespace
+}
 
 std::string urlEncode(const std::string& value) {
     static const char hex[] = "0123456789ABCDEF";
@@ -131,7 +131,6 @@ std::optional<std::string> extractFechaHoraFirma(const std::string& signedXml) {
     return value.substr(a, b - a + 1);
 }
 
-
 std::string buildTimbreUrl(const std::string& baseUrl,
                            const domain::TimbreEcfRequest& req) {
     bool isE43 = req.eNcf.rfind("E43", 0) == 0 || req.eNcf.rfind("e43", 0) == 0;
@@ -165,4 +164,4 @@ std::string buildTimbreFcUrl(const std::string& baseUrl,
     return os.str();
 }
 
-}  // namespace ecf::infra::EcfSecurityUtils
+}

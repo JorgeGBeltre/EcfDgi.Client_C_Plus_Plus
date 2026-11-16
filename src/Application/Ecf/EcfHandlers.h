@@ -1,5 +1,4 @@
 #pragma once
-// Ports of SendEcfCommandHandler, SendRfceCommandHandler, GetEcfStatusQueryHandler.
 
 #include <memory>
 
@@ -60,4 +59,4 @@ private:
     std::shared_ptr<domain::IUnitOfWork> uow_;
 };
 
-}  // namespace ecf::app
+}

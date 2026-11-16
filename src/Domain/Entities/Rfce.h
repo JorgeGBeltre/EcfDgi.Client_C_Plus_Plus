@@ -1,6 +1,4 @@
 #pragma once
-// Represents a "Resumen de Factura de Consumo Electrónica" (e-CF type 32).
-// The XML element names/order are reproduced by EcfXmlSerializer.
 
 #include <optional>
 #include <string>
@@ -69,7 +67,7 @@ struct RfceEncabezado {
 
 struct Rfce {
     RfceEncabezado encabezado;
-    // The <Signature> block is appended by EcfXmlSigner after serialization.
+
 };
 
-}  // namespace ecf::domain
+}

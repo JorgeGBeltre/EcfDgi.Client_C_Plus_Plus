@@ -22,7 +22,7 @@ void schemaErrorCallback(void* ctx, const char* msg, ...) {
     va_end(args);
 
     std::string errStr(buf);
-    // Remove trailing newline if present
+
     while (!errStr.empty() && (errStr.back() == '\n' || errStr.back() == '\r')) {
         errStr.pop_back();
     }
@@ -31,7 +31,7 @@ void schemaErrorCallback(void* ctx, const char* msg, ...) {
     }
 }
 
-}  // namespace
+}
 
 EcfSchemaValidator::EcfSchemaValidator(const std::optional<std::string>& xsdDirectoryPath)
     : xsdDirectoryPath_(xsdDirectoryPath) {}
@@ -56,7 +56,7 @@ xmlSchemaPtr EcfSchemaValidator::getOrCompileSchema(const std::string& xsdPath) 
     }
 
     std::unique_lock writeLock(cacheMutex_);
-    // Double-check pattern
+
     auto it = schemaCache_.find(xsdPath);
     if (it != schemaCache_.end()) {
         return it->second;
@@ -71,20 +71,18 @@ xmlSchemaPtr EcfSchemaValidator::getOrCompileSchema(const std::string& xsdPath) 
     std::string content((std::istreambuf_iterator<char>(file)),
                         std::istreambuf_iterator<char>());
 
-    // Sanitize DGII non-standard regex syntax for libxml2 W3C compliance
-    // 1. Replace (?: with (
     size_t pos = 0;
     while ((pos = content.find("(?:", pos)) != std::string::npos) {
         content.replace(pos, 3, "(");
         pos += 1;
     }
-    // 2. Replace \- with -
+
     pos = 0;
     while ((pos = content.find("\\-", pos)) != std::string::npos) {
         content.replace(pos, 2, "-");
         pos += 1;
     }
-    // 3. Fix missing IndicadorServicioTodoIncluidoType in DGII drafts if present
+
     if (content.find("IndicadorServicioTodoIncluidoType") != std::string::npos &&
         content.find("name=\"IndicadorServicioTodoIncluidoType\"") == std::string::npos) {
         const std::string missingType =
@@ -180,4 +178,4 @@ domain::SchemaValidationResult EcfSchemaValidator::validate(const std::string& x
     return validate(xmlContent, xsdPath);
 }
 
-}  // namespace ecf::infra
+}

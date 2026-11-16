@@ -1,5 +1,4 @@
 #pragma once
-// Aggregates request validation failures grouped by property name.
 
 #include <map>
 #include <stdexcept>
@@ -23,11 +22,10 @@ public:
         for (const auto& f : failures) errors_[f.propertyName].push_back(f.errorMessage);
     }
 
-    // property name -> list of error messages
     const std::map<std::string, std::vector<std::string>>& errors() const { return errors_; }
 
 private:
     std::map<std::string, std::vector<std::string>> errors_;
 };
 
-}  // namespace ecf::app
+}

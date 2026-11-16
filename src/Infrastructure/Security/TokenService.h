@@ -17,4 +17,4 @@ private:
     JwtSettings settings_;
 };
 
-}  // namespace ecf::infra
+}

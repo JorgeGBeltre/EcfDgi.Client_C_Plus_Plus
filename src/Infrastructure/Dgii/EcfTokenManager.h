@@ -1,6 +1,4 @@
 #pragma once
-// Handles the DGII challenge-response auth: GET semilla -> sign -> validate ->
-// cache the bearer token until ~5 minutes before expiry.
 
 #include <chrono>
 #include <memory>
@@ -36,4 +34,4 @@ private:
     mutable std::mutex tokenMutex_;
 };
 
-}  // namespace ecf::infra
+}

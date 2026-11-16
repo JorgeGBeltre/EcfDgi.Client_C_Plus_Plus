@@ -8,7 +8,7 @@ namespace ecf::app::validators {
 namespace {
 
 const std::regex kRncRegex(R"(^\d{9}$|^\d{11}$)");
-// Pragmatic e-mail check.
+
 const std::regex kEmailRegex(R"(^[^@\s]+@[^@\s]+\.[^@\s]+$)");
 
 bool empty(const std::string& s) { return s.empty(); }
@@ -23,7 +23,7 @@ void maxLength(std::vector<ValidationFailure>& f, const std::string& prop,
     if (value.size() > max) f.push_back({prop, msg});
 }
 
-}  // namespace
+}
 
 std::vector<ValidationFailure> validate(const RegisterUserCommand& c) {
     std::vector<ValidationFailure> f;
@@ -106,4 +106,4 @@ std::vector<ValidationFailure> validate(const SendRfceCommand& c) {
     return f;
 }
 
-}  // namespace ecf::app::validators
+}

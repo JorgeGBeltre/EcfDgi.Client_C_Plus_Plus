@@ -44,7 +44,6 @@ std::string CanonicalRequestHelper::computeHmacSha256(
          reinterpret_cast<const unsigned char*>(canonicalString.c_str()), canonicalString.size(),
          hash, &length);
 
-    // Encode to Base64 using OpenSSL BIO
     BIO* b64 = BIO_new(BIO_f_base64());
     BIO* mem = BIO_new(BIO_s_mem());
     BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
@@ -70,7 +69,7 @@ std::string CanonicalRequestHelper::computeSha256Hex(
     if (!context) {
         throw std::runtime_error("Fallo al crear contexto SHA256.");
     }
-    
+
     if (EVP_DigestInit_ex(context, EVP_sha256(), nullptr) <= 0 ||
         EVP_DigestUpdate(context, input.c_str(), input.size()) <= 0 ||
         EVP_DigestFinal_ex(context, hash, &length) <= 0) {
@@ -95,4 +94,4 @@ bool CanonicalRequestHelper::safeCompare(
     return CRYPTO_memcmp(a.data(), b.data(), a.size()) == 0;
 }
 
-} // namespace ecf::infra
+}

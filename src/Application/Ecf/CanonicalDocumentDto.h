@@ -19,7 +19,7 @@ struct CanonicalHeaderDto {
     std::optional<std::string> identificadorExtranjero;
     std::string razonSocialComprador;
     std::optional<std::string> correoComprador;
-    // ISO 8601 (yyyy-MM-dd) or DGII format (dd-MM-yyyy)
+
     std::string fechaEmision;
     std::optional<std::string> fechaVencimientoSecuencia;
     std::optional<std::string> direccionEmisor;
@@ -48,7 +48,7 @@ struct CanonicalLineDto {
 };
 
 struct CanonicalTaxBucketDto {
-    int rate = 18;       // 18, 16, 0
+    int rate = 18;
     double base = 0.0;
     double tax = 0.0;
 };
@@ -90,8 +90,8 @@ struct CanonicalDocumentDto {
     std::optional<CanonicalCertificateDto> certificate;
     std::optional<std::string> ncf;
     SourceReferenceDto sourceReference;
-    std::string documentKind = "Invoice"; // Invoice, CreditNote, DebitNote, Bill
-    std::string tipoComprobante = "E31"; // Default Factura de Crédito Fiscal
+    std::string documentKind = "Invoice";
+    std::string tipoComprobante = "E31";
     CanonicalHeaderDto header;
     std::optional<CanonicalCurrencyDto> currency;
     std::vector<CanonicalLineDto> lines;
@@ -101,4 +101,4 @@ struct CanonicalDocumentDto {
     std::optional<std::string> fechaVencimientoSecuencia;
 };
 
-} // namespace ecf::app
+}

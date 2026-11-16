@@ -11,4 +11,4 @@ public:
                   drogon::FilterChainCallback&& fccb) override;
 };
 
-} // namespace ecf::api
+}

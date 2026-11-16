@@ -1,5 +1,4 @@
 #pragma once
-// A lightweight success/failure wrapper used by the Application handlers.
 
 #include <optional>
 #include <string>
@@ -60,4 +59,4 @@ private:
     std::optional<T> value_;
 };
 
-}  // namespace ecf::shared
+}

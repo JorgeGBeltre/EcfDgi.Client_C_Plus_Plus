@@ -12,4 +12,4 @@ struct Customer : AuditableEntity {
     std::string rnc;
 };
 
-}  // namespace ecf::domain
+}

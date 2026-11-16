@@ -33,7 +33,6 @@ std::string childText(xmlNode* parent, const char* name) {
     return {};
 }
 
-// Parses ISO timestamps with optional fractional seconds / milliseconds and timezone offset into a UTC time_point.
 bool parseExpiry(const std::string& s, std::chrono::system_clock::time_point& out) {
     if (s.empty()) return false;
     std::tm tm{};
@@ -94,7 +93,7 @@ bool parseExpiry(const std::string& s, std::chrono::system_clock::time_point& ou
     return true;
 }
 
-}  // namespace
+}
 
 EcfTokenManager::EcfTokenManager(std::shared_ptr<domain::IEcfXmlSigner> signer,
                                  EcfEnvironmentConfig config, std::string rncEmisor,
@@ -111,7 +110,6 @@ std::string EcfTokenManager::getToken() {
     using namespace std::chrono;
     std::string cacheKey = "ecf:tokens:" + rncEmisor_ + ":" + std::to_string(static_cast<int>(config_.ambiente));
 
-    // RAII guard for distributed lock
     struct DistLockGuard {
         std::shared_ptr<domain::ICacheService> cache;
         std::string key;
@@ -132,7 +130,6 @@ std::string EcfTokenManager::getToken() {
         }
     };
 
-    // 1. Check Distributed Cache
     if (cacheService_) {
         if (auto tokenOpt = cacheService_->get(cacheKey)) {
             if (!tokenOpt->empty()) {
@@ -144,7 +141,6 @@ std::string EcfTokenManager::getToken() {
         }
     }
 
-    // 2. Check Memory Cache (synchronized under tokenMutex_)
     auto validMemoryToken = [&]() -> std::optional<std::string> {
         std::lock_guard<std::mutex> tlock(tokenMutex_);
         if (!cachedToken_.empty() &&
@@ -156,7 +152,6 @@ std::string EcfTokenManager::getToken() {
 
     if (auto t = validMemoryToken()) return *t;
 
-    // 3. Acquire Distributed / Local Lock
     std::string lockKey = "ecf:tokens:lock:" + rncEmisor_ + ":" + std::to_string(static_cast<int>(config_.ambiente));
     static std::random_device rd;
     static std::mt19937_64 gen(rd());
@@ -179,8 +174,7 @@ std::string EcfTokenManager::getToken() {
                 }
             }
         } else {
-            // Another instance holds the lock and is renewing the token.
-            // Wait and poll the cache instead of renewing simultaneously (BUG-052).
+
             for (int attempt = 0; attempt < 12; ++attempt) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(250));
                 if (auto tokenOpt = cacheService_->get(cacheKey)) {
@@ -192,7 +186,7 @@ std::string EcfTokenManager::getToken() {
                     }
                 }
             }
-            // If still not available after 3s, attempt to acquire lock one more time
+
             acquiredDistLock = cacheService_->acquireLock(lockKey, lockValue, std::chrono::seconds(30));
             if (!acquiredDistLock) {
                 if (auto tokenOpt = cacheService_->get(cacheKey)) {
@@ -248,7 +242,7 @@ void EcfTokenManager::invalidate() {
 }
 
 void EcfTokenManager::renewToken() {
-    // 1. Request the seed.
+
     auto seedResp = cpr::Get(
         cpr::Url{config_.autenticacionUrl + "/api/autenticacion/semilla"},
         cpr::Timeout{15000},
@@ -257,10 +251,8 @@ void EcfTokenManager::renewToken() {
         throw EcfException("No se pudo obtener la semilla: " + (seedResp.error.message.empty() ? "HTTP 0" : seedResp.error.message));
     const std::string semillaXml = seedResp.text;
 
-    // 2. Sign the seed.
     const std::string semillaFirmada = signer_->signXml(semillaXml, rncEmisor_);
 
-    // 3. Validate the signed seed (multipart form-data, field "xml").
     auto validateResp = cpr::Post(
         cpr::Url{config_.autenticacionUrl + "/api/autenticacion/validarsemilla"},
         cpr::Multipart{{"xml", cpr::Buffer{semillaFirmada.begin(), semillaFirmada.end(),
@@ -272,7 +264,6 @@ void EcfTokenManager::renewToken() {
                            std::to_string(validateResp.status_code) + "): " +
                            (validateResp.error.message.empty() ? validateResp.text : validateResp.error.message));
 
-    // 4. Extract token + expiry (supports both XML and JSON formats from DGII / mock endpoints).
     std::string token;
     std::string expira;
 
@@ -315,4 +306,4 @@ void EcfTokenManager::renewToken() {
     }
 }
 
-}  // namespace ecf::infra
+}

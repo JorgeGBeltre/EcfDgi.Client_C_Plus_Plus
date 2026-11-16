@@ -21,7 +21,7 @@ std::string readAll(const std::string& path) {
     ss << f.rdbuf();
     return ss.str();
 }
-}  // namespace
+}
 
 void DbInitializer::initialize(const std::string& connectionString,
                                const std::string& schemaPath,
@@ -40,13 +40,11 @@ void DbInitializer::initialize(const std::string& connectionString,
     }
     pqxx::connection& conn = *connPtr;
 
-    // 1. Apply schema (idempotent CREATE TABLE IF NOT EXISTS ...).
     {
         const std::string sql = readAll(schemaPath);
         pqxx::work w(conn);
         w.exec(sql);
 
-        // Migrations for existing deployments
         w.exec("ALTER TABLE ecf_documents ADD COLUMN IF NOT EXISTS edit_sequence varchar(50) NOT NULL DEFAULT '';");
         w.exec("ALTER TABLE ecf_documents ADD COLUMN IF NOT EXISTS sent_to_dgii_at timestamptz;");
         w.exec("ALTER TABLE ecf_documents ADD COLUMN IF NOT EXISTS last_status_check_at timestamptz;");
@@ -61,17 +59,12 @@ void DbInitializer::initialize(const std::string& connectionString,
         w.commit();
     }
 
-    // 2. SEC-053 & ARC-021: Purge legacy seeded admin user and insecure accounts.
-    // Interactive end-user authentication is managed exclusively by SaaS-Ecf-Back (/api/v1/auth/login).
-    // The C++ fiscal engine operates as an internal subsystem using worker tokens and mutual HMAC.
     {
         pqxx::work w(conn);
         w.exec("DELETE FROM users WHERE id = '9f3c7e09-8b2a-4c1d-9e3f-1a2b3c4d5e6f' OR username = 'admin' OR email LIKE '%@ecfdgii.client.com';");
         w.commit();
     }
 
-    // 3. Seed the default "Consumidor Final" customer with a fixed
-    //    id/RNC/date so the seed is stable across runs.
     {
         pqxx::work w(conn);
         pqxx::result r = w.exec_params(
@@ -91,4 +84,4 @@ void DbInitializer::initialize(const std::string& connectionString,
     }
 }
 
-}  // namespace ecf::infra
+}

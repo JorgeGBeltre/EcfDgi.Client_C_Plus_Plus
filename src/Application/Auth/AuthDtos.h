@@ -1,5 +1,4 @@
 #pragma once
-// Ports of the Auth commands + AuthResponseDto.
 
 #include <string>
 
@@ -23,4 +22,4 @@ struct LoginUserCommand {
     std::string password;
 };
 
-}  // namespace ecf::app
+}

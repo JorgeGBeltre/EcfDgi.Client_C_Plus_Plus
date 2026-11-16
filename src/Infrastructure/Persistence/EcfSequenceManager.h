@@ -17,4 +17,4 @@ private:
     std::string connectionString_;
 };
 
-} // namespace ecf::infra
+}

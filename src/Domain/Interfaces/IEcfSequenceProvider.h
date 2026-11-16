@@ -12,4 +12,4 @@ public:
     virtual void release(const std::string& rncEmisor, const std::string& eNcf) = 0;
 };
 
-}  // namespace ecf::domain
+}

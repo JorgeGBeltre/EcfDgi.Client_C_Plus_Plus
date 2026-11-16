@@ -1,5 +1,4 @@
 #pragma once
-// Builds the RFCE XML payload and parses the XML-form DGII responses.
 
 #include <string>
 
@@ -21,4 +20,4 @@ public:
     std::string escapeAlfanum(const std::string& value) override;
 };
 
-}  // namespace ecf::infra
+}

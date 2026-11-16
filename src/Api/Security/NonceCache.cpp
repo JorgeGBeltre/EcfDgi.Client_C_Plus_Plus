@@ -8,7 +8,7 @@ double currentTimestamp() {
     auto now = std::chrono::system_clock::now();
     return std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() / 1000.0;
 }
-} // namespace
+}
 
 bool NonceCache::tryAddNonce(const std::string& keyId, const std::string& nonce, double ttlSeconds) {
     if (keyId.empty() || nonce.empty()) {
@@ -20,7 +20,6 @@ bool NonceCache::tryAddNonce(const std::string& keyId, const std::string& nonce,
 
     std::lock_guard<std::mutex> lock(mutex_);
 
-    // Prune expired nonces to prevent indefinite growth
     for (auto it = cache_.begin(); it != cache_.end();) {
         if (it->second < now) {
             it = cache_.erase(it);
@@ -32,7 +31,7 @@ bool NonceCache::tryAddNonce(const std::string& keyId, const std::string& nonce,
     auto it = cache_.find(cacheKey);
     if (it != cache_.end()) {
         if (it->second >= now) {
-            return false; // Nonce already active -> replay attack
+            return false;
         }
     }
 
@@ -40,4 +39,4 @@ bool NonceCache::tryAddNonce(const std::string& keyId, const std::string& nonce,
     return true;
 }
 
-} // namespace ecf::api
+}

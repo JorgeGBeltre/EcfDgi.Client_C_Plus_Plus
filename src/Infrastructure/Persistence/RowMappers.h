@@ -1,11 +1,4 @@
 #pragma once
-// Helpers to map pqxx rows to domain entities (read side).
-//
-// The mappers are templated on the row/field type on purpose: across libpqxx
-// versions result indexing and iteration yield different-but-compatible types
-// (pqxx::row vs pqxx::row_ref, pqxx::field vs pqxx::field_ref). Templating lets
-// the same code bind to whichever the installed libpqxx provides. GCC requires
-// the `.template` disambiguator on the dependent `.as<T>()` member calls.
 
 #include <optional>
 #include <string>
@@ -20,16 +13,12 @@
 
 namespace ecf::infra {
 
-// Accepts any pqxx field-like type (pqxx::field or pqxx::field_ref); both
-// expose is_null()/as<T>().
 template <class Field>
 inline std::optional<std::string> optStr(const Field& f) {
     if (f.is_null()) return std::nullopt;
     return f.template as<std::string>();
 }
 
-// Accepts any pqxx row-like type (pqxx::row from iteration, pqxx::row_ref from
-// result::operator[] in newer libpqxx); both expose the same field accessors.
 template <class Row>
 inline void mapAuditable(const Row& r, domain::AuditableEntity& e) {
     e.id = r["id"].template as<std::string>();
@@ -124,7 +113,6 @@ inline domain::EcfIdempotencyRecord mapEcfIdempotencyRecord(const Row& r) {
     return rec;
 }
 
-// Common SELECT column lists (timestamps cast to text for stable ISO strings).
 inline const char* userColumns() {
     return "id::text, username, email, password_hash, role, "
            "created_at::text, created_by, updated_at::text, updated_by, "
@@ -152,4 +140,4 @@ inline const char* ecfIdempotencyColumns() {
            "content_type, response_body, created_at::text, updated_at::text, expires_at::text";
 }
 
-}  // namespace ecf::infra
+}

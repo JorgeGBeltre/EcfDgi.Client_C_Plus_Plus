@@ -14,4 +14,4 @@ public:
                std::function<void(const drogon::HttpResponsePtr&)>&& callback);
 };
 
-}  // namespace ecf::api
+}

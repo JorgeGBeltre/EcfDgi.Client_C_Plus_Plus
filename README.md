@@ -26,7 +26,7 @@ It features complete support for all 10 canonical e-CF types (invoices, credit/d
   - [2. Sequence Allocation & Concurrency Control](#2-sequence-allocation--concurrency-control)
   - [3. XML Compilation & Element Structure](#3-xml-compilation--element-structure)
   - [4. XMLDSig Digital Signature & In-Memory Fallback](#4-xmldsig-digital-signature--in-memory-fallback)
-  - [5. Security Code Calculation (SHA-256)](#5-security-code-calculation-sha-256)
+  - [5. Security Code Calculation (SignatureValue Prefix)](#5-security-code-calculation-signaturevalue-prefix)
   - [6. Local XSD Schema Validation Gate](#6-local-xsd-schema-validation-gate)
   - [7. How Invoices, Credit Notes, and Bills Reach the DGII (Wire Protocol & Data Flow)](#7-how-invoices-credit-notes-and-bills-reach-the-dgii-wire-protocol--data-flow)
   - [8. State Machine & Asynchronous Status Polling](#8-state-machine--asynchronous-status-polling)
@@ -113,8 +113,8 @@ graph TD
   - `47`: Pagos al Exterior (foreign payee tax withholding).
 - **Single e-CF Sending (`POST /api/ecf/send`)**: Prepares, validates, signs, and posts pre-built XML tax receipts directly to DGII REST services.
 - **RFCE Summaries (`POST /api/ecf/send-rfce`)**: Automatic validation, serialization, signing, and transmission of Consumption Invoice Summaries (RFCE).
-- **DGII Status Syncing (`GET /api/ecf/status`)**: Queries local and external services to sync transaction statuses (TrackId results) into the PostgreSQL database.
-- **Sequence Collision Recovery**: Automatically retries transmitting with a newly acquired sequence number if the DGII responds with a sequence-in-use error.
+- **DGII Status Syncing (`GET /api/ecf/status`) & Live Service Telemetry (`GET /api/ecf/services-status`)**: Queries local and external services to sync transaction statuses (`TrackId` results) into PostgreSQL and exposes cached, warm-socket DGII service availability and latency probes per environment.
+- **Sequence Collision & Failed Idempotency Recovery**: Automatically retries transmitting with a newly acquired sequence number if the DGII responds with a sequence-in-use error, and permits safe retry of idempotency keys whose previous attempt returned HTTP `>= 400` or `RejectedByDgii`.
 - **B2B Receptor Exchange**: Endpoints for vendor e-CF reception (`/fe/recepcion/api/ecf`), producing signed `ARECF` acknowledgments, commercial approval (`/fe/aprobacioncomercial/api/ecf`), and mutual seed authentication (`/fe/autenticacion/api/semilla` and `/validacioncertificado`).
 - **Redis & Decorator Caching (`CachedEcfClient`)**: Caches taxpayer directories (24h), service status (5m), and maintenance windows (1h) with graceful in-memory fallback.
 - **Distributed Token Lock**: `EcfTokenManager` uses Redis distributed locks (`ecf:tokens:lock:{rnc}`) and token caching (`ecf:tokens:{rnc}`) to prevent token request thundering herds across distributed nodes.
@@ -123,7 +123,7 @@ graph TD
 - **Dual Authorization (JWT & Worker HMAC)**: Protects REST API endpoints with either JWT bearer tokens or machine-to-machine HMAC-SHA256 headers (`X-Worker-Key-Id`, `X-Request-Timestamp`, `X-Request-Nonce`, `X-Request-Signature`).
 - **XMLDSig (RSA-SHA256)**: Digitally signs invoices using enveloped signature transformations with Exclusive C14N (`xmlsec1` + OpenSSL), and validates certificate RNC ownership.
 - **Zero-Config Fallback Certificate**: Auto-generates self-signed X.509 certificates in memory when no physical certificate is configured, allowing instant test execution without blocking.
-- **Security Code Calculation**: Computes SHA-256 over `<ds:SignatureValue>` to derive the 6-character security code for invoice printing and QR verification.
+- **Security Code Calculation**: Extracts the first 6 case-sensitive characters from the trimmed `<ds:SignatureValue>` Base64 payload to derive the security code (`CodigoSeguridad`) for invoice printing, RFCE summaries, and QR verification.
 - **Local XSD Schema Gate**: Automatically matches and validates signed documents against 15 bundled official DGII XSD schemas using `libxml2` with multithreaded caching.
 - **Argon2id Password Hashing**: User credentials are stored using libsodium's `crypto_pwhash` (salted, adaptive).
 - **Auditing & Tracking**: Automatically registers creation, update, and soft-deletion dates/users for all tables.
@@ -215,13 +215,14 @@ sequenceDiagram
 Instead of forcing internal billing software to generate complex DGII XML, the API accepts a normalized `CanonicalDocumentDto`:
 - **Crédito Fiscal (31)**: Requires a valid buyer RNC (9 digits) or Cédula (11 digits).
 - **Consumo (32)**: For amounts $\ge 250,000$ DOP, the buyer must be identified with a valid RNC or Cédula.
-- **Notas de Débito (33) & Notas de Crédito (34)**: Must include the `References` block with `CorrectsENcf` (11 traditional or 13 e-CF digits) and `CodigoModificacion` (1: Anula, 2: Corrige Texto, 3: Corrige Montos).
+- **Notas de Débito (33) & Notas de Crédito (34)**: Must include the `References` block with `CorrectsENcf` (11 traditional Serie B or 13 e-CF characters, with automatic normalization for 9/10-digit legacy references) and `CodigoModificacion` (1: Anula, 2: Corrige Texto, 3: Corrige Montos, 4: Contingencia). For non-`E33`/`E34` types, `InformacionReferencia` is rejected pre-allocation unless `CodigoModificacion == 4` (DGII Rule `[613]`). For `E34` Credit Notes, if the modified e-CF exists in the same environment, the engine validates that the DOP credit note total does not exceed the modified document's total (DGII Rule `[615]`) before allocating a sequence.
 - **Compras (41)**: Must specify withholding amounts (`Retention` block with `montoRetencionRenta` and/or `montoItbisRetenido`).
 - **Gastos Menores (43)**: Enforces `montoGravadoTotal == 0` and `itbisTotal == 0` (no tax credits allowed under DGII regulation).
 - **Regímenes Especiales (44)**: Validates buyer tax identification and tax exemption requirements.
 - **Gubernamental (45)**: Requires government entity identification.
 - **Exportaciones (46)**: Requires ISO 3166-1 alpha-2 destination country code and foreign currency specification.
 - **Pagos al Exterior (47)**: Requires foreign payee withholding documentation.
+- **Foreign Currency (`currency.code` & `currency.exchangeRate`)**: Supports all 17 official DGII `TipoMonedaType` ISO codes (`BRL, CAD, CHF, CHY, XDR, DKK, EUR, GBP, JPY, NOK, SCP, SEK, USD, VEF, HTG, MXN, COP`) with `0 < exchangeRate < 1000` (normalizing `US$` to `USD` and `CNY` to `CHY`).
 - **ITBIS Tax Buckets**: Only rates 18%, 16%, and 0% (`I1`, `I2`, `I3`) are allowed. Any other rate is rejected *before* allocating a sequence number.
 
 ### 2. Sequence Allocation & Concurrency Control
@@ -249,12 +250,13 @@ The modular `CanonicalXmlBuilder` (`src/Application/Ecf/CanonicalXmlBuilder.h` &
   - Optional `<CorreoComprador>` is validated against standard email regex `^\w+([-+.]\w+)*@\w+([-.]\w+)*\.\w+([-.]\w+)*$`, trimmed, truncated to 80 characters, and emitted for all types except Tipo 47.
 - **`<Totales>`**: Emits `<MontoGravadoTotal>`, individual tax buckets (`<MontoGravadoI1>`, `<MontoGravadoI2>`, `<MontoGravadoI3>`), `<MontoExento>` (for tax-exempt lines, Tipo 43, 44, 47), `<TotalITBIS>`, `<TotalITBIS1..3>`, `<TotalITBISRetenido>`, and `<TotalISRRetencion>`.
 - **`<DetallesItems>` (Processed via `normalizeCanonicalLines()`)**:
-  - **Discount Absorption**: Absorbs negative ERP lines (e.g. QuickBooks line discounts) into the preceding item's `DescuentoMonto`.
+  - **Discount Absorption & Gross Unit Price Reconstruction**: Absorbs negative ERP lines (e.g. QuickBooks line discounts) into the preceding item's `DescuentoMonto`, and reconstructs gross `PrecioUnitarioItem` (up to 4 decimals) when lines arrive with pre-folded net unit prices so `CantidadItem * PrecioUnitarioItem - DescuentoMonto == MontoItem` holds to the cent.
   - **Zero-Amount Line Suppression**: Automatically discards lines with `amount == 0` or `unitPrice == 0` (e.g. ERP informational comments, "Total Bultos", "P-142501", subtotal text) to guarantee strict DGII validation compliance.
   - **Item Name & Description**: Truncates `NombreItem` to 80 characters and places any remainder up to 1000 characters into `<DescripcionItem>`.
-- **`<InformacionReferencia>`**: Appended for credit notes (34) and debit notes (33) referencing the original eNCF.
+- **Foreign Currency (`<OtraMoneda>` & `<OtraMonedaDetalle>`)**: When `currency.code` is a foreign currency (`!= DOP`), converts primary `<Item>` and `<Totales>` amounts to DOP (`Moneda Nacional`) with cent-level internal reconciliation, emits `<OtraMonedaDetalle>` before `<MontoItem>` in each item, and emits `<OtraMoneda>` immediately after `</Totales>` inside `<Encabezado>` according to each e-CF XSD sequence.
+- **`<InformacionReferencia>` & Conditional `E33`/`E34` Rules**: Appended for credit notes (34), debit notes (33), and contingency replacements (`CodigoModificacion == 4`). When `E33`/`E34` modifies `E43`/`B13` (`Gastos Menores`), `<Comprador>` is omitted and items default to `IndicadorFacturacion = 4` (`Exento`); when modifying `E41`/`B11`, `E43`/`B13`, or `E47`/`B17`, `<TipoIngresos>` is omitted; when modifying `E46`/`B16` without a Dominican RNC, `<IdentificadorExtranjero>EXTRANJERO</IdentificadorExtranjero>` is emitted; and when a document is 100% exempt (`totalGravado == 0`), `<IndicadorMontoGravado>` and `<TotalITBIS>` are omitted.
 - **`<Retencion>`**: Appended per item line for purchase bills (41) and foreign payments (47) with tax withholding amounts.
-- **Immediate Signed XML in Responses**: All `202 Accepted` response payloads from `POST /api/documents` return `signedXml` along with `documentId`, `eNcf`, `state`, `trackId`, and `securityCode`.
+- **Immediate Signed XML & TrackId Verification in Responses**: All response payloads from `POST /api/documents` return `signedXml`, `totalAmount` (DOP), `itbisAmount` (DOP), `documentId`, `eNcf`, `state`, `trackId`, and `securityCode`, performing an immediate post-transmission `consultarResultado` check (with a 350ms retry when `"En Proceso"`) so synchronously accepted documents return `AcceptedByDgii` (`200 OK`) immediately.
 
 ### 4. XMLDSig Digital Signature & Dynamic Multi-Tenant Resolution
 - `EcfXmlSigner` implements standard W3C XMLDSig using `xmlsec1` and OpenSSL:
@@ -269,23 +271,23 @@ The modular `CanonicalXmlBuilder` (`src/Application/Ecf/CanonicalXmlBuilder.h` &
   - This guarantees that multi-tenant billing platforms do not cross-contaminate signatures, issuer headers, or sequence allocations.
 - **Dynamic Multi-Tenant Certificate Loading**:
   Rather than binding to a single static certificate at boot, the client resolves certificates per-request:
-  1. **Inline Base64 PKCS#12 (`dto.certificate.certificateBase64`)**: The caller passes the certificate directly in the payload with its password. Decoded in-memory into `std::vector<unsigned char>` with zero disk leakage.
-  2. **Explicit File Path (`dto.certificate.certificatePath`)**: Directly loaded from disk if specified.
+  1. **Inline Base64 PKCS#12 (`dto.certificate.certificateBase64`)**: The caller passes the certificate directly in the payload with its password. Decoded in-memory into `std::vector<unsigned char>` with zero disk leakage and cached in a bounded 15-minute TTL signer cache keyed by the SHA-256 fingerprint of `(tenantId, rncEmisor, password, certificateBase64)`.
+  2. **Database Tenant Certificate Resolution (`TenantSignerResolver`)**: Loads encrypted tenant `.p12`/`.pfx` certificates from PostgreSQL (`Tenants`), supporting both `enc:v3:` (HKDF-SHA256 + AES-256-GCM) and `enc:v2:` password envelopes.
   3. **Conventions Directory Lookup**: Automatically inspects `/app/certificates/{tenantId}.pfx` or `/app/certificates/{rncEmisor}.pfx`.
   4. **Fallback Certificate**: If no tenant certificate is specified or available, the client gracefully falls back to the globally configured certificate or in-memory self-signed fallback.
 - **Dominican Republic CA & Delegated Tax Representative Validation**:
   In the Dominican Republic, corporate entities frequently sign electronic tax documents using digital certificates issued to their legal representatives or tax proxies (e.g. natural person certificates containing national identity cédulas `IDCDO-` or `VATDO-`). The validator enforces a 4-tier check:
   1. Self-signed bypass for development, unit testing, and sandbox environments.
-  2. Direct RNC match against certificate `Subject` or `Issuer`.
+  2. Direct RNC match against certificate `Subject` or `SAN`.
   3. Format-normalized digits comparison (stripping hyphens and punctuation).
-  4. Dominican Authorized Certification Authorities (CAs: `VIAFIRMA`, `AVANSI`, `CAMARA DE COMERCIO`, `DIGIFIRMA`, `DOMINICANA`, `C=DO`) issuing tax procedure certificates (`TAX PROCEDURES`, `PROCEDIMIENTOS TRIBUTARIOS`, `PERSONA FISICA`, `NATURAL PERSON`).
+  4. Dominican Authorized Certification Authorities (CAs: `VIAFIRMA`, `AVANSI`, `CAMARA DE COMERCIO`, `DIGIFIRMA`, `INDOTEL`, `OPTIC`) issuing tax procedure certificates (`TAX PROCEDURES`, `PROCEDIMIENTOS TRIBUTARIOS`, `PERSONA FISICA`, `NATURAL PERSON`).
 
-### 5. Security Code Calculation (SHA-256) & Timbre Verification URLs
-- DGII requires a 6-character security code printed on invoices and encoded in QR verification codes.
-- `EcfSecurityUtils::calcularCodigoSeguridad` queries `//ds:SignatureValue` with XPath, computes the SHA-256 hash in OpenSSL, and extracts the first 6 hexadecimal characters.
+### 5. Security Code Calculation (`SignatureValue` Prefix) & Timbre Verification URLs
+- DGII requires a 6-character case-sensitive security code printed on invoices, included in RFCE summaries (`<CodigoSeguridadeCF>`), and encoded in QR verification codes.
+- `EcfSecurityUtils::calcularCodigoSeguridad` queries `//ds:SignatureValue` with XPath, trims whitespace from the Base64 signature string, and extracts the first 6 case-sensitive characters directly.
 - **Timbre URL Construction (`buildTimbreUrl` & `buildTimbreFcUrl`)**:
   Generates verification URLs for printed representation QR codes:
-  - Standard e-CF: `{baseUrl}?rncemisor={rnc}&rnccomprador={rnc}&encf={encf}&fechaemision={date}&montototal={total}&fechafirma={signDate}&codigoseguridad={secCode}`
+  - Standard e-CF: `{baseUrl}?rncemisor={rnc}&rnccomprador={rnc}&encf={encf}&fechaemision={date}&montototal={total}&fechafirma={signDate}&codigoseguridad={secCode}` (omitting `&rnccomprador=` on `E43` Gastos Menores and `E33`/`E34` notes modifying `E43`/`B13`, or when buyer RNC is absent).
   - Consumer Invoice (FC): `{baseUrl}?rncemisor={rnc}&encf={encf}&montototal={total}&codigoseguridad={secCode}`
   - Both builders enforce strict DGII parameter naming (`&codigoseguridad=`), avoiding legacy draft typos.
 
@@ -357,7 +359,7 @@ In high-throughput distributed architectures, an issued token may be prematurely
    ```
 3. **Multipart Body**:
    - Field Name: `"xml"`
-   - Filename: `"{RNCEmisor}{TipoeCF}{eNCF}.xml"` (e.g. `10188906331E310000000001.xml`)
+   - Filename: `"{RNCEmisor}{TipoeCF}{eNCF}.xml"` (e.g. `10100000131E310000000001.xml`)
    - Content: Complete UTF-8 signed XML document.
 4. **DGII Response**:
    ```xml
@@ -427,9 +429,9 @@ When trading with other electronic billing taxpayers, documents flow directly be
    - The server validates the signature and registers the commercial approval.
 
 ### 10. Background Status Reconciliation Thread
-- `EcfStatusReconciler` daemon thread runs every 15 minutes.
-- Scans `ecf_documents` where state is `AwaitingTransmission`, `Signed`, or `Uncertain` with age $> 2$ minutes.
-- Performs batched DGII status queries to reconcile processing states to `AcceptedByDgii` or `RejectedByDgii`.
+- `EcfStatusReconciler` daemon thread (and `POST /api/documents/by-source/{txnId}/reconcile`) reconciles `Signed`, `SentToDgii`, `AwaitingTransmission`, and `Uncertain` documents.
+- Performs DGII status queries (`consultarResultado` and `consultarEstado`) using environment-scoped `EcfClient` instances backed by `ICacheService` (sharing 1-hour DGII Semilla tokens in Redis) to transition states to `AcceptedByDgii` or `RejectedByDgii`.
+- When an `Uncertain` document lacking a `TrackId` is confirmed `"No encontrado"` by DGII after the 2-minute cooldown, the reconciler retransmits the persisted `signedXmlContent` verbatim under the same `eNCF` and security code.
 
 ---
 
@@ -442,13 +444,15 @@ Every endpoint and service interface from the reference C# implementation is ful
 | Category | Route | Method | Auth Scheme | Request Payload | Response Model | Description |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **ERP Documents** | `/api/documents` | `POST` | Bearer / Worker HMAC | `CanonicalDocumentDto` (JSON) | `DocumentSubmissionResponse` | Canonical invoice ingestion, validation of all 10 e-CF types, sequential allocation, dynamic multi-tenant certificate resolution, signing, XSD gate, and DGII dispatch with reactive 401 recovery. |
-| **ERP Documents** | `/api/documents/by-source/{txnId}` | `GET` | Bearer / Worker HMAC | None | `DocumentSummaryDto` | Queries invoice state, eNCF, and security code flexibly by ERP source transaction ID, DGII TrackId, or eNCF. |
+| **ERP Documents** | `/api/documents/by-source/{txnId}` | `GET` | Bearer / Worker HMAC | None | `DocumentSummaryDto` | Queries invoice state, eNCF, environment, and security code flexibly by ERP source transaction ID, DGII TrackId, or eNCF (with live DGII verification for pending `Signed` documents). |
+| **ERP Documents** | `/api/documents/by-source/{txnId}/reconcile` | `POST` | Bearer / Worker HMAC | None | `DocumentSummaryDto` | Reconciles pending or `Uncertain` documents against DGII status endpoints (honoring `X-Environment` / `?environment=`) and verbatim-retransmits persisted signed XML if `"No encontrado"`. |
 | **ERP Documents** | `/api/documents/by-source/{txnId}/xml` | `GET` | Bearer / Worker HMAC | None | XML Attachment | Downloads signed XML e-CF document file flexibly by ERP source transaction ID, DGII TrackId, or eNCF. |
 | **ERP Documents** | `/api/documents/{id}` | `GET` | Bearer / Worker HMAC | None | `DocumentSummaryDto` | Queries document state, eNCF, and security code by document UUID (enforces tenant isolation). |
 | **ERP Documents** | `/api/documents/{id}/xml` | `GET` | Bearer / Worker HMAC | None | XML Attachment | Downloads signed XML e-CF document file by document UUID (enforces tenant isolation). |
 | **Direct e-CF** | `/api/ecf/send` | `POST` | Bearer / Worker HMAC | `SendEcfCommand` (JSON) | `EcfRecepcionResponse` | Submits pre-built signed e-CF XML directly to DGII REST services. |
 | **Direct e-CF** | `/api/ecf/send-rfce` | `POST` | Bearer / Worker HMAC | `SendRfceCommand` (JSON) | `RfceRecepcionResponse` | Submits Consumption Summary (RFCE) to DGII. |
 | **Direct e-CF** | `/api/ecf/status` | `GET` | Bearer / Worker HMAC | Query Params (`rncEmisor`, `eNcf`, `trackId`) | `ConsultaEstadoResponse` | Queries DGII TrackId and eNCF processing status. |
+| **Direct e-CF** | `/api/ecf/services-status` | `GET` | Bearer / Worker HMAC | Optional `environment` | `DgiiServiceHealthDto[]` | Probes live DGII service availability and warm TLS latency per environment (cached 45s in Redis). |
 | **B2B Reception** | `/fe/recepcion/api/ecf` | `POST` | Anonymous / Multipart | `xml` (Vendor signed e-CF) | `ARECF` (Signed XML) | Receives vendor e-CF, verifies signature, and yields signed Acuse de Recibo (`ARECF`). |
 | **B2B Approval** | `/fe/aprobacioncomercial/api/ecf` | `POST` | Anonymous / Multipart | `xml` (Vendor `ACECF`) | HTTP 200 OK | Receives B2B commercial approval/rejection document. |
 | **B2B Auth** | `/fe/autenticacion/api/semilla` | `GET` | Anonymous | None | `SemillaModel` (XML) | Generates new cryptographic authentication seed for B2B peers. |
@@ -498,8 +502,8 @@ Every endpoint and service interface from the reference C# implementation is ful
     "editSequence": "1"
   },
   "comprador": {
-    "rnc": "101672919",
-    "razonSocial": "DISTRIBUIDORA NACIONAL SAS"
+    "rnc": "101000021",
+    "razonSocial": "COMERCIAL EJEMPLO SRL"
   },
   "lines": [
     {
@@ -546,13 +550,13 @@ Every endpoint and service interface from the reference C# implementation is ful
       <TipoPago>1</TipoPago>
     </IdDoc>
     <Emisor>
-      <RNCEmisor>101889063</RNCEmisor>
-      <RazonSocialEmisor>WILLY CHIC DOMINICANA SRL</RazonSocialEmisor>
+      <RNCEmisor>101000001</RNCEmisor>
+      <RazonSocialEmisor>EMPRESA DEMO SRL</RazonSocialEmisor>
       <FechaEmision>11-09-2026</FechaEmision>
     </Emisor>
     <Comprador>
-      <RNCComprador>101672919</RNCComprador>
-      <RazonSocialComprador>DISTRIBUIDORA NACIONAL SAS</RazonSocialComprador>
+      <RNCComprador>101000021</RNCComprador>
+      <RazonSocialComprador>COMERCIAL EJEMPLO SRL</RazonSocialComprador>
     </Comprador>
     <Totales>
       <MontoGravadoTotal>25000.00</MontoGravadoTotal>
@@ -608,8 +612,8 @@ Every endpoint and service interface from the reference C# implementation is ful
     "editSequence": "1"
   },
   "comprador": {
-    "rnc": "101672919",
-    "razonSocial": "DISTRIBUIDORA NACIONAL SAS"
+    "rnc": "101000021",
+    "razonSocial": "COMERCIAL EJEMPLO SRL"
   },
   "references": {
     "correctsENcf": "E310000000001",
@@ -647,12 +651,12 @@ Every endpoint and service interface from the reference C# implementation is ful
       <IndicadorMontoNeto>1</IndicadorMontoNeto>
     </IdDoc>
     <Emisor>
-      <RNCEmisor>101889063</RNCEmisor>
-      <RazonSocialEmisor>WILLY CHIC DOMINICANA SRL</RazonSocialEmisor>
+      <RNCEmisor>101000001</RNCEmisor>
+      <RazonSocialEmisor>EMPRESA DEMO SRL</RazonSocialEmisor>
     </Emisor>
     <Comprador>
-      <RNCComprador>101672919</RNCComprador>
-      <RazonSocialComprador>DISTRIBUIDORA NACIONAL SAS</RazonSocialComprador>
+      <RNCComprador>101000021</RNCComprador>
+      <RazonSocialComprador>COMERCIAL EJEMPLO SRL</RazonSocialComprador>
     </Comprador>
     <Totales>
       <MontoGravadoTotal>25000.00</MontoGravadoTotal>
@@ -707,8 +711,8 @@ Every endpoint and service interface from the reference C# implementation is ful
     "editSequence": "1"
   },
   "comprador": {
-    "rnc": "101672919",
-    "razonSocial": "DISTRIBUIDORA NACIONAL SAS"
+    "rnc": "101000021",
+    "razonSocial": "COMERCIAL EJEMPLO SRL"
   },
   "references": {
     "correctsENcf": "E310000000001",
@@ -744,8 +748,8 @@ Every endpoint and service interface from the reference C# implementation is ful
     "editSequence": "1"
   },
   "comprador": {
-    "rnc": "101889063",
-    "razonSocial": "WILLY CHIC DOMINICANA SRL"
+    "rnc": "101000001",
+    "razonSocial": "EMPRESA DEMO SRL"
   },
   "retention": {
     "montoRetencionRenta": 2000.00,
@@ -836,12 +840,12 @@ When reporting low-value consumer invoices under RD$ 250,000 as a daily summary 
       </TablaFormasPago>
     </IdDoc>
     <Emisor>
-      <RNCEmisor>101672919</RNCEmisor>
-      <RazonSocialEmisor>WILLY CHIC DOMINICANA SRL</RazonSocialEmisor>
+      <RNCEmisor>101000021</RNCEmisor>
+      <RazonSocialEmisor>EMPRESA DEMO SRL</RazonSocialEmisor>
       <FechaEmision>10-10-2020</FechaEmision>
     </Emisor>
     <Comprador>
-      <RNCComprador>101889063</RNCComprador>
+      <RNCComprador>101000001</RNCComprador>
       <RazonSocialComprador>Cliente Test</RazonSocialComprador>
     </Comprador>
     <Totales>
@@ -870,8 +874,8 @@ When an incoming vendor invoice is posted to `POST /fe/recepcion/api/ecf`, the c
 <ARECF>
   <DetalleAcusedeRecibo>
     <Version>1.0</Version>
-    <RNCEmisor>101889063</RNCEmisor>
-    <RNCComprador>101672919</RNCComprador>
+    <RNCEmisor>101000001</RNCEmisor>
+    <RNCComprador>101000021</RNCComprador>
     <eNCF>E310000000001</eNCF>
     <Estado>0</Estado>
     <FechaHoraAcuseRecibo>11-09-2026 14:30:00</FechaHoraAcuseRecibo>
@@ -910,8 +914,8 @@ When a recipient approves an invoice commercially via `POST /fe/aprobacioncomerc
 <ACECF>
   <DetalleAprobacionComercial>
     <Version>1.0</Version>
-    <RNCEmisor>101889063</RNCEmisor>
-    <RNCComprador>101672919</RNCComprador>
+    <RNCEmisor>101000001</RNCEmisor>
+    <RNCComprador>101000021</RNCComprador>
     <eNCF>E310000000001</eNCF>
     <EstadoAprobacion>1</EstadoAprobacion>
     <FechaHoraAprobacion>11-09-2026 15:45:00</FechaHoraAprobacion>
@@ -1067,17 +1071,17 @@ Configure your server, database, Redis connection, credentials, and signing cert
     "Audience": "EcfDgiiClientAudience"
   },
   "EcfEmisor": {
-    "Rnc": "101889063",
-    "RazonSocial": "WILLY CHIC DOMINICANA SRL"
+    "Rnc": "101000001",
+    "RazonSocial": "EMPRESA DEMO SRL"
   },
   "EcfClientOptions": {
     "ApiKey": "",
     "BaseUrl": "https://ecf.dgii.gov.do",
     "Environment": "Test",
     "Mode": "DgiiDirect",
-    "RncEmisor": "101889063",
-    "CertificatePath": "C:/config/credentials/dgii_certificate.p12",
-    "CertificatePassword": "SecurePassword123",
+    "RncEmisor": "101000001",
+    "CertificatePath": "/config/credentials/dgii_certificate.p12",
+    "CertificatePassword": "ReplaceWithCertificatePassword",
     "AutoRetryOnReuseableSequence": true,
     "ValidateSchemasLocal": true,
     "XsdDirectoryPath": "Documentación Técnica (XSD)"
@@ -1193,13 +1197,15 @@ All endpoints except `Auth`, `/health`, `/scalar`, `/swagger`, and `/openapi/v1.
 | `/api/customers/{id}` | `PUT` | Bearer Token | `UpdateCustomerCommand` | Updates an existing customer record |
 | `/api/customers/{id}` | `DELETE` | Admin Role | None | Soft-deletes a customer |
 | `/api/documents` | `POST` | Bearer or HMAC | `CanonicalDocumentDto` | Ingests canonical ERP invoice, compiles XML, signs, checks XSD, and dispatches to DGII |
-| `/api/documents/by-source/{txnId}` | `GET` | Bearer or HMAC | None | Queries document state and eNCF by ERP source transaction ID |
+| `/api/documents/by-source/{txnId}` | `GET` | Bearer or HMAC | None | Queries document state, environment, and eNCF by ERP source transaction ID |
+| `/api/documents/by-source/{txnId}/reconcile` | `POST` | Bearer or HMAC | None | Reconciles pending or `Uncertain` document status against DGII and verbatim-retransmits if `"No encontrado"` |
 | `/api/documents/by-source/{txnId}/xml` | `GET` | Bearer or HMAC | None | Downloads signed XML file attachment by ERP source transaction ID |
 | `/api/documents/{id}` | `GET` | Bearer or HMAC | None | Queries document state and details by document UUID |
 | `/api/documents/{id}/xml` | `GET` | Bearer or HMAC | None | Downloads signed XML file attachment by document UUID |
 | `/api/ecf/send` | `POST` | Bearer or HMAC | `SendEcfCommand` | Submits pre-built signed XML e-CF document |
 | `/api/ecf/send-rfce` | `POST` | Bearer or HMAC | `SendRfceCommand` | Submits Consumption Summary (RFCE) |
 | `/api/ecf/status` | `GET` | Bearer or HMAC | Query Parameters | Queries current DGII processing status |
+| `/api/ecf/services-status` | `GET` | Bearer or HMAC | Optional `environment` | Probes live DGII service availability and warm TLS latency per environment |
 | `/fe/recepcion/api/ecf` | `POST` | Multipart | XML File | B2B receptor endpoint: validates vendor e-CF and returns signed `ARECF` XML |
 | `/fe/aprobacioncomercial/api/ecf` | `POST` | Multipart | XML File | B2B commercial approval endpoint (`ACECF`) |
 | `/fe/autenticacion/api/semilla` | `GET` | Anonymous | None | Issues authentication seed XML (`SemillaModel`) |
@@ -1245,8 +1251,10 @@ CREATE TABLE IF NOT EXISTS ecf_documents (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_ecf_documents_tenant_source_txn 
-ON ecf_documents (tenant_id, source_txn_id) 
-WHERE is_deleted = FALSE AND source_txn_id IS NOT NULL;
+ON ecf_documents (tenant_id, source_txn_id, ambiente);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_ecf_documents_rnc_emisor_encf
+ON ecf_documents (rnc_emisor, ambiente, e_ncf);
 ```
 
 ---
@@ -1467,16 +1475,18 @@ ctest --test-dir build --output-on-failure
 ```
 
 ```text
-Test project C:/Users/Jorge/Pictures/DGII/EcfDgi.Client_C_Plus_Plus/build
+Test project /workspace/EcfDgi.Client_C_Plus_Plus/build
     Start 1: validator_tests
-1/3 Test #1: validator_tests ..................   Passed    0.05 sec
+1/4 Test #1: validator_tests ..................   Passed    0.05 sec
     Start 2: hmac_tests
-2/3 Test #2: hmac_tests .......................   Passed    0.18 sec
+2/4 Test #2: hmac_tests .......................   Passed    0.18 sec
     Start 3: xsd_tests
-3/3 Test #3: xsd_tests ........................   Passed    2.38 sec
+3/4 Test #3: xsd_tests ........................   Passed    2.38 sec
+    Start 4: parity_tests
+4/4 Test #4: parity_tests .....................   Passed    0.12 sec
 
-100% tests passed, 0 tests failed out of 3
-Total Test time (real) = 2.74 sec
+100% tests passed, 0 tests failed out of 4
+Total Test time (real) = 2.73 sec
 ```
 
 The test suites validate 100% parity against the C# reference test suite:

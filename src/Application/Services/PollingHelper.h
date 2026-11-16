@@ -1,6 +1,4 @@
 #pragma once
-// Polls fn() with exponential backoff until isComplete() is true, or until the
-// retry/timeout limits are hit.
 
 #include <algorithm>
 #include <chrono>
@@ -52,4 +50,4 @@ public:
     }
 };
 
-}  // namespace ecf::app
+}

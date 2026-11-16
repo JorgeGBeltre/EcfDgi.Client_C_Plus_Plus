@@ -12,4 +12,4 @@ public:
     virtual void releaseUnusedEncf(const std::string& tenantId, const std::string& tipoComprobante, const std::string& encf) = 0;
 };
 
-} // namespace ecf::domain
+}

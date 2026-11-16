@@ -1,6 +1,4 @@
 #pragma once
-// Request validators (one per command). Each returns the list of failures;
-// validateOrThrow turns a non-empty list into a ValidationException.
 
 #include <vector>
 
@@ -18,4 +16,4 @@ std::vector<ValidationFailure> validate(const UpdateCustomerCommand& c);
 std::vector<ValidationFailure> validate(const SendEcfCommand& c);
 std::vector<ValidationFailure> validate(const SendRfceCommand& c);
 
-}  // namespace ecf::app::validators
+}

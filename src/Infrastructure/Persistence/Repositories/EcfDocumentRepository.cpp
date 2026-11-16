@@ -18,7 +18,7 @@ std::optional<EcfDocument> queryOne(DbContext& db, const std::string& where,
     if (r.empty()) return std::nullopt;
     return mapEcfDocument(r[0]);
 }
-}  // namespace
+}
 
 std::optional<EcfDocument> EcfDocumentRepository::getById(const std::string& id) {
     return queryOne(*db_, "id = $1", id);
@@ -124,4 +124,4 @@ void EcfDocumentRepository::update(const EcfDocument& document) {
     });
 }
 
-}  // namespace ecf::infra
+}

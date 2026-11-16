@@ -1,6 +1,4 @@
-// Wires configuration, DB bootstrap (schema + admin seed), a global exception
-// handler (RFC 9457 problem+json), a /health endpoint, JWT auth and the
-// controllers (which self-register via Drogon's HttpController templates).
+
 
 #include <drogon/drogon.h>
 #include <spdlog/spdlog.h>
@@ -35,7 +33,7 @@ HttpResponsePtr problemDetails(HttpStatusCode code, const std::string& title,
     return resp;
 }
 
-}  // namespace
+}
 
 int main() {
     spdlog::info("Starting web host (EcfDgii.Client C++)");
@@ -55,7 +53,6 @@ int main() {
     auto& services = ecf::api::AppServices::instance();
     services.configure(config);
 
-    // Auto-apply schema and apply maintenance migrations on startup.
     try {
         ecf::infra::DbInitializer::initialize(config.connectionString, config.schemaPath,
                                               *services.passwordHasher());
@@ -64,7 +61,6 @@ int main() {
         spdlog::warn("Database initialization skipped/failed: {}", ex.what());
     }
 
-    // Start background status reconciliation thread (disabled by default; delegated to C# EcfStatusPollingBackgroundWorker)
     const char* enablePollerEnv = std::getenv("ENABLE_BACKGROUND_POLLER");
     bool enablePoller = (enablePollerEnv != nullptr && (std::string(enablePollerEnv) == "true" || std::string(enablePollerEnv) == "1"));
 
@@ -72,10 +68,8 @@ int main() {
         std::thread pollerThread([&services]() {
             spdlog::info("Started EcfStatusReconciler background poller thread.");
             int intervalSeconds = services.statusPollingOptions().pollingIntervalMinutes * 60;
-            if (intervalSeconds <= 0) intervalSeconds = 900; // 15 minutes
+            if (intervalSeconds <= 0) intervalSeconds = 900;
 
-            // Run one pass immediately on startup (same as C# EcfStatusPollingBackgroundService),
-            // then on the timer's cadence thereafter.
             try {
                 auto scope = services.makeScope(nullptr);
                 ecf::app::EcfStatusReconciler reconciler(
@@ -83,7 +77,8 @@ int main() {
                     scope.uow,
                     services.ecfClient(),
                     services.statusPollingOptions(),
-                    services.tenantSignerResolver()
+                    services.tenantSignerResolver(),
+                    services.cacheService()
                 );
                 int processed = reconciler.reconcile();
                 if (processed > 0) {
@@ -118,8 +113,6 @@ int main() {
         spdlog::info("Background status reconciler poller is disabled in C++ engine (delegated to C# background worker).");
     }
 
-    // Global exception handler -> RFC 9457 ProblemDetails: a validation error
-    // yields 400 with the field errors; any other error yields 500.
     app().setExceptionHandler([](const std::exception& e, const HttpRequestPtr& req,
                                  std::function<void(const HttpResponsePtr&)>&& cb) {
         if (const auto* ve = dynamic_cast<const ecf::app::ValidationException*>(&e)) {
@@ -148,7 +141,6 @@ int main() {
                           "https://tools.ietf.org/html/rfc9457#section-6.6"));
     });
 
-    // Health check (INF-013).
     app().registerHandler(
         "/health",
         [&services](const HttpRequestPtr&, std::function<void(const HttpResponsePtr&)>&& cb) {
@@ -173,7 +165,6 @@ int main() {
         },
         {Get});
 
-    // OpenAPI Specification JSON.
     app().registerHandler(
         "/openapi/v1.json",
         [](const HttpRequestPtr&, std::function<void(const HttpResponsePtr&)>&& cb) {
@@ -331,7 +322,6 @@ int main() {
         },
         {Get});
 
-    // Scalar API Reference UI.
     app().registerHandler(
         "/scalar",
         [](const HttpRequestPtr&, std::function<void(const HttpResponsePtr&)>&& cb) {
@@ -354,7 +344,6 @@ int main() {
         },
         {Get});
 
-    // Swagger UI.
     app().registerHandler(
         "/swagger",
         [](const HttpRequestPtr&, std::function<void(const HttpResponsePtr&)>&& cb) {

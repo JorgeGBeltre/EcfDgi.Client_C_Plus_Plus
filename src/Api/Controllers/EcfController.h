@@ -13,6 +13,8 @@ public:
                   "ecf::api::UserOrWorkerFilter");
     ADD_METHOD_TO(EcfController::status, "/api/ecf/status", drogon::Get,
                   "ecf::api::UserOrWorkerFilter");
+    ADD_METHOD_TO(EcfController::servicesStatus, "/api/ecf/services-status", drogon::Get,
+                  "ecf::api::UserOrWorkerFilter");
     METHOD_LIST_END
 
     void send(const drogon::HttpRequestPtr& req,
@@ -21,6 +23,8 @@ public:
                   std::function<void(const drogon::HttpResponsePtr&)>&& callback);
     void status(const drogon::HttpRequestPtr& req,
                 std::function<void(const drogon::HttpResponsePtr&)>&& callback);
+    void servicesStatus(const drogon::HttpRequestPtr& req,
+                        std::function<void(const drogon::HttpResponsePtr&)>&& callback);
 };
 
-}  // namespace ecf::api
+}

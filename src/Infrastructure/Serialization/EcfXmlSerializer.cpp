@@ -19,7 +19,7 @@ std::string xmlEscape(const std::string& value) {
     std::string out;
     out.reserve(value.size());
     for (unsigned char c : value) {
-        // Strip illegal XML 1.0 control characters and null bytes (BUG-149)
+
         if (c < 0x20 && c != 0x09 && c != 0x0A && c != 0x0D) {
             continue;
         }
@@ -61,14 +61,12 @@ void elMoneyOpt(std::ostringstream& os, const std::string& tag,
     if (value.has_value()) el(os, tag, money(*value));
 }
 
-// --- libxml2 read helpers --------------------------------------------------
-
 std::string nodeText(xmlNode* node) {
     if (!node) return {};
     xmlChar* content = xmlNodeGetContent(node);
     std::string s = content ? reinterpret_cast<const char*>(content) : "";
     if (content) xmlFree(content);
-    // trim
+
     size_t a = s.find_first_not_of(" \t\r\n");
     size_t b = s.find_last_not_of(" \t\r\n");
     return (a == std::string::npos) ? "" : s.substr(a, b - a + 1);
@@ -125,7 +123,7 @@ struct XmlDocGuard {
     ~XmlDocGuard() { if (doc) xmlFreeDoc(doc); }
 };
 
-}  // namespace
+}
 
 std::string EcfXmlSerializer::serialize(const Rfce& model) {
     const auto& e = model.encabezado;
@@ -136,7 +134,6 @@ std::string EcfXmlSerializer::serialize(const Rfce& model) {
 
     el(os, "Version", e.version);
 
-    // IdDoc
     os << "<IdDoc>";
     el(os, "TipoeCF", e.idDoc.tipoeCF);
     el(os, "eNCF", e.idDoc.eNcf);
@@ -158,14 +155,12 @@ std::string EcfXmlSerializer::serialize(const Rfce& model) {
     }
     os << "</IdDoc>";
 
-    // Emisor
     os << "<Emisor>";
     el(os, "RNCEmisor", e.emisor.rncEmisor);
     el(os, "RazonSocialEmisor", e.emisor.razonSocialEmisor);
     el(os, "FechaEmision", e.emisor.fechaEmision);
     os << "</Emisor>";
 
-    // Comprador
     os << "<Comprador>";
     if (e.comprador.has_value()) {
         elOpt(os, "RNCComprador", e.comprador->rncComprador);
@@ -174,7 +169,6 @@ std::string EcfXmlSerializer::serialize(const Rfce& model) {
     }
     os << "</Comprador>";
 
-    // Totales
     const auto& t = e.totales;
     os << "<Totales>";
     elMoneyOpt(os, "MontoGravadoTotal", t.montoGravadoTotal);
@@ -229,7 +223,6 @@ EcfRecepcionResponse EcfXmlSerializer::deserializeEcfRecepcion(const std::string
     std::string msg = childText(root, "mensaje");
     if (!msg.empty()) r.mensaje = msg;
 
-    // BUG-078: Validar campos obligatorios. Un XML sin trackId ni error no es una respuesta válida de recepción.
     if (r.trackId.empty() && !r.error.has_value()) {
         throw EcfException("Respuesta XML DGII inválida: elemento raíz '" + rootName + "' no contiene trackId ni error.");
     }
@@ -251,7 +244,6 @@ RfceRecepcionResponse EcfXmlSerializer::deserializeRfceRecepcion(const std::stri
     r.eNcf = childText(root, "encf");
     r.secuenciaUtilizada = childBool(root, "secuenciaUtilizada");
 
-    // BUG-078: Validar que contenga estado o mensajes significativos
     if (r.estado.empty() && r.codigo == 0 && r.mensajes.empty()) {
         throw EcfException("Respuesta XML DGII RFCE inválida: elemento raíz '" + rootName + "' no contiene campos obligatorios (estado/codigo).");
     }
@@ -277,7 +269,6 @@ ConsultaResultadoResponse EcfXmlSerializer::deserializeConsultaResultado(
     r.fechaRecepcion = childText(root, "fechaRecepcion");
     r.mensajes = parseMensajes(root);
 
-    // BUG-078: Validar que contenga estado, trackId o mensajes significativos
     if (r.estado.empty() && r.trackId.empty() && r.codigo == 0 && r.mensajes.empty()) {
         throw EcfException("Respuesta XML DGII Consulta inválida: elemento raíz '" + rootName + "' no contiene información de estado.");
     }
@@ -293,4 +284,4 @@ std::string EcfXmlSerializer::escapeAlfanum(const std::string& value) {
     return xmlEscape(value);
 }
 
-}  // namespace ecf::infra
+}

@@ -9,4 +9,4 @@ public:
     static std::string resolve(const std::string& xmlContent);
 };
 
-}  // namespace ecf::infra
+}
