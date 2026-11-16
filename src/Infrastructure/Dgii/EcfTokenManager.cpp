@@ -242,23 +242,23 @@ void EcfTokenManager::invalidate() {
 }
 
 void EcfTokenManager::renewToken() {
-
-    auto seedResp = cpr::Get(
-        cpr::Url{config_.autenticacionUrl + "/api/autenticacion/semilla"},
-        cpr::Timeout{15000},
-        cpr::ConnectTimeout{5000});
+    cpr::Session authSession;
+    authSession.SetUrl(cpr::Url{config_.autenticacionUrl + "/api/autenticacion/semilla"});
+    authSession.SetHeader(cpr::Header{{"Connection", "keep-alive"}});
+    authSession.SetTimeout(cpr::Timeout{15000});
+    authSession.SetConnectTimeout(cpr::ConnectTimeout{5000});
+    auto seedResp = authSession.Get();
     if (seedResp.error.code != cpr::ErrorCode::OK || seedResp.status_code == 0)
         throw EcfException("No se pudo obtener la semilla: " + (seedResp.error.message.empty() ? "HTTP 0" : seedResp.error.message));
     const std::string semillaXml = seedResp.text;
 
     const std::string semillaFirmada = signer_->signXml(semillaXml, rncEmisor_);
 
-    auto validateResp = cpr::Post(
-        cpr::Url{config_.autenticacionUrl + "/api/autenticacion/validarsemilla"},
-        cpr::Multipart{{"xml", cpr::Buffer{semillaFirmada.begin(), semillaFirmada.end(),
-                                           "semilla.xml"}}},
-        cpr::Timeout{15000},
-        cpr::ConnectTimeout{5000});
+    authSession.SetUrl(cpr::Url{config_.autenticacionUrl + "/api/autenticacion/validarsemilla"});
+    authSession.SetMultipart(cpr::Multipart{{"xml", cpr::Buffer{semillaFirmada.begin(), semillaFirmada.end(), "semilla.xml"}}});
+    authSession.SetTimeout(cpr::Timeout{15000});
+    authSession.SetConnectTimeout(cpr::ConnectTimeout{5000});
+    auto validateResp = authSession.Post();
     if (validateResp.error.code != cpr::ErrorCode::OK || validateResp.status_code < 200 || validateResp.status_code >= 300)
         throw EcfException("Fallo la validación de la semilla (HTTP " +
                            std::to_string(validateResp.status_code) + "): " +

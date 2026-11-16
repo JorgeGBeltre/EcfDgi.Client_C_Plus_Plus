@@ -4,6 +4,7 @@
 #include <cctype>
 #include <chrono>
 #include <exception>
+#include <mutex>
 #include <cpr/cpr.h>
 #include <nlohmann/json.hpp>
 
@@ -232,21 +233,39 @@ void EcfController::servicesStatus(const HttpRequestPtr& req,
     std::string nowIso = sys::utcNowIso();
     bool gatewayOnline = false;
     int latencyMs = 0;
+    std::string probeBody;
 
     try {
+        static std::mutex probeMutex;
+        static cpr::Session probeSession;
+        std::lock_guard<std::mutex> lock(probeMutex);
+
+        probeSession.SetUrl(cpr::Url{statusUrl});
+        probeSession.SetHeader(cpr::Header{{"Accept", "application/json"}, {"Connection", "keep-alive"}});
+        probeSession.SetTimeout(cpr::Timeout{3000});
+        probeSession.SetConnectTimeout(cpr::ConnectTimeout{2000});
+
         auto t0 = std::chrono::steady_clock::now();
-        auto r1 = cpr::Get(cpr::Url{statusUrl}, cpr::Timeout{3000});
+        auto r1 = probeSession.Get();
         auto t1 = std::chrono::steady_clock::now();
         if (r1.error.code == cpr::ErrorCode::OK && r1.status_code > 0 && r1.status_code < 500) {
             gatewayOnline = true;
+            probeBody = r1.text;
             latencyMs = std::max(1, static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count()));
         }
-        if (gatewayOnline && latencyMs > 100) {
+        if (gatewayOnline && latencyMs > 30) {
+            probeSession.SetTimeout(cpr::Timeout{2000});
             auto w0 = std::chrono::steady_clock::now();
-            auto r2 = cpr::Get(cpr::Url{statusUrl}, cpr::Timeout{2000});
+            auto r2 = probeSession.Get();
             auto w1 = std::chrono::steady_clock::now();
             if (r2.error.code == cpr::ErrorCode::OK && r2.status_code > 0 && r2.status_code < 500) {
-                latencyMs = std::max(1, static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(w1 - w0).count()));
+                int warmMs = std::max(1, static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(w1 - w0).count()));
+                if (warmMs < latencyMs) {
+                    latencyMs = warmMs;
+                }
+                if (!r2.text.empty()) {
+                    probeBody = r2.text;
+                }
             }
         }
     } catch (...) {
@@ -255,7 +274,21 @@ void EcfController::servicesStatus(const HttpRequestPtr& req,
     }
 
     std::vector<domain::EstatusServicio> officialStatuses;
-    if (gatewayOnline) {
+    if (gatewayOnline && !probeBody.empty()) {
+        try {
+            auto j = nlohmann::json::parse(probeBody, nullptr, false);
+            if (j.is_array()) {
+                for (const auto& item : j) {
+                    domain::EstatusServicio es;
+                    if (item.contains("servicio") && item["servicio"].is_string()) es.servicio = item["servicio"].get<std::string>();
+                    if (item.contains("estatus") && item["estatus"].is_string()) es.estatus = item["estatus"].get<std::string>();
+                    if (item.contains("ambiente") && item["ambiente"].is_string()) es.ambiente = item["ambiente"].get<std::string>();
+                    officialStatuses.push_back(std::move(es));
+                }
+            }
+        } catch (...) {}
+    }
+    if (gatewayOnline && officialStatuses.empty()) {
         try {
             officialStatuses = services.ecfClient()->consultarEstatusServicios();
         } catch (...) {}
