@@ -1169,7 +1169,7 @@ void DocumentsController::getBySourceTxnId(const HttpRequestPtr& req,
         out["dgiiResponse"] = doc->dgiiResponseXml.value_or("");
         out["dgiiResponseXml"] = doc->dgiiResponseXml.value_or("");
         out["environment"] = doc->ambiente.value_or("");
-        out["sourceTxnId"] = doc->sourceTxnId.value_or("");
+        out["sourceTxnId"] = doc->sourceTxnId;
 
         callback(json(out, k200OK));
     } catch (const std::exception& ex) {
@@ -1504,7 +1504,7 @@ void DocumentsController::reconcileBySourceTxnId(const HttpRequestPtr& req,
         out["dgiiResponse"] = doc->dgiiResponseXml.value_or("");
         out["dgiiResponseXml"] = doc->dgiiResponseXml.value_or("");
         out["environment"] = doc->ambiente.value_or("");
-        out["sourceTxnId"] = doc->sourceTxnId.value_or("");
+        out["sourceTxnId"] = doc->sourceTxnId;
         out["reconciled"] = true;
 
         callback(json(out, k200OK));
