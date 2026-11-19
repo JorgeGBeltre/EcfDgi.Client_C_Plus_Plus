@@ -1,0 +1,66 @@
+name: Feature request
+description: Propose an enhancement to the C++20 fiscal engine or Drogon REST API.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For substantial architectural changes, consider opening a discussion first.
+        Do not include confidential customer, taxpayer, or credential information.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What limitation or user need would this address?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Project area
+      multiple: true
+      options:
+        - Core C++20 fiscal engine (ecfdgii_core)
+        - Drogon REST API & endpoints (ecfdgii_api)
+        - e-CF document types
+        - XML generation or XSD validation
+        - Digital signatures & PKCS#12 certificates
+        - DGII communication & reconciliation
+        - Multi-currency (<OtraMoneda>) & monetary rules
+        - Security, HMAC & multi-tenant isolation
+        - CMake, vcpkg, or Docker packaging
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: fiscal_reference
+    attributes:
+      label: DGII or technical reference
+      description: For fiscal requests, provide an official document, rule, or XSD reference. Do not guess a rule number.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility and impact
+      description: Could this affect REST APIs, C++ interfaces, e-CF types, currency calculations, PostgreSQL schema, or multi-tenant workflows?
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Safety checks
+      options:
+        - label: I searched existing issues and discussions.
+          required: true
+        - label: This request contains no secrets or real taxpayer data.
+          required: true

@@ -1,0 +1,106 @@
+name: DGII compliance or fiscal behavior
+description: Report a suspected discrepancy involving DGII e-CF behavior or fiscal validation.
+title: "[DGII]: "
+labels:
+  - fiscal-compliance
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Provide an official reference when available. Use only synthetic or fully anonymized examples.
+        Never publish a real e-CF, taxpayer/customer information, certificate, or private key.
+  - type: dropdown
+    id: document_type
+    attributes:
+      label: e-CF document type
+      options:
+        - E31
+        - E32
+        - E33
+        - E34
+        - E41
+        - E43
+        - E44
+        - E45
+        - E46
+        - E47
+        - RFCE
+        - ARECF
+        - ACECF
+        - ANECF
+        - Semilla or authentication
+        - Other or not applicable
+    validations:
+      required: true
+  - type: input
+    id: project_version
+    attributes:
+      label: Project version or commit
+    validations:
+      required: true
+  - type: dropdown
+    id: execution_path
+    attributes:
+      label: Where does the behavior occur?
+      options:
+        - Core C++20 fiscal engine / SDK (ecfdgii_core)
+        - Drogon REST API gateway (ecfdgii_api)
+        - Both
+        - Not yet determined
+    validations:
+      required: true
+  - type: input
+    id: xml_section
+    attributes:
+      label: Affected XML section or field
+  - type: input
+    id: rule
+    attributes:
+      label: DGII rule or validation identifier
+      description: Include only if verified.
+  - type: textarea
+    id: official_reference
+    attributes:
+      label: Official DGII reference
+      description: Document name, version, section, URL, or XSD reference.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected fiscal behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual project behavior
+    validations:
+      required: true
+  - type: textarea
+    id: synthetic_example
+    attributes:
+      label: Synthetic XML or minimal example
+      description: Use generated identifiers and fictional values only.
+      render: xml
+  - type: input
+    id: xsd
+    attributes:
+      label: XSD schema/version, if known
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Data safety confirmation
+      options:
+        - label: The example is synthetic or fully anonymized.
+          required: true
+        - label: No real taxpayer, customer, or employee data is included.
+          required: true
+        - label: No certificate, private key, password, API key, or token is included.
+          required: true

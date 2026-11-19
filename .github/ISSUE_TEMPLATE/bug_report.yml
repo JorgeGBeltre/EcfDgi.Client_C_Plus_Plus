@@ -1,0 +1,92 @@
+name: Bug report
+description: Report a reproducible defect in the C++20 fiscal engine or Drogon REST API.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search existing issues before submitting.
+        Do not include certificates, private keys, passwords, tokens, real taxpayer data, or unredacted fiscal XML.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected component
+      options:
+        - Core C++20 fiscal engine (ecfdgii_core)
+        - Drogon REST API & controllers (ecfdgii_api)
+        - XML generation or XSD validation (libxml2)
+        - XML digital signature or PKCS#12 handling (xmlsec1 / OpenSSL)
+        - DGII client, token manager, or TLS transport (cpr)
+        - Reconciliation, idempotency, or sequence allocation (libpqxx / Redis)
+        - Multi-currency (<OtraMoneda>) or monetary calculations
+        - Security, HMAC/JWT auth, or multi-tenant isolation
+        - CMake, vcpkg, or Docker build
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: project_version
+    attributes:
+      label: Project version
+      description: Release tag or commit SHA.
+    validations:
+      required: true
+  - type: input
+    id: compiler_toolchain
+    attributes:
+      label: Compiler and CMake/vcpkg toolchain
+      placeholder: e.g. GCC 13.3 / Ubuntu 24.04, Clang 17, or MSVC 2022 + CMake 3.28
+  - type: input
+    id: dgii_environment
+    attributes:
+      label: Target DGII environment, if applicable
+      placeholder: e.g. PreCertificacion (TestEcf), Certificacion (CertEcf), or Produccion
+  - type: input
+    id: environment
+    attributes:
+      label: Operating system and runtime environment
+      placeholder: e.g. Ubuntu 24.04 Docker container, PostgreSQL 16, Redis 7
+  - type: textarea
+    id: summary
+    attributes:
+      label: Problem summary
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce using synthetic data
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or errors
+      description: Redact credentials, personal data, certificate material, tokens, and fiscal identifiers.
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Safety checks
+      options:
+        - label: I searched existing issues.
+          required: true
+        - label: I used synthetic or anonymized data.
+          required: true
+        - label: I removed secrets, certificates, tokens, and personal data.
+          required: true
